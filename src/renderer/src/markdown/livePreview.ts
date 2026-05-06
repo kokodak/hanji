@@ -44,6 +44,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
       const lineText = line.text;
       const isInteractive = line.number === hoverLine || lineIntersectsSelection(view, line.from, line.to);
       const codeBlock = getFencedCodeBlockForLine(codeBlocks, line.number);
+      const indentedCodeBlock = lineIsIndentedCodeBlock(lineText);
       const headingMatch = /^(#{1,6})\s+/.exec(lineText);
       const taskMatch = /^(\s*)([-*+])\s+\[([ xX])\]\s+/.exec(lineText);
       const listMatch = /^(\s*)([-*+])\s+/.exec(lineText);
@@ -77,6 +78,26 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
             })
           });
         }
+
+        pos = line.to + 1;
+        continue;
+      }
+
+      if (indentedCodeBlock) {
+        pending.push({
+          from: line.from,
+          to: line.from,
+          decoration: getPreviewCodeLineDecoration(
+            { startLine: line.number, endLine: line.number, marker: '    ', language: 'plain text' },
+            line.number
+          )
+        });
+
+        if (!isInteractive) {
+          pending.push({ from: line.from, to: line.from + 4, decoration: hiddenSyntax });
+        }
+
+        addInlinePreviewDecorations(view, pending, line.from, lineText);
 
         pos = line.to + 1;
         continue;
@@ -190,6 +211,18 @@ export function nextHoverLineAfterEditorUpdate(
 
 export function lineIsHorizontalRule(lineText: string): boolean {
   return /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.test(lineText);
+}
+
+export function lineIsIndentedCodeBlock(lineText: string): boolean {
+  if (!/^ {4,}\S/.test(lineText)) return false;
+
+  const unindentedText = lineText.replace(/^ {4}/, '');
+  return (
+    !/^([-*+])\s+/.test(unindentedText) &&
+    !/^([-*+])\s+\[([ xX])\]\s+/.test(unindentedText) &&
+    !/^\d+[.)]\s+/.test(unindentedText) &&
+    !/^>\s?/.test(unindentedText)
+  );
 }
 
 export const liveMarkdownPreview = ViewPlugin.fromClass(

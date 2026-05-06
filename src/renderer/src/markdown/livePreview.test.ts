@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { lineIsHorizontalRule, nextHoverLineAfterEditorUpdate } from './livePreview';
+import { lineIsHorizontalRule, lineIsIndentedCodeBlock, nextHoverLineAfterEditorUpdate } from './livePreview';
 
 export const tests = [
   {
@@ -57,6 +57,22 @@ export const tests = [
       assert.equal(lineIsHorizontalRule('---- text'), false);
       assert.equal(lineIsHorizontalRule('    ---'), false);
       assert.equal(lineIsHorizontalRule('*** emphasis ***'), false);
+    }
+  },
+  {
+    name: 'recognizes Markdown indented code block lines',
+    run() {
+      assert.equal(lineIsIndentedCodeBlock('    const value = 1;'), true);
+      assert.equal(lineIsIndentedCodeBlock('        deeply indented code'), true);
+    }
+  },
+  {
+    name: 'does not treat nested Markdown structures as indented code',
+    run() {
+      assert.equal(lineIsIndentedCodeBlock('    - nested item'), false);
+      assert.equal(lineIsIndentedCodeBlock('    1. nested item'), false);
+      assert.equal(lineIsIndentedCodeBlock('    - [ ] nested task'), false);
+      assert.equal(lineIsIndentedCodeBlock('    > nested quote'), false);
     }
   }
 ];
