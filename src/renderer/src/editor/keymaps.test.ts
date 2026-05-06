@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { EditorState, type TransactionSpec } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import { continueListItem } from './keymaps';
+import { continueListItem, indentWithSpaces, outdentSpaces } from './keymaps';
 
 class TestEditorView {
   state: EditorState;
@@ -76,6 +76,52 @@ export const tests = [
       assert.equal(handled, false);
       assert.equal(view.dispatchCount, 0);
       assert.equal(view.state.doc.toString(), 'plain text');
+    }
+  },
+  {
+    name: 'inserts four spaces for Tab at an empty cursor',
+    run() {
+      const view = new TestEditorView('ab', 1);
+      const handled = indentWithSpaces(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), 'a    b');
+      assert.equal(view.state.selection.main.head, 5);
+    }
+  },
+  {
+    name: 'indents every selected line by four spaces',
+    run() {
+      const view = new TestEditorView('one\ntwo\nthree');
+      view.dispatch({ selection: { anchor: 0, head: 'one\ntwo'.length } });
+
+      const handled = indentWithSpaces(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), '    one\n    two\nthree');
+    }
+  },
+  {
+    name: 'outdents selected lines by up to four spaces',
+    run() {
+      const view = new TestEditorView('    one\n  two\nthree');
+      view.dispatch({ selection: { anchor: 0, head: '    one\n  two'.length } });
+
+      const handled = outdentSpaces(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), 'one\ntwo\nthree');
+    }
+  },
+  {
+    name: 'outdents the current line at an empty cursor',
+    run() {
+      const view = new TestEditorView('    item', 6);
+      const handled = outdentSpaces(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), 'item');
+      assert.equal(view.state.selection.main.head, 2);
     }
   }
 ];

@@ -6,7 +6,7 @@ import { EditorState } from '@codemirror/state';
 import { drawSelection, EditorView, keymap } from '@codemirror/view';
 import { litheHighlightStyle } from './highlighting';
 import { handleBacktickInput, handlePairedSymbolInput } from './inputHandlers';
-import { continueListItem, stableVerticalMovement } from './keymaps';
+import { continueListItem, stableVerticalMovement, tabIndentation } from './keymaps';
 import { liveMarkdownPreview } from '../markdown/livePreview';
 
 interface CreateEditorOptions {
@@ -33,6 +33,7 @@ export function createEditor(options: CreateEditorOptions): EditorView {
         liveMarkdownPreview,
         EditorView.lineWrapping,
         stableVerticalMovement,
+        tabIndentation,
         keymap.of([{ key: 'Enter', run: continueListItem }, ...defaultKeymap, ...historyKeymap]),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
