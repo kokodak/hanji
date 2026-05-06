@@ -177,6 +177,17 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
   return builder.finish();
 }
 
+export function nextHoverLineAfterEditorUpdate(
+  hoverLine: number | null,
+  update: Pick<ViewUpdate, 'docChanged' | 'selectionSet' | 'viewportChanged'>
+): number | null {
+  if (update.docChanged || update.selectionSet) {
+    return null;
+  }
+
+  return hoverLine;
+}
+
 export const liveMarkdownPreview = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
@@ -188,6 +199,7 @@ export const liveMarkdownPreview = ViewPlugin.fromClass(
 
     update(update: ViewUpdate): void {
       if (update.docChanged || update.selectionSet || update.viewportChanged) {
+        this.hoverLine = nextHoverLineAfterEditorUpdate(this.hoverLine, update);
         this.decorations = buildLivePreviewDecorations(update.view, this.hoverLine);
         update.view.requestMeasure();
       }
