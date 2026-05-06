@@ -1,0 +1,81 @@
+import assert from 'node:assert/strict';
+import { EditorState, type TransactionSpec } from '@codemirror/state';
+import type { EditorView } from '@codemirror/view';
+import { continueListItem } from './keymaps';
+
+class TestEditorView {
+  state: EditorState;
+  dispatchCount = 0;
+
+  constructor(doc: string, cursor: number = doc.length) {
+    this.state = EditorState.create({
+      doc,
+      selection: { anchor: cursor }
+    });
+  }
+
+  dispatch(spec: TransactionSpec): void {
+    this.dispatchCount += 1;
+    this.state = this.state.update(spec).state;
+  }
+}
+
+function runContinueListItem(doc: string, cursor: number = doc.length): TestEditorView {
+  const view = new TestEditorView(doc, cursor);
+  const handled = continueListItem(view as unknown as EditorView);
+
+  assert.equal(handled, true);
+  assert.equal(view.dispatchCount, 1);
+
+  return view;
+}
+
+export const tests = [
+  {
+    name: 'continues unordered bullet lists',
+    run() {
+      const view = runContinueListItem('- item');
+
+      assert.equal(view.state.doc.toString(), '- item\n- ');
+      assert.equal(view.state.selection.main.head, '- item\n- '.length);
+    }
+  },
+  {
+    name: 'continues nested unordered bullet lists',
+    run() {
+      const view = runContinueListItem('  * nested');
+
+      assert.equal(view.state.doc.toString(), '  * nested\n  * ');
+      assert.equal(view.state.selection.main.head, '  * nested\n  * '.length);
+    }
+  },
+  {
+    name: 'removes empty bullet markers',
+    run() {
+      const view = runContinueListItem('  - ');
+
+      assert.equal(view.state.doc.toString(), '  ');
+      assert.equal(view.state.selection.main.head, 2);
+    }
+  },
+  {
+    name: 'continues task lists with an unchecked marker',
+    run() {
+      const view = runContinueListItem('- [x] done');
+
+      assert.equal(view.state.doc.toString(), '- [x] done\n- [ ] ');
+      assert.equal(view.state.selection.main.head, '- [x] done\n- [ ] '.length);
+    }
+  },
+  {
+    name: 'ignores non-list lines',
+    run() {
+      const view = new TestEditorView('plain text');
+      const handled = continueListItem(view as unknown as EditorView);
+
+      assert.equal(handled, false);
+      assert.equal(view.dispatchCount, 0);
+      assert.equal(view.state.doc.toString(), 'plain text');
+    }
+  }
+];

@@ -11,7 +11,8 @@
     "web:dev": "vite --host 127.0.0.1",
     "web:build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/run-tests.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",
