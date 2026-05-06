@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
-import { lineIsHorizontalRule, lineIsIndentedCodeBlock, nextHoverLineAfterEditorUpdate } from './livePreview';
+import { Text } from '@codemirror/state';
+import {
+  collectYamlFrontmatterBlock,
+  lineIsHorizontalRule,
+  lineIsIndentedCodeBlock,
+  nextHoverLineAfterEditorUpdate
+} from './livePreview';
 
 export const tests = [
   {
@@ -73,6 +79,22 @@ export const tests = [
       assert.equal(lineIsIndentedCodeBlock('    1. nested item'), false);
       assert.equal(lineIsIndentedCodeBlock('    - [ ] nested task'), false);
       assert.equal(lineIsIndentedCodeBlock('    > nested quote'), false);
+    }
+  },
+  {
+    name: 'collects a YAML frontmatter block at the top of the document',
+    run() {
+      const block = collectYamlFrontmatterBlock(Text.of(['---', 'title: Draft', 'tags:', '  - qa', '---', '# Body']));
+
+      assert.deepEqual(block, { startLine: 1, endLine: 5 });
+    }
+  },
+  {
+    name: 'does not collect horizontal rules away from the document start as frontmatter',
+    run() {
+      const block = collectYamlFrontmatterBlock(Text.of(['# Body', '', '---']));
+
+      assert.equal(block, null);
     }
   }
 ];

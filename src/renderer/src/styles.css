@@ -482,6 +482,10 @@ input:focus {
   text-transform: lowercase;
 }
 
+#editor .cm-live-frontmatter {
+  color: #6d665d;
+}
+
 #editor .cm-live-blockquote {
   position: relative;
   padding-left: 16px;

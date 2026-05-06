@@ -1,4 +1,4 @@
-import { RangeSetBuilder } from '@codemirror/state';
+import { RangeSetBuilder, type Text } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { addInlinePreviewDecorations, lineIsOnlyInlineCode } from './inlinePreview';
 import {
@@ -37,11 +37,14 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
   const builder = new RangeSetBuilder<Decoration>();
   const pending: PendingDecoration[] = [];
   const codeBlocks = collectFencedCodeBlocks(view.state.doc);
+  const frontmatterBlock = collectYamlFrontmatterBlock(view.state.doc);
 
   for (const range of view.visibleRanges) {
     for (let pos = range.from; pos <= range.to;) {
       const line = view.state.doc.lineAt(pos);
       const lineText = line.text;
+      const inFrontmatter =
+        frontmatterBlock !== null && line.number >= frontmatterBlock.startLine && line.number <= frontmatterBlock.endLine;
       const isInteractive = line.number === hoverLine || lineIntersectsSelection(view, line.from, line.to);
       const codeBlock = getFencedCodeBlockForLine(codeBlocks, line.number);
       const indentedCodeBlock = lineIsIndentedCodeBlock(lineText);
@@ -78,6 +81,17 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
             })
           });
         }
+
+        pos = line.to + 1;
+        continue;
+      }
+
+      if (inFrontmatter) {
+        pending.push({
+          from: line.from,
+          to: line.from,
+          decoration: Decoration.line({ class: 'cm-live-frontmatter' })
+        });
 
         pos = line.to + 1;
         continue;
@@ -223,6 +237,25 @@ export function lineIsIndentedCodeBlock(lineText: string): boolean {
     !/^\d+[.)]\s+/.test(unindentedText) &&
     !/^>\s?/.test(unindentedText)
   );
+}
+
+export interface FrontmatterBlock {
+  startLine: number;
+  endLine: number;
+}
+
+export function collectYamlFrontmatterBlock(doc: Text): FrontmatterBlock | null {
+  if (doc.lines < 2 || !/^---\s*$/.test(doc.line(1).text)) {
+    return null;
+  }
+
+  for (let lineNumber = 2; lineNumber <= doc.lines; lineNumber += 1) {
+    if (/^---\s*$/.test(doc.line(lineNumber).text)) {
+      return { startLine: 1, endLine: lineNumber };
+    }
+  }
+
+  return { startLine: 1, endLine: doc.lines };
 }
 
 export const liveMarkdownPreview = ViewPlugin.fromClass(
