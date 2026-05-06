@@ -23,7 +23,7 @@ The first harness pass focuses on live Markdown editing quality:
 | QA-006 | Inline code isolation | Type `` `ego_path_conflict_candidate` `` and move the cursor away. | The inline code span renders as code, underscores remain literal, and emphasis is not applied inside the code span. Test: `src/renderer/src/markdown/inlinePreview.test.ts`. | Fixed pending manual verification |
 | QA-007 | Tables | Type a GitHub-Flavored Markdown table. | The table is recognized and rendered in live preview without breaking editing on the active line. | Open |
 | QA-008 | Frontmatter | Add a YAML frontmatter block at the top of the document. | Frontmatter remains readable and does not interfere with Markdown table or horizontal-rule parsing. | Open |
-| QA-009 | Horizontal rules | Type `---`, `***`, and `___` as standalone lines. | Horizontal rules render as separators when the cursor leaves the line. | Open |
+| QA-009 | Horizontal rules | Type `---`, `***`, and `___` as standalone lines. | Horizontal rules render as separators when the cursor leaves the line. Test: `src/renderer/src/markdown/livePreview.test.ts`. | Fixed pending manual verification |
 
 ## Layout And Scroll Checks
 

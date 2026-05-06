@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { nextHoverLineAfterEditorUpdate } from './livePreview';
+import { lineIsHorizontalRule, nextHoverLineAfterEditorUpdate } from './livePreview';
 
 export const tests = [
   {
@@ -39,6 +39,24 @@ export const tests = [
         }),
         1
       );
+    }
+  },
+  {
+    name: 'recognizes standalone Markdown horizontal rules',
+    run() {
+      assert.equal(lineIsHorizontalRule('---'), true);
+      assert.equal(lineIsHorizontalRule('***'), true);
+      assert.equal(lineIsHorizontalRule('___'), true);
+      assert.equal(lineIsHorizontalRule(' - - - '), true);
+    }
+  },
+  {
+    name: 'rejects non-rule lines that contain rule characters',
+    run() {
+      assert.equal(lineIsHorizontalRule('--'), false);
+      assert.equal(lineIsHorizontalRule('---- text'), false);
+      assert.equal(lineIsHorizontalRule('    ---'), false);
+      assert.equal(lineIsHorizontalRule('*** emphasis ***'), false);
     }
   }
 ];

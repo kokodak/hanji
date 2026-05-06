@@ -49,7 +49,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
       const listMatch = /^(\s*)([-*+])\s+/.exec(lineText);
       const numberedListMatch = /^(\s*)(\d+)([.)])\s+/.exec(lineText);
       const blockquoteMatch = /^(\s*)>\s?/.exec(lineText);
-      const horizontalRuleMatch = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.exec(lineText);
+      const horizontalRule = lineIsHorizontalRule(lineText);
 
       if (codeBlock) {
         const activeCodeBlock = isActiveFencedCodeBlock(view, codeBlock);
@@ -95,7 +95,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
         }
       }
 
-      if (horizontalRuleMatch) {
+      if (horizontalRule) {
         if (!isInteractive) {
           pending.push({
             from: line.from,
@@ -186,6 +186,10 @@ export function nextHoverLineAfterEditorUpdate(
   }
 
   return hoverLine;
+}
+
+export function lineIsHorizontalRule(lineText: string): boolean {
+  return /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.test(lineText);
 }
 
 export const liveMarkdownPreview = ViewPlugin.fromClass(
