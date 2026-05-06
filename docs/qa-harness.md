@@ -46,4 +46,6 @@ For each fix:
 
 Scenario tests should stay focused on one user-visible rule at a time. Prefer small editor-state inputs and clear expected document, selection, parser, or decoration outputs over broad end-to-end flows. If a behavior currently needs manual visual verification, keep the manual step and add the closest stable unit or integration test around the underlying rule.
 
+Use `npm run web:dev` for fast browser checks while iterating on renderer behavior. The web runtime uses a local browser QA Space instead of native Tauri filesystem commands, so editor behavior can be inspected at `http://127.0.0.1:1420/`. Final user-facing fixes should still be spot-checked in the Tauri app when they depend on native shell behavior.
+
 Each closed QA item should keep or gain a test reference before it is marked fixed.
