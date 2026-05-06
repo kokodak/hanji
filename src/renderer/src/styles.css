@@ -421,10 +421,11 @@ input:focus {
 }
 
 #editor .cm-live-horizontal-rule {
-  display: block;
+  display: inline-block;
+  width: 100%;
   height: 1px;
-  margin: 0.78em 0;
   background: #dfd6ca;
+  vertical-align: middle;
 }
 
 #editor .cm-live-image {
