@@ -14,6 +14,7 @@
 - Recent documents.
 - Basic Markdown preview.
 - Keyboard-first command menu.
+- QA harness for live Markdown editing and scroll behavior.
 
 ## Milestone 2: Extension Host
 
