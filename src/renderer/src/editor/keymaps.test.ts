@@ -90,6 +90,39 @@ export const tests = [
     }
   },
   {
+    name: 'indents the current bullet line from any cursor position',
+    run() {
+      const view = new TestEditorView('- item', 4);
+      const handled = indentWithSpaces(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), '    - item');
+      assert.equal(view.state.selection.main.head, 8);
+    }
+  },
+  {
+    name: 'indents the current task line from any cursor position',
+    run() {
+      const view = new TestEditorView('- [ ] task', 7);
+      const handled = indentWithSpaces(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), '    - [ ] task');
+      assert.equal(view.state.selection.main.head, 11);
+    }
+  },
+  {
+    name: 'indents the current numbered list line from any cursor position',
+    run() {
+      const view = new TestEditorView('1. item', 5);
+      const handled = indentWithSpaces(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), '    1. item');
+      assert.equal(view.state.selection.main.head, 9);
+    }
+  },
+  {
     name: 'indents every selected line by four spaces',
     run() {
       const view = new TestEditorView('one\ntwo\nthree');

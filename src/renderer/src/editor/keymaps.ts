@@ -1,6 +1,7 @@
 import { EditorView, keymap } from '@codemirror/view';
 
 const TAB_SPACES = '    ';
+const listLinePattern = /^(\s*)(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)/;
 
 export function continueListItem(view: EditorView): boolean {
   const selection = view.state.selection.main;
@@ -74,6 +75,16 @@ export function indentWithSpaces(view: EditorView): boolean {
   const selection = view.state.selection.main;
 
   if (selection.empty) {
+    const line = view.state.doc.lineAt(selection.head);
+
+    if (listLinePattern.test(line.text)) {
+      view.dispatch({
+        changes: { from: line.from, insert: TAB_SPACES },
+        selection: { anchor: selection.head + TAB_SPACES.length }
+      });
+      return true;
+    }
+
     view.dispatch({
       changes: { from: selection.head, insert: TAB_SPACES },
       selection: { anchor: selection.head + TAB_SPACES.length }
