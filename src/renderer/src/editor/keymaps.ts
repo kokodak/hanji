@@ -2,6 +2,13 @@ import { EditorView, keymap } from '@codemirror/view';
 
 const TAB_SPACES = '    ';
 const listLinePattern = /^(\s*)(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)/;
+const emptyTaskLinePattern = /^(\s*)([-*+])\s+\[[ xX]\]\s*$/;
+const emptyBulletLinePattern = /^(\s*)([-*+])\s*$/;
+const emptyNumberedLinePattern = /^(\s*)\d+[.)]\s*$/;
+
+function reduceIndent(indent: string): string {
+  return indent.slice(0, Math.max(0, indent.length - TAB_SPACES.length));
+}
 
 export function continueListItem(view: EditorView): boolean {
   const selection = view.state.selection.main;
@@ -9,16 +16,41 @@ export function continueListItem(view: EditorView): boolean {
 
   const line = view.state.doc.lineAt(selection.head);
   const textBeforeCursor = view.state.sliceDoc(line.from, selection.head);
+  const emptyListLineMatch =
+    emptyTaskLinePattern.exec(line.text) ?? emptyBulletLinePattern.exec(line.text) ?? emptyNumberedLinePattern.exec(line.text);
   const taskMatch = /^(\s*)([-*+])\s+\[([ xX])\]\s*(.*)$/.exec(textBeforeCursor);
   const bulletMatch = /^(\s*)([-*+])\s+(.*)$/.exec(textBeforeCursor);
+  const numberedMatch = /^(\s*)(\d+)([.)])\s+(.*)$/.exec(textBeforeCursor);
+
+  if (emptyListLineMatch) {
+    const nextIndent = reduceIndent(emptyListLineMatch[1]);
+
+    view.dispatch({
+      changes: { from: line.from, to: line.to, insert: nextIndent },
+      selection: { anchor: line.from + nextIndent.length }
+    });
+    return true;
+  }
+
+  if (/^\s+$/.test(line.text)) {
+    const indent = line.text;
+    const nextIndent = reduceIndent(indent);
+
+    view.dispatch({
+      changes: { from: line.from, to: line.to, insert: nextIndent },
+      selection: { anchor: line.from + nextIndent.length }
+    });
+    return true;
+  }
 
   if (taskMatch) {
     const [, indent, marker, , content] = taskMatch;
 
     if (content.trim() === '') {
+      const nextIndent = reduceIndent(indent);
       view.dispatch({
-        changes: { from: line.from, to: selection.head, insert: indent },
-        selection: { anchor: line.from + indent.length }
+        changes: { from: line.from, to: selection.head, insert: nextIndent },
+        selection: { anchor: line.from + nextIndent.length }
       });
       return true;
     }
@@ -35,14 +67,36 @@ export function continueListItem(view: EditorView): boolean {
     const [, indent, marker, content] = bulletMatch;
 
     if (content.trim() === '') {
+      const nextIndent = reduceIndent(indent);
       view.dispatch({
-        changes: { from: line.from, to: selection.head, insert: indent },
-        selection: { anchor: line.from + indent.length }
+        changes: { from: line.from, to: selection.head, insert: nextIndent },
+        selection: { anchor: line.from + nextIndent.length }
       });
       return true;
     }
 
     const insert = `\n${indent}${marker} `;
+    view.dispatch({
+      changes: { from: selection.head, insert },
+      selection: { anchor: selection.head + insert.length }
+    });
+    return true;
+  }
+
+  if (numberedMatch) {
+    const [, indent, numberText, marker, content] = numberedMatch;
+
+    if (content.trim() === '') {
+      const nextIndent = reduceIndent(indent);
+      view.dispatch({
+        changes: { from: line.from, to: selection.head, insert: nextIndent },
+        selection: { anchor: line.from + nextIndent.length }
+      });
+      return true;
+    }
+
+    const nextNumber = Number(numberText) + 1;
+    const insert = `\n${indent}${nextNumber}${marker} `;
     view.dispatch({
       changes: { from: selection.head, insert },
       selection: { anchor: selection.head + insert.length }

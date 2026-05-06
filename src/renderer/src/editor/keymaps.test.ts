@@ -54,8 +54,26 @@ export const tests = [
     run() {
       const view = runContinueListItem('  - ');
 
-      assert.equal(view.state.doc.toString(), '  ');
-      assert.equal(view.state.selection.main.head, 2);
+      assert.equal(view.state.doc.toString(), '');
+      assert.equal(view.state.selection.main.head, 0);
+    }
+  },
+  {
+    name: 'outdents empty nested bullet markers',
+    run() {
+      const view = runContinueListItem('        - ');
+
+      assert.equal(view.state.doc.toString(), '    ');
+      assert.equal(view.state.selection.main.head, 4);
+    }
+  },
+  {
+    name: 'outdents empty list markers even when the cursor is inside the marker',
+    run() {
+      const view = runContinueListItem('    - ', 5);
+
+      assert.equal(view.state.doc.toString(), '');
+      assert.equal(view.state.selection.main.head, 0);
     }
   },
   {
@@ -76,6 +94,35 @@ export const tests = [
       assert.equal(handled, false);
       assert.equal(view.dispatchCount, 0);
       assert.equal(view.state.doc.toString(), 'plain text');
+    }
+  },
+  {
+    name: 'continues numbered lists',
+    run() {
+      const view = runContinueListItem('1. item');
+
+      assert.equal(view.state.doc.toString(), '1. item\n2. ');
+      assert.equal(view.state.selection.main.head, '1. item\n2. '.length);
+    }
+  },
+  {
+    name: 'outdents whitespace-only indented lines on Enter',
+    run() {
+      const view = runContinueListItem('        ');
+
+      assert.equal(view.state.doc.toString(), '    ');
+      assert.equal(view.state.selection.main.head, 4);
+    }
+  },
+  {
+    name: 'does not create a blank bullet after exiting a nested list item',
+    run() {
+      const view = runContinueListItem('    - item');
+      const handled = continueListItem(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), '    - item\n');
+      assert.equal(view.state.selection.main.head, '    - item\n'.length);
     }
   },
   {
