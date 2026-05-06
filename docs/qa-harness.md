@@ -15,7 +15,7 @@ The first harness pass focuses on live Markdown editing quality:
 
 | ID | Area | Reproduction | Expected Behavior | Status |
 | --- | --- | --- | --- | --- |
-| QA-001 | Cursor rendering | Type text, press Backspace repeatedly, and watch the caret immediately after deletion. | The caret moves with the document change and only one caret is visible. | Open |
+| QA-001 | Cursor rendering | Type text, press Backspace repeatedly, and watch the caret immediately after deletion. | The caret moves with the document change and only one caret is visible. Test: `src/renderer/src/editor/cursorStyle.test.ts`. | Fixed pending manual verification |
 | QA-002 | Heading live preview | Type `# Heading`, then press Enter. | The completed heading switches back to preview styling immediately after the cursor leaves the line. | Open |
 | QA-003 | List continuation | Type `- item`, then press Enter. Repeat from several cursor positions and after live preview toggles. | A new line starts with the same unordered-list marker when the previous list item has content. | Open |
 | QA-004 | Tab handling | Press Tab inside normal text, list items, and indented Markdown blocks. | Tab inserts four spaces or indents the current selection by four spaces. Shift+Tab should outdent where applicable. | Open |

@@ -3,7 +3,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { syntaxHighlighting } from '@codemirror/language';
 import { EditorState } from '@codemirror/state';
-import { EditorView, keymap } from '@codemirror/view';
+import { drawSelection, EditorView, keymap } from '@codemirror/view';
 import { litheHighlightStyle } from './highlighting';
 import { handleBacktickInput, handlePairedSymbolInput } from './inputHandlers';
 import { continueListItem, stableVerticalMovement } from './keymaps';
@@ -27,6 +27,7 @@ export function createEditor(options: CreateEditorOptions): EditorView {
         history(),
         markdown({ codeLanguages: languages }),
         syntaxHighlighting(litheHighlightStyle, { fallback: true }),
+        drawSelection(),
         handleBacktickInput,
         handlePairedSymbolInput,
         liveMarkdownPreview,

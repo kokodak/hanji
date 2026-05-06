@@ -255,7 +255,7 @@ input:focus {
 #editor .cm-content {
   min-height: 100%;
   padding: 34px 38px;
-  caret-color: #2f5f62;
+  caret-color: transparent;
 }
 
 #editor .cm-line {
