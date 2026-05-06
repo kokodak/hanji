@@ -29,8 +29,8 @@ The first harness pass focuses on live Markdown editing quality:
 
 | ID | Area | Reproduction | Expected Behavior | Status |
 | --- | --- | --- | --- | --- |
-| QA-010 | Sidebar position | Open a long document and scroll the editor. | The left sidebar stays fixed and does not move with editor content. | Open |
-| QA-011 | Scroll containment | Use fast trackpad scrolling with momentum. | Scroll momentum and bounce are contained to the editor surface. The clock and sidebar remain visually stable. | Open |
+| QA-010 | Sidebar position | Open a long document and scroll the editor. | The left sidebar stays fixed and does not move with editor content. Test: `src/renderer/src/app/layoutStyle.test.ts`. | Fixed pending manual verification |
+| QA-011 | Scroll containment | Use fast trackpad scrolling with momentum. | Scroll momentum and bounce are contained to the editor surface. The clock and sidebar remain visually stable. Test: `src/renderer/src/app/layoutStyle.test.ts`. | Fixed pending manual verification |
 
 ## Verification Rhythm
 

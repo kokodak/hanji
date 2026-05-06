@@ -13,10 +13,17 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#app {
+  height: 100%;
+}
+
 body {
   margin: 0;
   min-width: 360px;
   min-height: 560px;
+  overflow: hidden;
   background: #f7f4ef;
 }
 
@@ -39,7 +46,8 @@ input:focus {
 .shell {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .space-panel {
@@ -47,6 +55,8 @@ input:focus {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   min-width: 0;
+  height: 100vh;
+  overflow: hidden;
   border-right: 1px solid #dfd6ca;
   background: #f7f4ef;
   user-select: none;
@@ -125,6 +135,7 @@ input:focus {
 
 .note-list {
   overflow: auto;
+  overscroll-behavior: contain;
   min-height: 0;
   padding: 8px;
 }
@@ -196,6 +207,8 @@ input:focus {
   display: grid;
   grid-template-rows: 58px minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .toolbar {
@@ -231,6 +244,7 @@ input:focus {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   min-height: 0;
+  overflow: hidden;
 }
 
 #editor {
@@ -249,6 +263,8 @@ input:focus {
 }
 
 #editor .cm-scroller {
+  overflow: auto;
+  overscroll-behavior: contain;
   font-family: inherit;
 }
 
