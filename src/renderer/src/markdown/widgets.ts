@@ -45,6 +45,48 @@ export class HorizontalRuleWidget extends WidgetType {
   }
 }
 
+export class TableWidget extends WidgetType {
+  constructor(
+    private readonly headers: string[],
+    private readonly rows: string[][]
+  ) {
+    super();
+  }
+
+  eq(other: TableWidget): boolean {
+    return JSON.stringify(other.headers) === JSON.stringify(this.headers) && JSON.stringify(other.rows) === JSON.stringify(this.rows);
+  }
+
+  toDOM(): HTMLElement {
+    const table = document.createElement('table');
+    table.className = 'cm-live-table';
+
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    for (const header of this.headers) {
+      const cell = document.createElement('th');
+      cell.textContent = header;
+      headerRow.append(cell);
+    }
+    thead.append(headerRow);
+    table.append(thead);
+
+    const tbody = document.createElement('tbody');
+    for (const row of this.rows) {
+      const tableRow = document.createElement('tr');
+      for (let index = 0; index < this.headers.length; index += 1) {
+        const cell = document.createElement('td');
+        cell.textContent = row[index] ?? '';
+        tableRow.append(cell);
+      }
+      tbody.append(tableRow);
+    }
+    table.append(tbody);
+
+    return table;
+  }
+}
+
 export class ImageWidget extends WidgetType {
   constructor(
     private readonly source: string,

@@ -9,7 +9,7 @@ import {
   isActiveFencedCodeBlock
 } from './fencedCode';
 import { bulletMarker, headingClasses, hiddenSyntax, liveCheckedTask } from './decorations';
-import { CheckboxWidget, CodeLanguageWidget, HorizontalRuleWidget, NumberedListWidget } from './widgets';
+import { CheckboxWidget, CodeLanguageWidget, HorizontalRuleWidget, NumberedListWidget, TableWidget } from './widgets';
 import { lineContainsSelection, lineIntersectsSelection, rangeContainsSelection } from './selection';
 import type { PendingDecoration } from './types';
 
@@ -38,6 +38,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
   const pending: PendingDecoration[] = [];
   const codeBlocks = collectFencedCodeBlocks(view.state.doc);
   const frontmatterBlock = collectYamlFrontmatterBlock(view.state.doc);
+  const tables = collectMarkdownTables(view.state.doc);
 
   for (const range of view.visibleRanges) {
     for (let pos = range.from; pos <= range.to;) {
@@ -47,6 +48,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
         frontmatterBlock !== null && line.number >= frontmatterBlock.startLine && line.number <= frontmatterBlock.endLine;
       const isInteractive = line.number === hoverLine || lineIntersectsSelection(view, line.from, line.to);
       const codeBlock = getFencedCodeBlockForLine(codeBlocks, line.number);
+      const table = getMarkdownTableForLine(tables, line.number);
       const indentedCodeBlock = lineIsIndentedCodeBlock(lineText);
       const headingMatch = /^(#{1,6})\s+/.exec(lineText);
       const taskMatch = /^(\s*)([-*+])\s+\[([ xX])\]\s+/.exec(lineText);
@@ -92,6 +94,26 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
           to: line.from,
           decoration: Decoration.line({ class: 'cm-live-frontmatter' })
         });
+
+        pos = line.to + 1;
+        continue;
+      }
+
+      if (table) {
+        const activeTable = lineRangeIntersectsSelection(view, table.startLine, table.endLine);
+
+        if (!activeTable && line.number === table.startLine) {
+          const startLine = view.state.doc.line(table.startLine);
+          const endLine = view.state.doc.line(table.endLine);
+          pending.push({
+            from: startLine.from,
+            to: endLine.to,
+            decoration: Decoration.replace({
+              widget: new TableWidget(table.headers, table.rows),
+              block: true
+            })
+          });
+        }
 
         pos = line.to + 1;
         continue;
@@ -242,6 +264,74 @@ export function lineIsIndentedCodeBlock(lineText: string): boolean {
 export interface FrontmatterBlock {
   startLine: number;
   endLine: number;
+}
+
+export interface MarkdownTable {
+  startLine: number;
+  endLine: number;
+  headers: string[];
+  rows: string[][];
+}
+
+function lineRangeIntersectsSelection(view: EditorView, startLine: number, endLine: number): boolean {
+  const from = view.state.doc.line(startLine).from;
+  const to = view.state.doc.line(endLine).to;
+  return lineIntersectsSelection(view, from, to);
+}
+
+function splitTableCells(lineText: string): string[] {
+  const trimmed = lineText.trim().replace(/^\|/, '').replace(/\|$/, '');
+  return trimmed.split('|').map((cell) => cell.trim());
+}
+
+function lineIsTableDelimiter(lineText: string): boolean {
+  const cells = splitTableCells(lineText);
+  return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function lineLooksLikeTableRow(lineText: string): boolean {
+  return lineText.includes('|') && splitTableCells(lineText).length > 1;
+}
+
+export function collectMarkdownTables(doc: Text): MarkdownTable[] {
+  const tables: MarkdownTable[] = [];
+  let lineNumber = 1;
+
+  while (lineNumber < doc.lines) {
+    const headerLine = doc.line(lineNumber);
+    const delimiterLine = doc.line(lineNumber + 1);
+
+    if (!lineLooksLikeTableRow(headerLine.text) || !lineIsTableDelimiter(delimiterLine.text)) {
+      lineNumber += 1;
+      continue;
+    }
+
+    const headers = splitTableCells(headerLine.text);
+    const rows: string[][] = [];
+    let endLine = delimiterLine.number;
+
+    for (let rowLineNumber = delimiterLine.number + 1; rowLineNumber <= doc.lines; rowLineNumber += 1) {
+      const rowLine = doc.line(rowLineNumber);
+      if (!lineLooksLikeTableRow(rowLine.text)) break;
+
+      rows.push(splitTableCells(rowLine.text));
+      endLine = rowLineNumber;
+    }
+
+    tables.push({
+      startLine: headerLine.number,
+      endLine,
+      headers,
+      rows
+    });
+    lineNumber = endLine + 1;
+  }
+
+  return tables;
+}
+
+function getMarkdownTableForLine(tables: MarkdownTable[], lineNumber: number): MarkdownTable | null {
+  return tables.find((table) => lineNumber >= table.startLine && lineNumber <= table.endLine) ?? null;
 }
 
 export function collectYamlFrontmatterBlock(doc: Text): FrontmatterBlock | null {

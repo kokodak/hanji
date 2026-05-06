@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { Text } from '@codemirror/state';
 import {
+  collectMarkdownTables,
   collectYamlFrontmatterBlock,
   lineIsHorizontalRule,
   lineIsIndentedCodeBlock,
@@ -95,6 +96,29 @@ export const tests = [
       const block = collectYamlFrontmatterBlock(Text.of(['# Body', '', '---']));
 
       assert.equal(block, null);
+    }
+  },
+  {
+    name: 'collects GitHub-Flavored Markdown tables',
+    run() {
+      const tables = collectMarkdownTables(Text.of(['| Name | Status |', '| --- | --- |', '| QA | Open |', '', 'after']));
+
+      assert.deepEqual(tables, [
+        {
+          startLine: 1,
+          endLine: 3,
+          headers: ['Name', 'Status'],
+          rows: [['QA', 'Open']]
+        }
+      ]);
+    }
+  },
+  {
+    name: 'rejects pipe text without a table delimiter row',
+    run() {
+      const tables = collectMarkdownTables(Text.of(['Name | Status', 'QA | Open']));
+
+      assert.deepEqual(tables, []);
     }
   }
 ];
