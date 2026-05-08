@@ -13,8 +13,16 @@ import { CheckboxWidget, CodeLanguageWidget, HorizontalRuleWidget, NumberedListW
 import { lineContainsSelection, lineIntersectsSelection, rangeContainsSelection } from './selection';
 import type { PendingDecoration } from './types';
 
+export function safePosAtCoords(view: Pick<EditorView, 'posAtCoords'>, coords: { x: number; y: number }): number | null {
+  try {
+    return view.posAtCoords(coords);
+  } catch {
+    return null;
+  }
+}
+
 function moveSingleInlineCodeClickToLineEnd(view: EditorView, event: MouseEvent): boolean {
-  const position = view.posAtCoords({ x: event.clientX, y: event.clientY });
+  const position = safePosAtCoords(view, { x: event.clientX, y: event.clientY });
   if (position === null) return false;
 
   const line = view.state.doc.lineAt(position);
@@ -107,10 +115,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
           pending.push({
             from: startLine.from,
             to: endLine.to,
-            decoration: Decoration.replace({
-              widget: new TableWidget(table.headers, table.rows),
-              block: true
-            })
+            decoration: Decoration.replace({ widget: new TableWidget(table.headers, table.rows) })
           });
         }
 
@@ -349,7 +354,7 @@ export const liveMarkdownPreview = ViewPlugin.fromClass(
         const plugin = view.plugin(liveMarkdownPreview);
         if (!plugin) return;
 
-        const position = view.posAtCoords({ x: event.clientX, y: event.clientY });
+        const position = safePosAtCoords(view, { x: event.clientX, y: event.clientY });
         plugin.setHoverLine(view, position === null ? null : view.state.doc.lineAt(position).number);
       },
       mouseleave(_, view) {

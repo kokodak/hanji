@@ -4,7 +4,8 @@ import {
   collectMarkdownTables,
   collectYamlFrontmatterBlock,
   lineIsHorizontalRule,
-  nextHoverLineAfterEditorUpdate
+  nextHoverLineAfterEditorUpdate,
+  safePosAtCoords
 } from './livePreview';
 
 export const tests = [
@@ -45,6 +46,30 @@ export const tests = [
         }),
         1
       );
+    }
+  },
+  {
+    name: 'ignores transient coordinate lookup failures',
+    run() {
+      const view = {
+        posAtCoords() {
+          throw new Error('No tile at position 73');
+        }
+      };
+
+      assert.equal(safePosAtCoords(view, { x: 10, y: 10 }), null);
+    }
+  },
+  {
+    name: 'returns coordinate positions when lookup succeeds',
+    run() {
+      const view = {
+        posAtCoords() {
+          return 4;
+        }
+      };
+
+      assert.equal(safePosAtCoords(view, { x: 10, y: 10 }), 4);
     }
   },
   {
