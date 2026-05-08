@@ -23,6 +23,10 @@ Tables should use a dedicated table block editor:
 
 The stored document remains plain Markdown. The table editor is an interaction layer over that source, not a new file format.
 
+## Current First Pass
+
+The current implementation keeps recognized tables in a rendered table surface, lets existing cells be edited directly, and serializes those edits back to Markdown. Copy events from the table surface write Markdown text to the clipboard. Row and column insertion controls remain future work.
+
 ## Interaction Rules
 
 - A table block keeps a stable block height while editing cells.

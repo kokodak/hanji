@@ -1,4 +1,5 @@
 import { EditorView, WidgetType } from '@codemirror/view';
+import { serializeMarkdownTable, type MarkdownTable } from './table';
 
 function safeHref(href: string): string {
   if (href.startsWith('#')) return href;
@@ -46,37 +47,93 @@ export class HorizontalRuleWidget extends WidgetType {
 }
 
 export class TableWidget extends WidgetType {
-  constructor(
-    private readonly headers: string[],
-    private readonly rows: string[][]
-  ) {
+  constructor(private readonly table: MarkdownTable) {
     super();
   }
 
   eq(other: TableWidget): boolean {
-    return JSON.stringify(other.headers) === JSON.stringify(this.headers) && JSON.stringify(other.rows) === JSON.stringify(this.rows);
+    return (
+      other.table.startLine === this.table.startLine &&
+      other.table.endLine === this.table.endLine &&
+      this.markdownSource() === other.markdownSource()
+    );
   }
 
-  toDOM(): HTMLElement {
+  private markdownSource(): string {
+    return serializeMarkdownTable(this.table.headers, this.table.rows);
+  }
+
+  private markdownFromDOM(table: HTMLTableElement): string {
+    const headers = Array.from(table.querySelectorAll('thead th')).map((cell) => cell.textContent ?? '');
+    const rows = Array.from(table.querySelectorAll('tbody tr')).map((row) =>
+      Array.from(row.querySelectorAll('td')).map((cell) => cell.textContent ?? '')
+    );
+    return serializeMarkdownTable(headers, rows);
+  }
+
+  private updateDocument(view: EditorView, table: HTMLTableElement): void {
+    const markdown = this.markdownFromDOM(table);
+    if (markdown === this.markdownSource()) return;
+    if (this.table.endLine > view.state.doc.lines) return;
+
+    const startLine = view.state.doc.line(this.table.startLine);
+    const endLine = view.state.doc.line(this.table.endLine);
+    view.dispatch({
+      changes: {
+        from: startLine.from,
+        to: endLine.to,
+        insert: markdown
+      }
+    });
+  }
+
+  private createCell(tagName: 'td' | 'th', text: string, view: EditorView, table: HTMLTableElement): HTMLTableCellElement {
+    const cell = document.createElement(tagName);
+    cell.textContent = text;
+    cell.contentEditable = 'plaintext-only';
+    cell.spellcheck = false;
+    cell.addEventListener('blur', () => {
+      this.updateDocument(view, table);
+    });
+    cell.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        cell.blur();
+        view.focus();
+      }
+    });
+    return cell;
+  }
+
+  toDOM(view: EditorView): HTMLElement {
     const table = document.createElement('table');
     table.className = 'cm-live-table';
+    table.dataset.markdown = this.markdownSource();
+    table.addEventListener('copy', (event) => {
+      event.preventDefault();
+      event.clipboardData?.setData('text/plain', this.markdownFromDOM(table));
+    });
+    table.addEventListener('mousedown', (event) => {
+      event.stopPropagation();
+    });
+    table.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
 
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
-    for (const header of this.headers) {
-      const cell = document.createElement('th');
-      cell.textContent = header;
+    for (const header of this.table.headers) {
+      const cell = this.createCell('th', header, view, table);
       headerRow.append(cell);
     }
     thead.append(headerRow);
     table.append(thead);
 
     const tbody = document.createElement('tbody');
-    for (const row of this.rows) {
+    for (const row of this.table.rows) {
       const tableRow = document.createElement('tr');
-      for (let index = 0; index < this.headers.length; index += 1) {
-        const cell = document.createElement('td');
-        cell.textContent = row[index] ?? '';
+      for (let index = 0; index < this.table.headers.length; index += 1) {
+        const cell = this.createCell('td', row[index] ?? '', view, table);
         tableRow.append(cell);
       }
       tbody.append(tableRow);
@@ -84,6 +141,10 @@ export class TableWidget extends WidgetType {
     table.append(tbody);
 
     return table;
+  }
+
+  ignoreEvent(): boolean {
+    return true;
   }
 }
 

@@ -11,7 +11,11 @@ import {
 import { bulletMarker, headingClasses, hiddenSyntax, liveCheckedTask } from './decorations';
 import { CheckboxWidget, CodeLanguageWidget, HorizontalRuleWidget, NumberedListWidget, TableWidget } from './widgets';
 import { lineContainsSelection, lineIntersectsSelection, rangeContainsSelection } from './selection';
+import { collectMarkdownTables, getMarkdownTableForLine, type MarkdownTable } from './table';
 import type { PendingDecoration } from './types';
+
+export { collectMarkdownTables } from './table';
+export type { MarkdownTable } from './table';
 
 export function safePosAtCoords(view: Pick<EditorView, 'posAtCoords'>, coords: { x: number; y: number }): number | null {
   try {
@@ -107,18 +111,14 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
       }
 
       if (table) {
-        const activeTable = lineRangeIntersectsSelection(view, table.startLine, table.endLine);
-
-        if (!activeTable) {
-          if (line.number === table.startLine) {
-            pending.push({
-              from: line.from,
-              to: line.to,
-              decoration: Decoration.replace({ widget: new TableWidget(table.headers, table.rows) })
-            });
-          } else {
-            pending.push({ from: line.from, to: line.to, decoration: hiddenSyntax });
-          }
+        if (line.number === table.startLine) {
+          pending.push({
+            from: line.from,
+            to: line.to,
+            decoration: Decoration.replace({ widget: new TableWidget(table) })
+          });
+        } else {
+          pending.push({ from: line.from, to: line.to, decoration: hiddenSyntax });
         }
 
         pos = line.to + 1;
@@ -238,74 +238,6 @@ export function lineIsHorizontalRule(lineText: string): boolean {
 export interface FrontmatterBlock {
   startLine: number;
   endLine: number;
-}
-
-export interface MarkdownTable {
-  startLine: number;
-  endLine: number;
-  headers: string[];
-  rows: string[][];
-}
-
-function lineRangeIntersectsSelection(view: EditorView, startLine: number, endLine: number): boolean {
-  const from = view.state.doc.line(startLine).from;
-  const to = view.state.doc.line(endLine).to;
-  return lineIntersectsSelection(view, from, to);
-}
-
-function splitTableCells(lineText: string): string[] {
-  const trimmed = lineText.trim().replace(/^\|/, '').replace(/\|$/, '');
-  return trimmed.split('|').map((cell) => cell.trim());
-}
-
-function lineIsTableDelimiter(lineText: string): boolean {
-  const cells = splitTableCells(lineText);
-  return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
-}
-
-function lineLooksLikeTableRow(lineText: string): boolean {
-  return lineText.includes('|') && splitTableCells(lineText).length > 1;
-}
-
-export function collectMarkdownTables(doc: Text): MarkdownTable[] {
-  const tables: MarkdownTable[] = [];
-  let lineNumber = 1;
-
-  while (lineNumber < doc.lines) {
-    const headerLine = doc.line(lineNumber);
-    const delimiterLine = doc.line(lineNumber + 1);
-
-    if (!lineLooksLikeTableRow(headerLine.text) || !lineIsTableDelimiter(delimiterLine.text)) {
-      lineNumber += 1;
-      continue;
-    }
-
-    const headers = splitTableCells(headerLine.text);
-    const rows: string[][] = [];
-    let endLine = delimiterLine.number;
-
-    for (let rowLineNumber = delimiterLine.number + 1; rowLineNumber <= doc.lines; rowLineNumber += 1) {
-      const rowLine = doc.line(rowLineNumber);
-      if (!lineLooksLikeTableRow(rowLine.text)) break;
-
-      rows.push(splitTableCells(rowLine.text));
-      endLine = rowLineNumber;
-    }
-
-    tables.push({
-      startLine: headerLine.number,
-      endLine,
-      headers,
-      rows
-    });
-    lineNumber = endLine + 1;
-  }
-
-  return tables;
-}
-
-function getMarkdownTableForLine(tables: MarkdownTable[], lineNumber: number): MarkdownTable | null {
-  return tables.find((table) => lineNumber >= table.startLine && lineNumber <= table.endLine) ?? null;
 }
 
 export function collectYamlFrontmatterBlock(doc: Text): FrontmatterBlock | null {
