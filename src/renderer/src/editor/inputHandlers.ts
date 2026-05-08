@@ -18,6 +18,10 @@ const pairRules: PairRule[] = [
 const pairRulesByOpen = new Map(pairRules.map((rule) => [rule.open, rule]));
 const pairRulesByClose = new Map(pairRules.map((rule) => [rule.close, rule]));
 
+export function normalizePastedText(text: string): string {
+  return text.replace(/\r\n?/g, '\n');
+}
+
 function positionIsInsideFencedCodeBlock(view: EditorView, position: number): boolean {
   const currentLine = view.state.doc.lineAt(position);
   let insideFence = false;
@@ -136,4 +140,15 @@ export const handlePairedSymbolInput = EditorView.inputHandler.of((view, from, t
   });
 
   return true;
+});
+
+export const handlePlainTextPaste = EditorView.domEventHandlers({
+  paste(event, view) {
+    const text = event.clipboardData?.getData('text/plain');
+    if (!text) return false;
+
+    event.preventDefault();
+    view.dispatch(view.state.replaceSelection(normalizePastedText(text)));
+    return true;
+  }
 });
