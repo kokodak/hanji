@@ -220,6 +220,47 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
   return builder.finish();
 }
 
+export interface TableCursorTarget {
+  anchor: number;
+  insertBreakAt: number | null;
+}
+
+export function getTableCursorTarget(doc: Text, table: MarkdownTable, position: number): TableCursorTarget | null {
+  const startLine = doc.line(table.startLine);
+  const endLine = doc.line(table.endLine);
+  if (position < startLine.from || position > endLine.to) return null;
+
+  if (table.endLine < doc.lines) {
+    return { anchor: doc.line(table.endLine + 1).from, insertBreakAt: null };
+  }
+
+  return { anchor: endLine.to + 1, insertBreakAt: endLine.to };
+}
+
+function moveCursorOutsideRenderedTables(view: EditorView): void {
+  const selection = view.state.selection.main;
+  if (!selection.empty) return;
+
+  const tables = collectMarkdownTables(view.state.doc);
+  const table = tables.find((item) => getTableCursorTarget(view.state.doc, item, selection.head) !== null);
+  if (!table) return;
+
+  const target = getTableCursorTarget(view.state.doc, table, selection.head);
+  if (!target) return;
+
+  view.dispatch({
+    changes: target.insertBreakAt === null ? undefined : { from: target.insertBreakAt, insert: '\n' },
+    selection: { anchor: target.anchor },
+    scrollIntoView: true
+  });
+}
+
+function scheduleCursorMoveOutsideRenderedTables(view: EditorView): void {
+  window.setTimeout(() => {
+    moveCursorOutsideRenderedTables(view);
+  }, 0);
+}
+
 export function nextHoverLineAfterEditorUpdate(
   hoverLine: number | null,
   update: Pick<ViewUpdate, 'docChanged' | 'selectionSet' | 'viewportChanged'>
@@ -268,6 +309,9 @@ export const liveMarkdownPreview = ViewPlugin.fromClass(
         this.hoverLine = nextHoverLineAfterEditorUpdate(this.hoverLine, update);
         this.decorations = buildLivePreviewDecorations(update.view, this.hoverLine);
         update.view.requestMeasure();
+        if (update.docChanged || update.selectionSet) {
+          scheduleCursorMoveOutsideRenderedTables(update.view);
+        }
       }
     }
 

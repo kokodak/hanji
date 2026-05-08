@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { Text } from '@codemirror/state';
 import {
   collectYamlFrontmatterBlock,
+  getTableCursorTarget,
   lineIsHorizontalRule,
   nextHoverLineAfterEditorUpdate,
   safePosAtCoords
@@ -103,6 +104,46 @@ export const tests = [
       const block = collectYamlFrontmatterBlock(Text.of(['# Body', '', '---']));
 
       assert.equal(block, null);
+    }
+  },
+  {
+    name: 'moves a rendered table cursor to the next existing line',
+    run() {
+      const doc = Text.of(['| Name | Status |', '| --- | --- |', '| Lithe | Ready |', 'after']);
+
+      assert.deepEqual(
+        getTableCursorTarget(
+          doc,
+          {
+            startLine: 1,
+            endLine: 3,
+            headers: ['Name', 'Status'],
+            rows: [['Lithe', 'Ready']]
+          },
+          doc.line(2).from
+        ),
+        { anchor: doc.line(4).from, insertBreakAt: null }
+      );
+    }
+  },
+  {
+    name: 'creates a following line for a rendered table at document end',
+    run() {
+      const doc = Text.of(['| Name | Status |', '| --- | --- |', '| Lithe | Ready |']);
+
+      assert.deepEqual(
+        getTableCursorTarget(
+          doc,
+          {
+            startLine: 1,
+            endLine: 3,
+            headers: ['Name', 'Status'],
+            rows: [['Lithe', 'Ready']]
+          },
+          doc.line(3).to
+        ),
+        { anchor: doc.line(3).to + 1, insertBreakAt: doc.line(3).to }
+      );
     }
   },
 ];

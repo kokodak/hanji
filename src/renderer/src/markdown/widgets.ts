@@ -87,21 +87,31 @@ export class TableWidget extends WidgetType {
     });
   }
 
-  private createCell(tagName: 'td' | 'th', text: string, view: EditorView, table: HTMLTableElement): HTMLTableCellElement {
+  private deleteDocumentTable(view: EditorView): void {
+    if (this.table.endLine > view.state.doc.lines) return;
+
+    const startLine = view.state.doc.line(this.table.startLine);
+    const endLine = view.state.doc.line(this.table.endLine);
+    const to = this.table.endLine < view.state.doc.lines ? view.state.doc.line(this.table.endLine + 1).from : endLine.to;
+    view.dispatch({
+      changes: {
+        from: startLine.from,
+        to,
+        insert: ''
+      },
+      selection: { anchor: startLine.from },
+      scrollIntoView: true
+    });
+    view.focus();
+  }
+
+  private createCell(tagName: 'td' | 'th', text: string, row: number, column: number): HTMLTableCellElement {
     const cell = document.createElement(tagName);
     cell.textContent = text;
     cell.contentEditable = 'plaintext-only';
+    cell.dataset.row = String(row);
+    cell.dataset.column = String(column);
     cell.spellcheck = false;
-    cell.addEventListener('blur', () => {
-      this.updateDocument(view, table);
-    });
-    cell.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        cell.blur();
-        view.focus();
-      }
-    });
     return cell;
   }
 
@@ -109,9 +119,103 @@ export class TableWidget extends WidgetType {
     const table = document.createElement('table');
     table.className = 'cm-live-table';
     table.dataset.markdown = this.markdownSource();
+    table.tabIndex = 0;
+
+    let dragStart: { row: number; column: number } | null = null;
+    let draggingCells = false;
+
+    const getCellPosition = (cell: HTMLTableCellElement): { row: number; column: number } => ({
+      row: Number(cell.dataset.row ?? 0),
+      column: Number(cell.dataset.column ?? 0)
+    });
+    const getCellFromPoint = (x: number, y: number): HTMLTableCellElement | null => {
+      const element = document.elementFromPoint(x, y);
+      return element?.closest<HTMLTableCellElement>('.cm-live-table th, .cm-live-table td') ?? null;
+    };
+
+    const getSelectedCells = (): HTMLTableCellElement[] => Array.from(table.querySelectorAll<HTMLTableCellElement>('.is-selected'));
+    const getAllCells = (): HTMLTableCellElement[] => Array.from(table.querySelectorAll<HTMLTableCellElement>('th, td'));
+    const clearCellSelection = (): void => {
+      table.classList.remove('has-cell-selection');
+      for (const cell of getSelectedCells()) {
+        cell.classList.remove('is-selected');
+      }
+    };
+    const selectCellRange = (from: { row: number; column: number }, to: { row: number; column: number }): void => {
+      clearCellSelection();
+      const minRow = Math.min(from.row, to.row);
+      const maxRow = Math.max(from.row, to.row);
+      const minColumn = Math.min(from.column, to.column);
+      const maxColumn = Math.max(from.column, to.column);
+
+      for (const cell of getAllCells()) {
+        const position = getCellPosition(cell);
+        if (position.row >= minRow && position.row <= maxRow && position.column >= minColumn && position.column <= maxColumn) {
+          cell.classList.add('is-selected');
+        }
+      }
+      table.classList.toggle('has-cell-selection', getSelectedCells().length > 0);
+    };
+    const selectAllCells = (): void => {
+      for (const cell of getAllCells()) {
+        cell.classList.add('is-selected');
+      }
+      table.classList.add('has-cell-selection');
+      table.focus();
+    };
+    const selectedMarkdown = (): string => {
+      const selectedCells = getSelectedCells();
+      if (selectedCells.length === 0) return this.markdownFromDOM(table);
+
+      const selectedPositions = selectedCells.map(getCellPosition);
+      const selectedColumns = Array.from(new Set(selectedPositions.map((position) => position.column))).sort((a, b) => a - b);
+      const selectedBodyRows = Array.from(new Set(selectedPositions.map((position) => position.row).filter((row) => row > 0))).sort(
+        (a, b) => a - b
+      );
+      const headers = selectedColumns.map((column) => table.querySelector<HTMLTableCellElement>(`th[data-column="${column}"]`)?.textContent ?? '');
+      const rows = selectedBodyRows.map((row) =>
+        selectedColumns.map((column) => table.querySelector<HTMLTableCellElement>(`td[data-row="${row}"][data-column="${column}"]`)?.textContent ?? '')
+      );
+
+      return serializeMarkdownTable(headers, rows);
+    };
+    const clearSelectedCellText = (): void => {
+      const selectedCells = getSelectedCells();
+      if (selectedCells.length === 0) return;
+      if (selectedCells.length === getAllCells().length) {
+        this.deleteDocumentTable(view);
+        return;
+      }
+
+      for (const cell of selectedCells) {
+        cell.textContent = '';
+      }
+      this.updateDocument(view, table);
+      clearCellSelection();
+      table.focus();
+    };
+    const handleKeydown = (event: KeyboardEvent): void => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        selectAllCells();
+        return;
+      }
+
+      if ((event.key === 'Backspace' || event.key === 'Delete') && getSelectedCells().length > 0) {
+        event.preventDefault();
+        clearSelectedCellText();
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        clearCellSelection();
+        view.focus();
+      }
+    };
+
     table.addEventListener('copy', (event) => {
       event.preventDefault();
-      event.clipboardData?.setData('text/plain', this.markdownFromDOM(table));
+      event.clipboardData?.setData('text/plain', selectedMarkdown());
     });
     table.addEventListener('mousedown', (event) => {
       event.stopPropagation();
@@ -119,26 +223,83 @@ export class TableWidget extends WidgetType {
     table.addEventListener('click', (event) => {
       event.stopPropagation();
     });
+    table.addEventListener('mousemove', (event) => {
+      if (event.buttons !== 1 || dragStart === null) return;
+
+      const cell = getCellFromPoint(event.clientX, event.clientY);
+      if (!cell || !table.contains(cell)) return;
+
+      event.preventDefault();
+      draggingCells = true;
+      selectCellRange(dragStart, getCellPosition(cell));
+    });
+    table.addEventListener('mouseup', () => {
+      dragStart = null;
+      if (draggingCells) {
+        table.focus();
+      }
+      draggingCells = false;
+    });
+    table.addEventListener('keydown', handleKeydown);
 
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
-    for (const header of this.table.headers) {
-      const cell = this.createCell('th', header, view, table);
+    for (const [index, header] of this.table.headers.entries()) {
+      const cell = this.createCell('th', header, 0, index);
       headerRow.append(cell);
     }
     thead.append(headerRow);
     table.append(thead);
 
     const tbody = document.createElement('tbody');
-    for (const row of this.table.rows) {
+    for (const [rowIndex, row] of this.table.rows.entries()) {
       const tableRow = document.createElement('tr');
       for (let index = 0; index < this.table.headers.length; index += 1) {
-        const cell = this.createCell('td', row[index] ?? '', view, table);
+        const cell = this.createCell('td', row[index] ?? '', rowIndex + 1, index);
         tableRow.append(cell);
       }
       tbody.append(tableRow);
     }
     table.append(tbody);
+
+    for (const cell of getAllCells()) {
+      cell.addEventListener('mousedown', () => {
+        dragStart = getCellPosition(cell);
+        draggingCells = false;
+      });
+      cell.addEventListener('mouseenter', (event) => {
+        if (event.buttons !== 1 || dragStart === null) return;
+
+        event.preventDefault();
+        draggingCells = true;
+        selectCellRange(dragStart, getCellPosition(cell));
+      });
+      cell.addEventListener('mouseup', () => {
+        dragStart = null;
+        if (draggingCells) {
+          table.focus();
+        }
+        draggingCells = false;
+      });
+      cell.addEventListener('focus', () => {
+        if (!draggingCells) {
+          clearCellSelection();
+        }
+      });
+      cell.addEventListener('blur', () => {
+        this.updateDocument(view, table);
+      });
+      cell.addEventListener('keydown', (event) => {
+        handleKeydown(event);
+        if (event.defaultPrevented) return;
+
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          cell.blur();
+          view.focus();
+        }
+      });
+    }
 
     return table;
   }

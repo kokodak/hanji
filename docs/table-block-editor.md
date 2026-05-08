@@ -25,15 +25,16 @@ The stored document remains plain Markdown. The table editor is an interaction l
 
 ## Current First Pass
 
-The current implementation keeps recognized tables in a rendered table surface, lets existing cells be edited directly, and serializes those edits back to Markdown. Copy events from the table surface write Markdown text to the clipboard. Row and column insertion controls remain future work.
+The current implementation keeps recognized tables in a rendered table surface, lets existing cells be edited directly, and serializes those edits back to Markdown. Copy events from the table surface write Markdown text to the clipboard. Users can drag across cells to select a rectangular range, copy the selected cells as Markdown, clear selected cells, or delete the table when the full cell range is selected. Row and column insertion controls remain future work.
 
 ## Interaction Rules
 
 - A table block keeps a stable block height while editing cells.
+- The editor cursor moves to the line after a rendered table instead of staying in hidden Markdown table source.
 - Arrow keys move within cell text first, then between cells at cell boundaries.
 - Enter inserts a line break inside a cell only when explicitly supported; otherwise it commits the cell edit.
 - Tab and Shift+Tab move to the next or previous cell.
-- Copying the full table writes Markdown to the clipboard.
+- Copying the full table or a selected cell range writes Markdown to the clipboard.
 - Pasting Markdown table text into the editor creates a table block.
 - Pasting tab-delimited rows inside a table fills cells.
 

@@ -486,6 +486,16 @@ input:focus {
   outline-offset: -2px;
 }
 
+#editor .cm-live-table.has-cell-selection {
+  outline: 2px solid #8fb8b6;
+  outline-offset: 2px;
+}
+
+#editor .cm-live-table .is-selected {
+  background: #d7e4df;
+  box-shadow: inset 0 0 0 2px #6fa09f;
+}
+
 #editor .cm-live-image {
   display: inline-block;
   max-width: min(100%, 720px);

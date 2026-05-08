@@ -25,7 +25,7 @@ The first harness pass focuses on live Markdown editing quality:
 | QA-008 | Frontmatter | Add a YAML frontmatter block at the top of the document. | Frontmatter remains readable and does not interfere with Markdown table or horizontal-rule parsing. Test: `src/renderer/src/markdown/livePreview.test.ts`. | Fixed pending manual verification |
 | QA-009 | Horizontal rules | Type `---`, `***`, and `___` as standalone lines. | Horizontal rules render as separators when the cursor leaves the line. Test: `src/renderer/src/markdown/livePreview.test.ts`. | Fixed pending manual verification |
 | QA-012 | List preview layout | Create many bullet, checkbox, and numbered list items, then move the cursor across the markers. | List marker previews stay inside the source line box and do not change line height. Test: `src/renderer/src/editor/cursorStyle.test.ts`. | Fixed pending manual verification |
-| QA-013 | Table editing UX | Paste a Markdown table, edit cells, and copy the table. | Tables should stay in a stable editable table surface while preserving Markdown as the stored and copied format. Design: `docs/table-block-editor.md`. | In progress |
+| QA-013 | Table editing UX | Paste a Markdown table, edit cells, drag-select cells, delete the table, and copy the selection. | Tables should stay in a stable editable table surface while preserving Markdown as the stored and copied format. Design: `docs/table-block-editor.md`. | In progress |
 
 ## Layout And Scroll Checks
 
