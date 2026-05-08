@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { Text } from '@codemirror/state';
 import {
   collectYamlFrontmatterBlock,
@@ -7,6 +8,8 @@ import {
   nextHoverLineAfterEditorUpdate,
   safePosAtCoords
 } from './livePreview';
+
+const livePreviewSource = readFileSync(new URL('./livePreview.ts', import.meta.url), 'utf8');
 
 export const tests = [
   {
@@ -46,6 +49,12 @@ export const tests = [
         }),
         1
       );
+    }
+  },
+  {
+    name: 'does not rebuild hover preview while dragging',
+    run() {
+      assert.match(livePreviewSource, /if \(event\.buttons !== 0\) return;/);
     }
   },
   {

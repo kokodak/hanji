@@ -339,6 +339,8 @@ export const liveMarkdownPreview = ViewPlugin.fromClass(
         return moveSingleInlineCodeClickToLineEnd(view, event);
       },
       mousemove(event, view) {
+        if (event.buttons !== 0) return;
+
         const plugin = view.plugin(liveMarkdownPreview);
         if (!plugin) return;
 
