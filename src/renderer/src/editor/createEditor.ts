@@ -2,7 +2,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { syntaxHighlighting } from '@codemirror/language';
-import { EditorState } from '@codemirror/state';
+import { EditorState, Prec } from '@codemirror/state';
 import { drawSelection, EditorView, keymap } from '@codemirror/view';
 import { litheHighlightStyle } from './highlighting';
 import { handleBacktickInput, handlePairedSymbolInput } from './inputHandlers';
@@ -34,7 +34,8 @@ export function createEditor(options: CreateEditorOptions): EditorView {
         EditorView.lineWrapping,
         stableVerticalMovement,
         tabIndentation,
-        keymap.of([{ key: 'Enter', run: continueListItem }, ...defaultKeymap, ...historyKeymap]),
+        Prec.highest(keymap.of([{ key: 'Enter', run: continueListItem }])),
+        keymap.of([...defaultKeymap, ...historyKeymap]),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             options.onChange(update.view.state.doc.toString());

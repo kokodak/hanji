@@ -50,12 +50,12 @@ export const tests = [
     }
   },
   {
-    name: 'removes empty bullet markers',
+    name: 'outdents shallow empty bullet markers to the root list',
     run() {
       const view = runContinueListItem('  - ');
 
-      assert.equal(view.state.doc.toString(), '');
-      assert.equal(view.state.selection.main.head, 0);
+      assert.equal(view.state.doc.toString(), '- ');
+      assert.equal(view.state.selection.main.head, 2);
     }
   },
   {
@@ -63,8 +63,26 @@ export const tests = [
     run() {
       const view = runContinueListItem('        - ');
 
-      assert.equal(view.state.doc.toString(), '    ');
-      assert.equal(view.state.selection.main.head, 4);
+      assert.equal(view.state.doc.toString(), '    - ');
+      assert.equal(view.state.selection.main.head, 6);
+    }
+  },
+  {
+    name: 'removes empty root bullet markers',
+    run() {
+      const view = runContinueListItem('- ');
+
+      assert.equal(view.state.doc.toString(), '');
+      assert.equal(view.state.selection.main.head, 0);
+    }
+  },
+  {
+    name: 'removes empty root bullet markers with invisible caret text',
+    run() {
+      const view = runContinueListItem('- \u200b');
+
+      assert.equal(view.state.doc.toString(), '');
+      assert.equal(view.state.selection.main.head, 0);
     }
   },
   {
@@ -72,6 +90,19 @@ export const tests = [
     run() {
       const view = runContinueListItem('    - ', 5);
 
+      assert.equal(view.state.doc.toString(), '- ');
+      assert.equal(view.state.selection.main.head, 2);
+    }
+  },
+  {
+    name: 'handles Enter when preview selection touches an empty list marker',
+    run() {
+      const view = new TestEditorView('- ');
+      view.dispatch({ selection: { anchor: 0, head: 1 } });
+
+      const handled = continueListItem(view as unknown as EditorView);
+
+      assert.equal(handled, true);
       assert.equal(view.state.doc.toString(), '');
       assert.equal(view.state.selection.main.head, 0);
     }
@@ -115,9 +146,21 @@ export const tests = [
     }
   },
   {
-    name: 'does not create a blank bullet after exiting a nested list item',
+    name: 'outdents a nested list marker on a second Enter',
     run() {
       const view = runContinueListItem('    - item');
+      const handled = continueListItem(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), '    - item\n- ');
+      assert.equal(view.state.selection.main.head, '    - item\n- '.length);
+    }
+  },
+  {
+    name: 'removes the root list marker on a third Enter',
+    run() {
+      const view = runContinueListItem('    - item');
+      continueListItem(view as unknown as EditorView);
       const handled = continueListItem(view as unknown as EditorView);
 
       assert.equal(handled, true);

@@ -2,32 +2,77 @@ import { EditorView, keymap } from '@codemirror/view';
 
 const TAB_SPACES = '    ';
 const listLinePattern = /^(\s*)(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)/;
-const emptyTaskLinePattern = /^(\s*)([-*+])\s+\[[ xX]\]\s*$/;
-const emptyBulletLinePattern = /^(\s*)([-*+])\s*$/;
-const emptyNumberedLinePattern = /^(\s*)\d+[.)]\s*$/;
+const invisibleCaretTextPattern = /[\u200b\u200c\u200d\ufeff]/g;
+const emptyTaskLinePattern = /^(\s*)([-*+])\s+\[([ xX])\][\s\u200b\u200c\u200d\ufeff]*$/;
+const emptyBulletLinePattern = /^(\s*)([-*+])[\s\u200b\u200c\u200d\ufeff]*$/;
+const emptyNumberedLinePattern = /^(\s*)(\d+)([.)])[\s\u200b\u200c\u200d\ufeff]*$/;
 
 function reduceIndent(indent: string): string {
   return indent.slice(0, Math.max(0, indent.length - TAB_SPACES.length));
 }
 
+function isBlankListContent(text: string): boolean {
+  return text.replace(invisibleCaretTextPattern, '').trim() === '';
+}
+
+function replacementForEmptyListLine(text: string): string | null {
+  const taskMatch = emptyTaskLinePattern.exec(text);
+  if (taskMatch) {
+    const [, indent, marker, checkboxState] = taskMatch;
+    const nextIndent = reduceIndent(indent);
+
+    return indent.length > 0 ? `${nextIndent}${marker} [${checkboxState}] ` : nextIndent;
+  }
+
+  const bulletMatch = emptyBulletLinePattern.exec(text);
+  if (bulletMatch) {
+    const [, indent, marker] = bulletMatch;
+    const nextIndent = reduceIndent(indent);
+
+    return indent.length > 0 ? `${nextIndent}${marker} ` : nextIndent;
+  }
+
+  const numberedMatch = emptyNumberedLinePattern.exec(text);
+  if (numberedMatch) {
+    const [, indent, numberText, marker] = numberedMatch;
+    const nextIndent = reduceIndent(indent);
+
+    return indent.length > 0 ? `${nextIndent}${numberText}${marker} ` : nextIndent;
+  }
+
+  return null;
+}
+
 export function continueListItem(view: EditorView): boolean {
   const selection = view.state.selection.main;
-  if (!selection.empty) return false;
-
   const line = view.state.doc.lineAt(selection.head);
+  const emptyListLineReplacement = replacementForEmptyListLine(line.text);
+
+  if (!selection.empty) {
+    const selectionStartLine = view.state.doc.lineAt(selection.from);
+    const selectionEndLine = view.state.doc.lineAt(selection.to);
+    const selectionStaysOnLine = selectionStartLine.number === selectionEndLine.number && selectionStartLine.number === line.number;
+
+    if (!selectionStaysOnLine || emptyListLineReplacement === null) {
+      return false;
+    }
+
+    view.dispatch({
+      changes: { from: line.from, to: line.to, insert: emptyListLineReplacement },
+      selection: { anchor: line.from + emptyListLineReplacement.length }
+    });
+    return true;
+  }
+
   const textBeforeCursor = view.state.sliceDoc(line.from, selection.head);
-  const emptyListLineMatch =
-    emptyTaskLinePattern.exec(line.text) ?? emptyBulletLinePattern.exec(line.text) ?? emptyNumberedLinePattern.exec(line.text);
   const taskMatch = /^(\s*)([-*+])\s+\[([ xX])\]\s*(.*)$/.exec(textBeforeCursor);
   const bulletMatch = /^(\s*)([-*+])\s+(.*)$/.exec(textBeforeCursor);
   const numberedMatch = /^(\s*)(\d+)([.)])\s+(.*)$/.exec(textBeforeCursor);
 
-  if (emptyListLineMatch) {
-    const nextIndent = reduceIndent(emptyListLineMatch[1]);
-
+  if (emptyListLineReplacement !== null) {
     view.dispatch({
-      changes: { from: line.from, to: line.to, insert: nextIndent },
-      selection: { anchor: line.from + nextIndent.length }
+      changes: { from: line.from, to: line.to, insert: emptyListLineReplacement },
+      selection: { anchor: line.from + emptyListLineReplacement.length }
     });
     return true;
   }
@@ -46,7 +91,7 @@ export function continueListItem(view: EditorView): boolean {
   if (taskMatch) {
     const [, indent, marker, , content] = taskMatch;
 
-    if (content.trim() === '') {
+    if (isBlankListContent(content)) {
       const nextIndent = reduceIndent(indent);
       view.dispatch({
         changes: { from: line.from, to: selection.head, insert: nextIndent },
@@ -66,7 +111,7 @@ export function continueListItem(view: EditorView): boolean {
   if (bulletMatch) {
     const [, indent, marker, content] = bulletMatch;
 
-    if (content.trim() === '') {
+    if (isBlankListContent(content)) {
       const nextIndent = reduceIndent(indent);
       view.dispatch({
         changes: { from: line.from, to: selection.head, insert: nextIndent },
@@ -86,7 +131,7 @@ export function continueListItem(view: EditorView): boolean {
   if (numberedMatch) {
     const [, indent, numberText, marker, content] = numberedMatch;
 
-    if (content.trim() === '') {
+    if (isBlankListContent(content)) {
       const nextIndent = reduceIndent(indent);
       view.dispatch({
         changes: { from: line.from, to: selection.head, insert: nextIndent },
