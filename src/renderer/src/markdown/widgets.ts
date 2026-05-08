@@ -120,17 +120,60 @@ export class TableWidget extends WidgetType {
     table.className = 'cm-live-table';
     table.dataset.markdown = this.markdownSource();
     table.tabIndex = 0;
+    const abortController = new AbortController();
 
     let dragStart: { row: number; column: number } | null = null;
+    let externalDragStart: { x: number; y: number } | null = null;
     let draggingCells = false;
 
     const getCellPosition = (cell: HTMLTableCellElement): { row: number; column: number } => ({
       row: Number(cell.dataset.row ?? 0),
       column: Number(cell.dataset.column ?? 0)
     });
-    const getCellFromPoint = (x: number, y: number): HTMLTableCellElement | null => {
-      const element = document.elementFromPoint(x, y);
-      return element?.closest<HTMLTableCellElement>('.cm-live-table th, .cm-live-table td') ?? null;
+    const getCellAtPoint = (x: number, y: number): HTMLTableCellElement | null => {
+      const cells = getAllCells();
+      if (cells.length === 0) return null;
+
+      const containingCell = cells.find((cell) => {
+        const rect = cell.getBoundingClientRect();
+        return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+      });
+      if (containingCell) return containingCell;
+
+      const tableRect = table.getBoundingClientRect();
+      if (x < tableRect.left || x > tableRect.right || y < tableRect.top || y > tableRect.bottom) return null;
+
+      return getNearestCellAtPoint(x, y);
+    };
+    const getNearestCellAtPoint = (x: number, y: number): HTMLTableCellElement | null => {
+      const cells = getAllCells();
+      if (cells.length === 0) return null;
+
+      return cells.reduce((nearest, cell) => {
+        const rect = cell.getBoundingClientRect();
+        const clampedX = Math.min(Math.max(x, rect.left), rect.right);
+        const clampedY = Math.min(Math.max(y, rect.top), rect.bottom);
+        const distance = Math.hypot(x - clampedX, y - clampedY);
+
+        return distance < nearest.distance ? { cell, distance } : nearest;
+      }, { cell: cells[0], distance: Number.POSITIVE_INFINITY }).cell;
+    };
+    const externalDragCrossesTable = (x: number, y: number): boolean => {
+      if (externalDragStart === null) return false;
+
+      const tableRect = table.getBoundingClientRect();
+      const startedAboveOrBelow = externalDragStart.y < tableRect.top || externalDragStart.y > tableRect.bottom;
+      const crossesTableX = Math.max(externalDragStart.x, x) >= tableRect.left && Math.min(externalDragStart.x, x) <= tableRect.right;
+      const crossesTableY = Math.max(externalDragStart.y, y) >= tableRect.top && Math.min(externalDragStart.y, y) <= tableRect.bottom;
+
+      return startedAboveOrBelow && crossesTableX && crossesTableY;
+    };
+    const clearDocumentSelection = (): void => {
+      window.getSelection()?.removeAllRanges();
+      const selection = view.state.selection.main;
+      if (!selection.empty) {
+        view.dispatch({ selection: { anchor: selection.head } });
+      }
     };
 
     const getSelectedCells = (): HTMLTableCellElement[] => Array.from(table.querySelectorAll<HTMLTableCellElement>('.is-selected'));
@@ -212,6 +255,66 @@ export class TableWidget extends WidgetType {
         view.focus();
       }
     };
+    const clearSelectionOnOutsidePointer = (event: MouseEvent): void => {
+      if (table.contains(event.target as Node | null)) {
+        externalDragStart = null;
+        return;
+      }
+
+      dragStart = null;
+      externalDragStart = { x: event.clientX, y: event.clientY };
+      draggingCells = false;
+      clearCellSelection();
+    };
+    const clearExternalDragStart = (): void => {
+      externalDragStart = null;
+    };
+    const nativeSelectionTouchesTable = (): boolean => {
+      if (externalDragStart === null) return false;
+
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
+
+      const tableRect = table.getBoundingClientRect();
+      for (let index = 0; index < selection.rangeCount; index += 1) {
+        for (const rect of Array.from(selection.getRangeAt(index).getClientRects())) {
+          const overlapsTable =
+            rect.right >= tableRect.left && rect.left <= tableRect.right && rect.bottom >= tableRect.top && rect.top <= tableRect.bottom;
+          if (overlapsTable) return true;
+        }
+      }
+
+      return false;
+    };
+    const convertNativeSelectionToTableSelection = (): void => {
+      if (!nativeSelectionTouchesTable()) return;
+
+      draggingCells = true;
+      clearDocumentSelection();
+      selectAllCells();
+    };
+    const extendCellDrag = (event: MouseEvent): void => {
+      if (event.buttons !== 1 && externalDragStart === null) return;
+
+      if (externalDragCrossesTable(event.clientX, event.clientY)) {
+        event.preventDefault();
+        draggingCells = true;
+        clearDocumentSelection();
+        selectAllCells();
+        return;
+      }
+
+      const cell = getCellAtPoint(event.clientX, event.clientY);
+      if (!cell || !table.contains(cell)) return;
+
+      event.preventDefault();
+      dragStart ??= getCellPosition(
+        externalDragStart === null ? cell : (getNearestCellAtPoint(externalDragStart.x, externalDragStart.y) ?? cell)
+      );
+      draggingCells = true;
+      clearDocumentSelection();
+      selectCellRange(dragStart, getCellPosition(cell));
+    };
 
     table.addEventListener('copy', (event) => {
       event.preventDefault();
@@ -220,27 +323,36 @@ export class TableWidget extends WidgetType {
     table.addEventListener('mousedown', (event) => {
       event.stopPropagation();
     });
+    table.addEventListener('pointerdown', (event) => {
+      event.stopPropagation();
+    });
     table.addEventListener('click', (event) => {
       event.stopPropagation();
     });
-    table.addEventListener('mousemove', (event) => {
-      if (event.buttons !== 1 || dragStart === null) return;
-
-      const cell = getCellFromPoint(event.clientX, event.clientY);
-      if (!cell || !table.contains(cell)) return;
-
-      event.preventDefault();
-      draggingCells = true;
-      selectCellRange(dragStart, getCellPosition(cell));
-    });
+    table.addEventListener('pointermove', extendCellDrag);
+    table.addEventListener('mousemove', extendCellDrag);
     table.addEventListener('mouseup', () => {
       dragStart = null;
       if (draggingCells) {
+        clearDocumentSelection();
         table.focus();
       }
       draggingCells = false;
     });
+    table.addEventListener('focusout', (event) => {
+      if (table.contains(event.relatedTarget as Node | null)) return;
+
+      clearCellSelection();
+    });
     table.addEventListener('keydown', handleKeydown);
+    document.addEventListener('pointerdown', clearSelectionOnOutsidePointer, { capture: true, signal: abortController.signal });
+    document.addEventListener('pointermove', extendCellDrag, { capture: true, signal: abortController.signal });
+    document.addEventListener('pointerup', clearExternalDragStart, { capture: true, signal: abortController.signal });
+    document.addEventListener('mousedown', clearSelectionOnOutsidePointer, { capture: true, signal: abortController.signal });
+    document.addEventListener('mousemove', extendCellDrag, { capture: true, signal: abortController.signal });
+    document.addEventListener('mouseup', clearExternalDragStart, { capture: true, signal: abortController.signal });
+    document.addEventListener('selectionchange', convertNativeSelectionToTableSelection, { signal: abortController.signal });
+    table.addEventListener('lithe-table-destroy', () => abortController.abort(), { once: true });
 
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
@@ -277,6 +389,7 @@ export class TableWidget extends WidgetType {
       cell.addEventListener('mouseup', () => {
         dragStart = null;
         if (draggingCells) {
+          clearDocumentSelection();
           table.focus();
         }
         draggingCells = false;
@@ -302,6 +415,10 @@ export class TableWidget extends WidgetType {
     }
 
     return table;
+  }
+
+  destroy(dom: HTMLElement): void {
+    dom.dispatchEvent(new CustomEvent('lithe-table-destroy'));
   }
 
   ignoreEvent(): boolean {

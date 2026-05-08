@@ -8,7 +8,7 @@ import {
   getPreviewCodeLineDecoration,
   isActiveFencedCodeBlock
 } from './fencedCode';
-import { bulletMarker, headingClasses, hiddenSyntax, liveCheckedTask } from './decorations';
+import { bulletMarker, headingClasses, hiddenSyntax, hiddenTableSourceLine, liveCheckedTask, tablePreviewLine } from './decorations';
 import { CheckboxWidget, CodeLanguageWidget, HorizontalRuleWidget, NumberedListWidget, TableWidget } from './widgets';
 import { lineContainsSelection, lineIntersectsSelection, rangeContainsSelection } from './selection';
 import { collectMarkdownTables, getMarkdownTableForLine, type MarkdownTable } from './table';
@@ -112,12 +112,14 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
 
       if (table) {
         if (line.number === table.startLine) {
+          pending.push({ from: line.from, to: line.from, decoration: tablePreviewLine });
           pending.push({
             from: line.from,
             to: line.to,
             decoration: Decoration.replace({ widget: new TableWidget(table) })
           });
         } else {
+          pending.push({ from: line.from, to: line.from, decoration: hiddenTableSourceLine });
           pending.push({ from: line.from, to: line.to, decoration: hiddenSyntax });
         }
 
