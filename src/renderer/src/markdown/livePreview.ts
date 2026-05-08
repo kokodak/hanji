@@ -109,14 +109,16 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
       if (table) {
         const activeTable = lineRangeIntersectsSelection(view, table.startLine, table.endLine);
 
-        if (!activeTable && line.number === table.startLine) {
-          const startLine = view.state.doc.line(table.startLine);
-          const endLine = view.state.doc.line(table.endLine);
-          pending.push({
-            from: startLine.from,
-            to: endLine.to,
-            decoration: Decoration.replace({ widget: new TableWidget(table.headers, table.rows) })
-          });
+        if (!activeTable) {
+          if (line.number === table.startLine) {
+            pending.push({
+              from: line.from,
+              to: line.to,
+              decoration: Decoration.replace({ widget: new TableWidget(table.headers, table.rows) })
+            });
+          } else {
+            pending.push({ from: line.from, to: line.to, decoration: hiddenSyntax });
+          }
         }
 
         pos = line.to + 1;
