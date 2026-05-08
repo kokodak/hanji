@@ -2,6 +2,7 @@ import { Decoration } from '@codemirror/view';
 import { BulletWidget } from './widgets';
 
 export const hiddenSyntax = Decoration.mark({ class: 'cm-markdown-syntax-hidden' });
+export const hiddenHeadingSyntax = Decoration.replace({});
 export const liveStrong = Decoration.mark({ class: 'cm-live-strong' });
 export const liveEmphasis = Decoration.mark({ class: 'cm-live-emphasis' });
 export const liveStrikethrough = Decoration.mark({ class: 'cm-live-strikethrough' });

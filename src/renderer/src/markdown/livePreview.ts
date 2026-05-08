@@ -8,7 +8,15 @@ import {
   getPreviewCodeLineDecoration,
   isActiveFencedCodeBlock
 } from './fencedCode';
-import { bulletMarker, headingClasses, hiddenSyntax, hiddenTableSourceLine, liveCheckedTask, tablePreviewLine } from './decorations';
+import {
+  bulletMarker,
+  headingClasses,
+  hiddenHeadingSyntax,
+  hiddenSyntax,
+  hiddenTableSourceLine,
+  liveCheckedTask,
+  tablePreviewLine
+} from './decorations';
 import { CheckboxWidget, CodeLanguageWidget, HorizontalRuleWidget, NumberedListWidget, TableWidget } from './widgets';
 import { lineContainsSelection, lineIntersectsSelection, rangeContainsSelection } from './selection';
 import { collectMarkdownTables, getMarkdownTableForLine, type MarkdownTable } from './table';
@@ -136,7 +144,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
         });
 
         if (!isInteractive) {
-          pending.push({ from: line.from, to: line.from + headingMatch[0].length, decoration: hiddenSyntax });
+          pending.push({ from: line.from, to: line.from + headingMatch[0].length, decoration: hiddenHeadingSyntax });
         }
       }
 
