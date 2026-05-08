@@ -22,6 +22,44 @@ export function normalizePastedText(text: string): string {
   return text.replace(/\r\n?/g, '\n');
 }
 
+const emptyListMarkerLinePattern =
+  /^(\s*)(?:[-*+]\s+(?:\[[ xX]\]\s*)?|\d+[.)]\s*)[\u200b\u200c\u200d\ufeff]*$/;
+const pastedListItemPattern = /^\s*(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)/;
+
+export interface PasteReplacement {
+  from: number;
+  to: number;
+  insert: string;
+}
+
+export function pastedTextStartsWithListItem(text: string): boolean {
+  return pastedListItemPattern.test(text);
+}
+
+export function lineIsEmptyListMarker(text: string): boolean {
+  return emptyListMarkerLinePattern.test(text);
+}
+
+export function getPlainTextPasteReplacement(view: EditorView, from: number, to: number, text: string): PasteReplacement {
+  const insert = normalizePastedText(text);
+  const selection = view.state.selection.main;
+
+  if (selection.empty && from === to && pastedTextStartsWithListItem(insert)) {
+    const line = view.state.doc.lineAt(from);
+    const lineText = view.state.sliceDoc(line.from, line.to);
+
+    if (lineIsEmptyListMarker(lineText)) {
+      return {
+        from: line.from,
+        to: line.to,
+        insert
+      };
+    }
+  }
+
+  return { from, to, insert };
+}
+
 function positionIsInsideFencedCodeBlock(view: EditorView, position: number): boolean {
   const currentLine = view.state.doc.lineAt(position);
   let insideFence = false;
@@ -148,7 +186,14 @@ export const handlePlainTextPaste = EditorView.domEventHandlers({
     if (!text) return false;
 
     event.preventDefault();
-    view.dispatch(view.state.replaceSelection(normalizePastedText(text)));
+    const selection = view.state.selection.main;
+    const replacement = getPlainTextPasteReplacement(view, selection.from, selection.to, text);
+
+    view.dispatch({
+      changes: replacement,
+      selection: { anchor: replacement.from + replacement.insert.length },
+      userEvent: 'input.paste'
+    });
     return true;
   }
 });
