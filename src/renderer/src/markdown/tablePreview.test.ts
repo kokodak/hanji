@@ -41,6 +41,16 @@ export const tests = [
       assert.match(widgetsSource, /getBoundingClientRect/);
       assert.match(widgetsSource, /externalDragStart/);
       assert.match(widgetsSource, /externalDragCrossesTable/);
+      assert.match(widgetsSource, /CELL_DRAG_THRESHOLD_PX = 6/);
+      assert.match(widgetsSource, /pointerMovedBeyondThreshold/);
+      assert.match(widgetsSource, /cellPositionsMatch/);
+      assert.match(widgetsSource, /dragEndsInStartCell/);
+      assert.match(widgetsSource, /cancelCellDragSelection/);
+      assert.match(widgetsSource, /selectedCellClasses/);
+      assert.match(widgetsSource, /classList\.remove\('is-cell-dragging'\)/);
+      assert.match(widgetsSource, /classList\.toggle\('is-cell-dragging', draggingCells\)/);
+      assert.match(widgetsSource, /table\.classList\.remove\('is-cell-dragging'\);\n\s+draggingCells = false;/);
+      assert.match(widgetsSource, /activeDragStart = externalDragStart \?\? dragOrigin/);
       assert.match(widgetsSource, /crossesTableX/);
       assert.match(widgetsSource, /crossesTableY/);
       assert.match(widgetsSource, /nativeSelectionTouchesTable/);
@@ -48,9 +58,15 @@ export const tests = [
       assert.match(widgetsSource, /event\.buttons !== 1 && externalDragStart === null/);
       assert.match(widgetsSource, /selectAllCells\(\);/);
       assert.match(widgetsSource, /getNearestCellAtPoint\(externalDragStart\.x, externalDragStart\.y\)/);
+      assert.match(widgetsSource, /dragOrigin = \{ x: event\.clientX, y: event\.clientY \}/);
+      assert.match(widgetsSource, /externalDragStart === null && cellPositionsMatch\(dragStart, cellPosition\)/);
+      assert.match(widgetsSource, /clearCellSelection\(\);\n\s+draggingCells = false;\n\s+return;/);
       assert.match(widgetsSource, /dragStart \?\?= getCellPosition\(/);
       assert.match(widgetsSource, /window\.getSelection\(\)\?\.removeAllRanges\(\)/);
       assert.match(widgetsSource, /classList\.add\('is-selected'\)/);
+      assert.match(widgetsSource, /updateSelectionOutline/);
+      assert.match(widgetsSource, /--selection-outline-left/);
+      assert.match(widgetsSource, /--selection-outline-height/);
       assert.match(widgetsSource, /deleteDocumentTable/);
       assert.match(widgetsSource, /event\.key === 'Backspace' \|\| event\.key === 'Delete'/);
       assert.match(widgetsSource, /event\.key\.toLowerCase\(\) === 'a'/);
@@ -59,6 +75,34 @@ export const tests = [
       assert.match(widgetsSource, /document\.addEventListener\('mousemove', extendCellDrag, \{ capture: true/);
       assert.match(widgetsSource, /document\.addEventListener\('selectionchange', convertNativeSelectionToTableSelection/);
       assert.match(widgetsSource, /abortController\.abort\(\)/);
+    }
+  },
+  {
+    name: 'shows selected table cells with divider color only',
+    run() {
+      const tableSelectionRule = getRuleBody('#editor .cm-live-table.has-cell-selection');
+      const tableRule = getRuleBody('#editor .cm-live-table');
+      const selectionOutlineRule = getRuleBody('#editor .cm-live-table.has-cell-selection::after');
+      const focusedHeaderRule = getRuleBody('#editor .cm-live-table.has-cell-selection th[contenteditable]:focus');
+      const focusedCellRule = getRuleBody('#editor .cm-live-table.has-cell-selection td[contenteditable]:focus');
+
+      assert.match(tableRule, /position:\s*relative;/);
+      assert.match(tableSelectionRule, /outline:\s*0;/);
+      assert.match(focusedHeaderRule, /outline:\s*0;/);
+      assert.match(focusedCellRule, /outline:\s*0;/);
+      assert.doesNotMatch(styles, /#editor \.cm-live-table \.is-selected\s*\{/);
+      assert.match(selectionOutlineRule, /border:\s*2px solid #6fa09f;/);
+      assert.match(selectionOutlineRule, /pointer-events:\s*none;/);
+      assert.match(selectionOutlineRule, /top:\s*var\(--selection-outline-top\);/);
+      assert.match(selectionOutlineRule, /left:\s*var\(--selection-outline-left\);/);
+    }
+  },
+  {
+    name: 'hides native table text selection while cell dragging',
+    run() {
+      const rule = getRuleBody('#editor .cm-live-table.is-cell-dragging ::selection');
+
+      assert.match(rule, /background:\s*transparent;/);
     }
   },
   {
