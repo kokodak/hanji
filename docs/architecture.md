@@ -10,6 +10,7 @@ Lithe starts as a Tauri application using Vite, TypeScript, and a thin Rust app 
 - Editor core: CodeMirror 6 provides the text editing engine, document state, transactions, keymaps, search, and Markdown syntax support.
 - Live preview: lightweight CodeMirror decorations hide Markdown syntax on inactive lines and reveal source syntax on the cursor or hovered line.
 - Code highlighting: fenced Markdown code blocks use CodeMirror's broad language registry and warm language parsers during idle time so many languages are available without blocking initial editor paint.
+- Table editing: Markdown tables should graduate from live preview decorations to a dedicated editable block surface. See [Table Block Editor](./table-block-editor.md).
 
 ## Local-First Model
 

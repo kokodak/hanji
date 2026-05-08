@@ -44,14 +44,17 @@ export const tests = [
       const checkboxBoxRule = getRuleBody('#editor .cm-live-checkbox-box');
       const numberedRule = getRuleBody('#editor .cm-live-numbered-marker');
 
+      assert.match(bulletRule, /height:\s*1lh;/);
       assert.match(bulletRule, /line-height:\s*inherit;/);
-      assert.match(bulletRule, /vertical-align:\s*baseline;/);
-      assert.match(checkboxRule, /height:\s*1em;/);
-      assert.match(checkboxRule, /vertical-align:\s*-0\.1em;/);
+      assert.match(bulletRule, /vertical-align:\s*top;/);
+      assert.match(checkboxRule, /height:\s*1lh;/);
+      assert.match(checkboxRule, /line-height:\s*inherit;/);
+      assert.match(checkboxRule, /vertical-align:\s*top;/);
       assert.match(checkboxBoxRule, /height:\s*1em;/);
-      assert.match(checkboxBoxRule, /transform:\s*translateY\(0\.08em\);/);
+      assert.doesNotMatch(checkboxBoxRule, /transform:/);
+      assert.match(numberedRule, /height:\s*1lh;/);
       assert.match(numberedRule, /line-height:\s*inherit;/);
-      assert.match(numberedRule, /vertical-align:\s*baseline;/);
+      assert.match(numberedRule, /vertical-align:\s*top;/);
     }
   }
 ];
