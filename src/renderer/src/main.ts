@@ -8,6 +8,7 @@ import {
   loadSpace,
   openSpace,
   readNote,
+  rememberActiveNote,
   writeNote,
   type NoteEntry,
   type SpaceSnapshot
@@ -27,6 +28,15 @@ let activeNote: NoteEntry | undefined;
 let editorView: EditorView | undefined;
 let loadingDocument = false;
 let contextMenuNote: NoteEntry | undefined;
+let snapshotRequestId = 0;
+let saveChain = Promise.resolve();
+
+function saveNoteContent(notePath: string, text: string): Promise<void> {
+  const write = saveChain.then(() => writeNote(notePath, text));
+  saveChain = write.catch(() => undefined);
+
+  return write;
+}
 
 function scheduleSave(text: string): void {
   if (loadingDocument || !activeNote) return;
@@ -34,8 +44,17 @@ function scheduleSave(text: string): void {
   window.clearTimeout(saveTimer);
   const notePath = activeNote.path;
   saveTimer = window.setTimeout(() => {
-    void writeNote(notePath, text);
+    saveTimer = undefined;
+    void saveNoteContent(notePath, text);
   }, 160);
+}
+
+async function flushPendingSave(): Promise<void> {
+  if (loadingDocument || !activeNote || !editorView) return;
+
+  window.clearTimeout(saveTimer);
+  saveTimer = undefined;
+  await saveNoteContent(activeNote.path, editorView.state.doc.toString());
 }
 
 function updateCursorPosition(view: EditorView): void {
@@ -160,8 +179,19 @@ function applySnapshot(snapshot: SpaceSnapshot): void {
   }
 }
 
+function applyLatestSnapshot(requestId: number, snapshot: SpaceSnapshot): void {
+  if (requestId !== snapshotRequestId) return;
+
+  void rememberActiveNote(snapshot.active_note.path);
+  applySnapshot(snapshot);
+}
+
 async function selectNote(notePath: string): Promise<void> {
-  applySnapshot(await readNote(notePath));
+  if (notePath === activeNote?.path) return;
+
+  const requestId = ++snapshotRequestId;
+  await flushPendingSave();
+  applyLatestSnapshot(requestId, await readNote(notePath));
 }
 
 async function startApp(): Promise<void> {
@@ -184,7 +214,8 @@ async function startApp(): Promise<void> {
   shell.newNoteButton.addEventListener('click', () => {
     const noteName = shell.newNoteName.value.trim() || 'Untitled';
     shell.newNoteName.value = '';
-    void createNote(noteName).then(applySnapshot);
+    const requestId = ++snapshotRequestId;
+    void flushPendingSave().then(() => createNote(noteName).then((snapshot) => applyLatestSnapshot(requestId, snapshot)));
   });
 
   shell.newNoteName.addEventListener('keydown', (event) => {
@@ -199,7 +230,8 @@ async function startApp(): Promise<void> {
 
     const notePath = contextMenuNote.path;
     hideNoteMenu();
-    void deleteNote(notePath).then(applySnapshot);
+    const requestId = ++snapshotRequestId;
+    void flushPendingSave().then(() => deleteNote(notePath).then((snapshot) => applyLatestSnapshot(requestId, snapshot)));
   });
 
   window.addEventListener('click', (event) => {
@@ -223,7 +255,9 @@ async function startApp(): Promise<void> {
 
       if (typeof selectedPath !== 'string') return;
 
-      await openSpace(selectedPath).then(applySnapshot);
+      const requestId = ++snapshotRequestId;
+      await flushPendingSave();
+      await openSpace(selectedPath).then((snapshot) => applyLatestSnapshot(requestId, snapshot));
     })();
   });
 

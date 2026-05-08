@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createNote, deleteNote, loadSpace, readNote, writeNote } from './spaceStorage';
+import { createNote, deleteNote, loadSpace, readNote, rememberActiveNote, writeNote } from './spaceStorage';
 
 class LocalStorageStub {
   private values = new Map<string, string>();
@@ -54,6 +54,51 @@ export const tests = [
 
       assert.equal(created.active_note.path, 'QA-Cursor-Check.md');
       assert.equal(loaded.content, '# Cursor\n\nBackspace check');
+    }
+  },
+  {
+    name: 'does not change the active browser QA note when saving another note',
+    async run() {
+      resetWebSpace();
+
+      const first = await createNote('First');
+      const second = await createNote('Second');
+
+      await writeNote(first.active_note.path, 'late save');
+      const loaded = await loadSpace();
+
+      assert.equal(second.active_note.path, 'Second.md');
+      assert.equal(loaded.active_note.path, 'Second.md');
+      assert.equal((await readNote(first.active_note.path)).content, 'late save');
+    }
+  },
+  {
+    name: 'does not change the active browser QA note when reading another note',
+    async run() {
+      resetWebSpace();
+
+      const first = await createNote('First');
+      const second = await createNote('Second');
+
+      await readNote(first.active_note.path);
+      const loaded = await loadSpace();
+
+      assert.equal(second.active_note.path, 'Second.md');
+      assert.equal(loaded.active_note.path, 'Second.md');
+    }
+  },
+  {
+    name: 'remembers the active browser QA note explicitly',
+    async run() {
+      resetWebSpace();
+
+      const first = await createNote('First');
+      await createNote('Second');
+
+      await rememberActiveNote(first.active_note.path);
+      const loaded = await loadSpace();
+
+      assert.equal(loaded.active_note.path, 'First.md');
     }
   },
   {

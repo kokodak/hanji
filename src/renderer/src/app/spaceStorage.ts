@@ -145,19 +145,27 @@ export async function createNote(name: string): Promise<SpaceSnapshot> {
 export async function readNote(path: string): Promise<SpaceSnapshot> {
   if (!isTauriRuntime()) {
     const data = readWebSpaceData();
-    data.activePath = path;
-    writeWebSpaceData(data);
     return snapshotFromWebData(data, path);
   }
 
   return await invoke<SpaceSnapshot>('read_note', { path });
 }
 
+export async function rememberActiveNote(path: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    const data = readWebSpaceData();
+    if (data.notes[path] === undefined) return;
+
+    data.activePath = path;
+    writeWebSpaceData(data);
+    return;
+  }
+}
+
 export async function writeNote(path: string, content: string): Promise<void> {
   if (!isTauriRuntime()) {
     const data = readWebSpaceData();
     data.notes[path] = content;
-    data.activePath = path;
     writeWebSpaceData(data);
     return;
   }
