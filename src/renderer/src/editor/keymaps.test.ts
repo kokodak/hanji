@@ -117,6 +117,49 @@ export const tests = [
     }
   },
   {
+    name: 'does not remove task text when Enter starts after the marker',
+    run() {
+      const view = new TestEditorView('- [ ] abc', '- [ ] '.length);
+      const handled = continueListItem(view as unknown as EditorView);
+
+      assert.equal(handled, false);
+      assert.equal(view.state.doc.toString(), '- [ ] abc');
+      assert.equal(view.state.selection.main.head, '- [ ] '.length);
+    }
+  },
+  {
+    name: 'keeps text typed after exiting an empty task marker',
+    run() {
+      const view = runContinueListItem('- [ ] ');
+      view.dispatch({
+        changes: { from: view.state.selection.main.head, insert: 'abc' },
+        selection: { anchor: 'abc'.length }
+      });
+
+      const handled = continueListItem(view as unknown as EditorView);
+
+      assert.equal(handled, false);
+      assert.equal(view.state.doc.toString(), 'abc');
+    }
+  },
+  {
+    name: 'inserts a plain newline after text typed below a task list',
+    run() {
+      const view = runContinueListItem('- [ ] qwe');
+      continueListItem(view as unknown as EditorView);
+      view.dispatch({
+        changes: { from: view.state.selection.main.head, insert: 'qwe' },
+        selection: { anchor: '- [ ] qwe\nqwe'.length }
+      });
+
+      const handled = continueListItem(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), '- [ ] qwe\nqwe\n');
+      assert.equal(view.state.selection.main.head, '- [ ] qwe\nqwe\n'.length);
+    }
+  },
+  {
     name: 'ignores non-list lines',
     run() {
       const view = new TestEditorView('plain text');

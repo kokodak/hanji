@@ -43,6 +43,21 @@ function replacementForEmptyListLine(text: string): string | null {
   return null;
 }
 
+function lineStartsListItem(text: string): boolean {
+  return listLinePattern.test(text);
+}
+
+function previousNonEmptyLineStartsListItem(view: EditorView, lineNumber: number): boolean {
+  for (let previousLineNumber = lineNumber - 1; previousLineNumber >= 1; previousLineNumber -= 1) {
+    const previousLine = view.state.doc.line(previousLineNumber);
+    if (previousLine.text.trim() === '') continue;
+
+    return lineStartsListItem(previousLine.text);
+  }
+
+  return false;
+}
+
 export function continueListItem(view: EditorView): boolean {
   const selection = view.state.selection.main;
   const line = view.state.doc.lineAt(selection.head);
@@ -65,6 +80,7 @@ export function continueListItem(view: EditorView): boolean {
   }
 
   const textBeforeCursor = view.state.sliceDoc(line.from, selection.head);
+  const textAfterCursor = view.state.sliceDoc(selection.head, line.to);
   const taskMatch = /^(\s*)([-*+])\s+\[([ xX])\]\s*(.*)$/.exec(textBeforeCursor);
   const bulletMatch = /^(\s*)([-*+])\s+(.*)$/.exec(textBeforeCursor);
   const numberedMatch = /^(\s*)(\d+)([.)])\s+(.*)$/.exec(textBeforeCursor);
@@ -92,6 +108,8 @@ export function continueListItem(view: EditorView): boolean {
     const [, indent, marker, , content] = taskMatch;
 
     if (isBlankListContent(content)) {
+      if (!isBlankListContent(textAfterCursor)) return false;
+
       const nextIndent = reduceIndent(indent);
       view.dispatch({
         changes: { from: line.from, to: selection.head, insert: nextIndent },
@@ -112,6 +130,8 @@ export function continueListItem(view: EditorView): boolean {
     const [, indent, marker, content] = bulletMatch;
 
     if (isBlankListContent(content)) {
+      if (!isBlankListContent(textAfterCursor)) return false;
+
       const nextIndent = reduceIndent(indent);
       view.dispatch({
         changes: { from: line.from, to: selection.head, insert: nextIndent },
@@ -132,6 +152,8 @@ export function continueListItem(view: EditorView): boolean {
     const [, indent, numberText, marker, content] = numberedMatch;
 
     if (isBlankListContent(content)) {
+      if (!isBlankListContent(textAfterCursor)) return false;
+
       const nextIndent = reduceIndent(indent);
       view.dispatch({
         changes: { from: line.from, to: selection.head, insert: nextIndent },
@@ -145,6 +167,14 @@ export function continueListItem(view: EditorView): boolean {
     view.dispatch({
       changes: { from: selection.head, insert },
       selection: { anchor: selection.head + insert.length }
+    });
+    return true;
+  }
+
+  if (line.text.trim() !== '' && previousNonEmptyLineStartsListItem(view, line.number)) {
+    view.dispatch({
+      changes: { from: selection.head, insert: '\n' },
+      selection: { anchor: selection.head + 1 }
     });
     return true;
   }
