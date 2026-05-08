@@ -28,7 +28,12 @@ export const tests = [
     run() {
       assert.match(getRuleBody('.workspace'), /overflow:\s*hidden;/);
       assert.match(getRuleBody('.editor-layout'), /overflow:\s*hidden;/);
+      assert.match(getRuleBody('.editor-layout'), /height:\s*100%;/);
+      assert.match(getRuleBody('#editor'), /overflow:\s*hidden;/);
+      assert.match(getRuleBody('#editor .cm-editor'), /min-height:\s*0;/);
       assert.match(getRuleBody('.note-list'), /overscroll-behavior:\s*contain;/);
+      assert.match(getRuleBody('#editor .cm-scroller'), /height:\s*100%;/);
+      assert.match(getRuleBody('#editor .cm-scroller'), /max-height:\s*100%;/);
       assert.match(getRuleBody('#editor .cm-scroller'), /overflow:\s*auto;/);
       assert.match(getRuleBody('#editor .cm-scroller'), /overscroll-behavior:\s*contain;/);
     }

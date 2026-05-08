@@ -207,6 +207,7 @@ input:focus {
   display: grid;
   grid-template-rows: 58px minmax(0, 1fr);
   min-width: 0;
+  height: 100vh;
   min-height: 0;
   overflow: hidden;
 }
@@ -243,6 +244,7 @@ input:focus {
 .editor-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  height: 100%;
   min-height: 0;
   overflow: hidden;
 }
@@ -251,11 +253,14 @@ input:focus {
   width: 100%;
   min-width: 0;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
   background: #fffefa;
 }
 
 #editor .cm-editor {
   height: 100%;
+  min-height: 0;
   color: #25211b;
   font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
   font-size: 15px;
@@ -264,18 +269,24 @@ input:focus {
 }
 
 #editor .cm-scroller {
+  height: 100%;
+  max-height: 100%;
   overflow: auto;
   overscroll-behavior: contain;
+  padding: 34px 38px;
   font-family: inherit;
 }
 
 #editor .cm-content {
-  min-height: 100%;
-  padding: 34px 38px;
+  min-height: calc(100% - 68px);
+  padding: 0;
   caret-color: transparent;
 }
 
 #editor .cm-line {
+  width: fit-content;
+  max-width: 100%;
+  min-width: 1ch;
   padding: 0;
 }
 
@@ -353,6 +364,9 @@ input:focus {
     sans-serif;
   line-height: inherit;
   text-align: left;
+  user-select: none;
+  -webkit-user-drag: none;
+  -webkit-user-select: none;
   vertical-align: top;
 }
 
@@ -441,6 +455,9 @@ input:focus {
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
   line-height: inherit;
+  user-select: none;
+  -webkit-user-drag: none;
+  -webkit-user-select: none;
   vertical-align: top;
 }
 

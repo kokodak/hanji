@@ -17,7 +17,14 @@ export class BulletWidget extends WidgetType {
     const bullet = document.createElement('span');
     bullet.className = 'cm-live-bullet';
     bullet.textContent = '•';
+    bullet.draggable = false;
+    bullet.contentEditable = 'false';
+    bullet.setAttribute('aria-hidden', 'true');
     return bullet;
+  }
+
+  ignoreEvent(): boolean {
+    return true;
   }
 }
 
@@ -34,7 +41,14 @@ export class NumberedListWidget extends WidgetType {
     const marker = document.createElement('span');
     marker.className = 'cm-live-numbered-marker';
     marker.textContent = this.marker;
+    marker.draggable = false;
+    marker.contentEditable = 'false';
+    marker.setAttribute('aria-hidden', 'true');
     return marker;
+  }
+
+  ignoreEvent(): boolean {
+    return true;
   }
 }
 

@@ -28,12 +28,39 @@ export const tests = [
     }
   },
   {
+    name: 'keeps visual editor margins outside the editable selection surface',
+    run() {
+      const scrollerRule = getRuleBody('#editor .cm-scroller');
+      const contentRule = getRuleBody('#editor .cm-content');
+      const lineRule = getRuleBody('#editor .cm-line');
+
+      assert.match(scrollerRule, /padding:\s*34px 38px;/);
+      assert.match(contentRule, /padding:\s*0;/);
+      assert.match(contentRule, /min-height:\s*calc\(100% - 68px\);/);
+      assert.match(lineRule, /width:\s*fit-content;/);
+      assert.match(lineRule, /max-width:\s*100%;/);
+      assert.match(lineRule, /min-width:\s*1ch;/);
+    }
+  },
+  {
     name: 'preserves hidden Markdown syntax layout space',
     run() {
       const syntaxRule = getRuleBody('#editor .cm-markdown-syntax-hidden');
 
       assert.doesNotMatch(syntaxRule, /display:\s*none;/);
       assert.match(syntaxRule, /visibility:\s*hidden;/);
+    }
+  },
+  {
+    name: 'does not let list marker preview widgets start browser drag operations',
+    run() {
+      const bulletRule = getRuleBody('#editor .cm-live-bullet');
+      const numberedRule = getRuleBody('#editor .cm-live-numbered-marker');
+
+      assert.match(bulletRule, /user-select:\s*none;/);
+      assert.match(bulletRule, /-webkit-user-drag:\s*none;/);
+      assert.match(numberedRule, /user-select:\s*none;/);
+      assert.match(numberedRule, /-webkit-user-drag:\s*none;/);
     }
   },
   {
