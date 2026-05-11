@@ -229,8 +229,11 @@ export const tests = [
       const previewCellBorderRule = getRuleBody('#editor .cm-live-table .is-structure-preview-cell::after');
       const previewHeaderRule = getRuleBody('#editor .cm-live-table .is-structure-preview-header-cell');
       const previewBodyRule = getRuleBody('#editor .cm-live-table .is-structure-preview-body-cell');
-      const draggingPreviewWeightRule = getRuleBody(
-        '#editor .cm-live-table-frame.is-structure-dragging .cm-live-table .is-structure-preview-header-cell,\n#editor .cm-live-table-frame.is-structure-dragging .cm-live-table .is-structure-preview-body-cell'
+      const draggingHeaderWeightRule = getRuleBody(
+        '#editor .cm-live-table-frame.is-structure-dragging .cm-live-table th.is-structure-preview-header-cell,\n#editor .cm-live-table-frame.is-structure-dragging .cm-live-table th.is-structure-preview-body-cell'
+      );
+      const draggingBodyWeightRule = getRuleBody(
+        '#editor .cm-live-table-frame.is-structure-dragging .cm-live-table td.is-structure-preview-header-cell,\n#editor .cm-live-table-frame.is-structure-dragging .cm-live-table td.is-structure-preview-body-cell'
       );
       const frameSelectionRule = getRuleBody('#editor .cm-live-table-frame.has-cell-selection::after');
       const sourceHandleRule = getRuleBody('#editor .cm-live-table-handle.is-drag-source');
@@ -301,7 +304,8 @@ export const tests = [
       assert.match(frameSelectionRule, /z-index:\s*4;/);
       assert.match(previewHeaderRule, /font-weight:\s*700;/);
       assert.match(previewBodyRule, /font-weight:\s*400;/);
-      assert.match(draggingPreviewWeightRule, /font-weight:\s*inherit;/);
+      assert.match(draggingHeaderWeightRule, /font-weight:\s*700;/);
+      assert.match(draggingBodyWeightRule, /font-weight:\s*400;/);
       assert.match(styles, /height:\s*18px;/);
       assert.match(styles, /width:\s*18px;/);
       assert.match(styles, /min-height:\s*18px;/);

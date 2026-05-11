@@ -656,9 +656,14 @@ input:focus {
   font-weight: 400;
 }
 
-#editor .cm-live-table-frame.is-structure-dragging .cm-live-table .is-structure-preview-header-cell,
-#editor .cm-live-table-frame.is-structure-dragging .cm-live-table .is-structure-preview-body-cell {
-  font-weight: inherit;
+#editor .cm-live-table-frame.is-structure-dragging .cm-live-table th.is-structure-preview-header-cell,
+#editor .cm-live-table-frame.is-structure-dragging .cm-live-table th.is-structure-preview-body-cell {
+  font-weight: 700;
+}
+
+#editor .cm-live-table-frame.is-structure-dragging .cm-live-table td.is-structure-preview-header-cell,
+#editor .cm-live-table-frame.is-structure-dragging .cm-live-table td.is-structure-preview-body-cell {
+  font-weight: 400;
 }
 
 #editor .cm-live-table-add {
