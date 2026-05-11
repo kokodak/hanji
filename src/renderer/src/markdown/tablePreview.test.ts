@@ -121,9 +121,9 @@ export const tests = [
     name: 'shows selected table cells with divider color only',
     run() {
       const tableSelectionRule = getRuleBody('#editor .cm-live-table.has-cell-selection');
+      const frameSelectionRule = getRuleBody('#editor .cm-live-table-frame.has-cell-selection::after');
       const tableRule = getRuleBody('#editor .cm-live-table');
       const tableCellRule = getRuleBody('#editor .cm-live-table th,\n#editor .cm-live-table td');
-      const selectionOutlineRule = getRuleBody('#editor .cm-live-table.has-cell-selection::after');
       const focusedHeaderRule = getRuleBody('#editor .cm-live-table.has-cell-selection th[contenteditable]:focus');
       const focusedCellRule = getRuleBody('#editor .cm-live-table.has-cell-selection td[contenteditable]:focus');
 
@@ -132,13 +132,14 @@ export const tests = [
       assert.match(focusedHeaderRule, /outline:\s*0;/);
       assert.match(focusedCellRule, /outline:\s*0;/);
       assert.doesNotMatch(styles, /#editor \.cm-live-table \.is-selected\s*\{/);
-      assert.match(selectionOutlineRule, /border:\s*2px solid #6fa09f;/);
-      assert.match(selectionOutlineRule, /pointer-events:\s*none;/);
-      assert.match(selectionOutlineRule, /top:\s*var\(--selection-outline-top\);/);
-      assert.match(selectionOutlineRule, /left:\s*var\(--selection-outline-left\);/);
+      assert.match(frameSelectionRule, /border:\s*2px solid #6fa09f;/);
+      assert.match(frameSelectionRule, /pointer-events:\s*none;/);
+      assert.match(frameSelectionRule, /top:\s*var\(--selection-outline-top\);/);
+      assert.match(frameSelectionRule, /left:\s*var\(--selection-outline-left\);/);
       assert.match(tableCellRule, /min-width:\s*32px;/);
       assert.match(tableCellRule, /height:\s*30px;/);
       assert.match(widgetsSource, /const outlineInset = 0\.5;/);
+      assert.match(widgetsSource, /frame\.classList\.toggle\('has-cell-selection'/);
       assert.match(widgetsSource, /--selection-outline-width/);
       assert.match(widgetsSource, /right - left/);
     }

@@ -468,28 +468,29 @@ export class TableWidget extends WidgetType {
     const updateSelectionOutline = (): void => {
       const selectedCells = getSelectedCells();
       if (selectedCells.length === 0) {
-        table.style.removeProperty('--selection-outline-left');
-        table.style.removeProperty('--selection-outline-top');
-        table.style.removeProperty('--selection-outline-width');
-        table.style.removeProperty('--selection-outline-height');
+        frame.style.removeProperty('--selection-outline-left');
+        frame.style.removeProperty('--selection-outline-top');
+        frame.style.removeProperty('--selection-outline-width');
+        frame.style.removeProperty('--selection-outline-height');
         return;
       }
 
-      const tableRect = table.getBoundingClientRect();
+      const frameRect = frame.getBoundingClientRect();
       const selectedRects = selectedCells.map((cell) => cell.getBoundingClientRect());
       const outlineInset = 0.5;
-      const left = Math.min(...selectedRects.map((rect) => rect.left)) - tableRect.left - outlineInset;
-      const top = Math.min(...selectedRects.map((rect) => rect.top)) - tableRect.top - outlineInset;
-      const right = Math.max(...selectedRects.map((rect) => rect.right)) - tableRect.left + outlineInset;
-      const bottom = Math.max(...selectedRects.map((rect) => rect.bottom)) - tableRect.top + outlineInset;
+      const left = Math.min(...selectedRects.map((rect) => rect.left)) - frameRect.left - outlineInset;
+      const top = Math.min(...selectedRects.map((rect) => rect.top)) - frameRect.top - outlineInset;
+      const right = Math.max(...selectedRects.map((rect) => rect.right)) - frameRect.left + outlineInset;
+      const bottom = Math.max(...selectedRects.map((rect) => rect.bottom)) - frameRect.top + outlineInset;
 
-      table.style.setProperty('--selection-outline-left', `${left}px`);
-      table.style.setProperty('--selection-outline-top', `${top}px`);
-      table.style.setProperty('--selection-outline-width', `${right - left}px`);
-      table.style.setProperty('--selection-outline-height', `${bottom - top}px`);
+      frame.style.setProperty('--selection-outline-left', `${left}px`);
+      frame.style.setProperty('--selection-outline-top', `${top}px`);
+      frame.style.setProperty('--selection-outline-width', `${right - left}px`);
+      frame.style.setProperty('--selection-outline-height', `${bottom - top}px`);
     };
     const clearCellSelection = (options: { preserveStoredSelection?: boolean } = {}): void => {
       table.classList.remove('has-cell-selection');
+      frame.classList.remove('has-cell-selection');
       table.classList.remove('is-cell-dragging');
       for (const cell of getSelectedCells()) {
         cell.classList.remove(...selectedCellClasses);
@@ -514,6 +515,7 @@ export class TableWidget extends WidgetType {
       }
       storedTableSelection = { key: tableSelectionKey, from, to };
       table.classList.toggle('has-cell-selection', getSelectedCells().length > 0);
+      frame.classList.toggle('has-cell-selection', getSelectedCells().length > 0);
       table.classList.toggle('is-cell-dragging', draggingCells);
       updateSelectionOutline();
     };
