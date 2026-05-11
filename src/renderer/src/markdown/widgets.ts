@@ -27,6 +27,7 @@ interface ActiveTableDrag {
 interface ActiveTableStructureDrag {
   ghost: HTMLElement;
   from: number;
+  sourceCells: HTMLTableCellElement[];
   target: HTMLElement | null;
   type: 'column' | 'row';
 }
@@ -412,6 +413,14 @@ export class TableWidget extends WidgetType {
         table.focus();
       }
     };
+    const selectColumn = (column: number): void => {
+      selectCellRange({ row: 0, column }, { row: this.table.rows.length, column });
+      table.focus();
+    };
+    const selectVisualRow = (row: number): void => {
+      selectCellRange({ row, column: 0 }, { row, column: Math.max(0, this.table.headers.length - 1) });
+      table.focus();
+    };
     const selectedMarkdown = (): string => {
       const selectedCells = getSelectedCells();
       if (selectedCells.length === 0) return this.markdownFromDOM(table);
@@ -461,11 +470,39 @@ export class TableWidget extends WidgetType {
       if (from === to) return;
       replaceWithCurrentTableContent(moveMarkdownTableVisualRow(this.tableContentFromDOM(table), from, to));
     };
-    const createStructureDragGhost = (type: 'column' | 'row', event: PointerEvent): HTMLElement => {
+    const getStructureCells = (type: 'column' | 'row', index: number): HTMLTableCellElement[] =>
+      getAllCells().filter((cell) => {
+        const position = getCellPosition(cell);
+        return type === 'column' ? position.column === index : position.row === index;
+      });
+    const createStructureDragGhost = (type: 'column' | 'row', cells: HTMLTableCellElement[], event: PointerEvent): HTMLElement => {
       const ghost = document.createElement('span');
       ghost.className = `cm-live-table-drag-ghost is-${type}`;
-      ghost.textContent = '::';
       ghost.setAttribute('aria-hidden', 'true');
+
+      const rects = cells.map((cell) => cell.getBoundingClientRect());
+      if (rects.length === 0) {
+        ghost.textContent = '::';
+        document.body.append(ghost);
+        moveStructureDragGhost(ghost, event);
+        return ghost;
+      }
+
+      if (type === 'row') {
+        ghost.style.gridTemplateColumns = rects.map((rect) => `${rect.width}px`).join(' ');
+      } else {
+        ghost.style.gridTemplateRows = rects.map((rect) => `${rect.height}px`).join(' ');
+        ghost.style.width = `${Math.max(...rects.map((rect) => rect.width), 40)}px`;
+      }
+
+      for (const cell of cells) {
+        const ghostCell = document.createElement('span');
+        ghostCell.className = 'cm-live-table-drag-ghost-cell';
+        ghostCell.classList.toggle('is-header', cell.tagName === 'TH');
+        ghostCell.textContent = cell.textContent ?? '';
+        ghost.append(ghostCell);
+      }
+
       document.body.append(ghost);
       moveStructureDragGhost(ghost, event);
       return ghost;
@@ -505,6 +542,9 @@ export class TableWidget extends WidgetType {
 
       clearStructureDragTarget();
       frame.querySelectorAll('.is-drag-source').forEach((element) => element.classList.remove('is-drag-source'));
+      for (const cell of activeStructureDrag.sourceCells) {
+        cell.classList.remove('is-structure-drag-source-cell');
+      }
       activeStructureDrag.ghost.remove();
       frame.classList.remove('is-structure-dragging');
       activeStructureDrag = null;
@@ -521,7 +561,16 @@ export class TableWidget extends WidgetType {
       event.stopPropagation();
       clearDocumentSelection();
       const target = event.currentTarget as HTMLElement;
-      activeStructureDrag = { from, ghost: createStructureDragGhost(type, event), target, type };
+      const sourceCells = getStructureCells(type, from);
+      if (type === 'column') {
+        selectColumn(from);
+      } else {
+        selectVisualRow(from);
+      }
+      for (const cell of sourceCells) {
+        cell.classList.add('is-structure-drag-source-cell');
+      }
+      activeStructureDrag = { from, ghost: createStructureDragGhost(type, sourceCells, event), sourceCells, target, type };
       target.classList.add('is-drop-target');
       target.classList.add('is-drag-source');
       frame.classList.add('is-structure-dragging');

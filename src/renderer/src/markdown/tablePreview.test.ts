@@ -202,6 +202,8 @@ export const tests = [
       const controlsRule = getRuleBody('#editor .cm-live-table-controls');
       const addColumnRule = getRuleBody('#editor .cm-live-table-add-column');
       const addRowRule = getRuleBody('#editor .cm-live-table-add-row');
+      const sourceCellRule = getRuleBody('#editor .cm-live-table .is-structure-drag-source-cell');
+      const dragGhostRule = getRuleBody('.cm-live-table-drag-ghost');
 
       assert.match(widgetsSource, /cm-live-table-column-handle/);
       assert.match(widgetsSource, /cm-live-table-row-handle/);
@@ -215,6 +217,10 @@ export const tests = [
       assert.match(widgetsSource, /moveMarkdownTableVisualRow/);
       assert.match(widgetsSource, /createStructureDragGhost/);
       assert.match(widgetsSource, /cm-live-table-drag-ghost/);
+      assert.match(widgetsSource, /selectColumn\(from\)/);
+      assert.match(widgetsSource, /selectVisualRow\(from\)/);
+      assert.match(widgetsSource, /is-structure-drag-source-cell/);
+      assert.match(widgetsSource, /cm-live-table-drag-ghost-cell/);
       assert.match(widgetsSource, /firstVisualRowCells/);
       assert.match(widgetsSource, /createRowHandle\(0\)/);
       assert.match(widgetsSource, /ResizeObserver/);
@@ -222,6 +228,8 @@ export const tests = [
       assert.match(controlsRule, /pointer-events:\s*none;/);
       assert.match(addColumnRule, /border-radius:\s*5px;/);
       assert.match(addRowRule, /height:\s*20px;/);
+      assert.match(sourceCellRule, /transform:\s*translateY\(-2px\);/);
+      assert.match(dragGhostRule, /display:\s*inline-grid;/);
     }
   }
 ];

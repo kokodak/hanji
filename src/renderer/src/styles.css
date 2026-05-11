@@ -606,6 +606,13 @@ input:focus {
   cursor: grabbing;
 }
 
+#editor .cm-live-table .is-structure-drag-source-cell {
+  position: relative;
+  z-index: 1;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgb(66 54 43 / 12%);
+}
+
 #editor .cm-live-table-add {
   width: 20px;
   min-height: 20px;
@@ -628,23 +635,40 @@ input:focus {
   z-index: 1000;
   top: 0;
   left: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 22px;
+  display: inline-grid;
+  overflow: hidden;
+  min-width: 40px;
+  max-width: min(70vw, 720px);
   border: 1px solid #d5cabc;
   border-radius: 5px;
   background: #fffefa;
   box-shadow: 0 8px 18px rgb(66 54 43 / 16%);
-  color: #4f7776;
   font:
-    700 12px/1 Inter,
+    500 13px/1.35 Inter,
     ui-sans-serif,
     system-ui,
     sans-serif;
   pointer-events: none;
   user-select: none;
+}
+
+.cm-live-table-drag-ghost.is-column {
+  grid-auto-flow: row;
+}
+
+.cm-live-table-drag-ghost-cell {
+  overflow: hidden;
+  padding: 6px 8px;
+  border-right: 1px solid #ded4c7;
+  border-bottom: 1px solid #ded4c7;
+  color: #3e3832;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cm-live-table-drag-ghost-cell.is-header {
+  background: #f2ece2;
+  font-weight: 700;
 }
 
 #editor .cm-live-table th,
