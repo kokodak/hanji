@@ -10,6 +10,13 @@ interface StoredTableSelection {
   to: { row: number; column: number };
 }
 
+interface ActiveTableDrag {
+  key: string;
+  origin: { x: number; y: number };
+  start: { row: number; column: number };
+}
+
+let activeTableDrag: ActiveTableDrag | null = null;
 let storedTableSelection: StoredTableSelection | null = null;
 
 function pointerMovedBeyondThreshold(start: { x: number; y: number } | null, x: number, y: number): boolean {
@@ -228,11 +235,13 @@ export class TableWidget extends WidgetType {
       const selection = view.state.selection.main;
       if (selection.empty && getSelectedCells().length === 0) return;
 
-      window.getSelection()?.removeAllRanges();
+      clearDocumentSelection();
     };
 
     const getSelectedCells = (): HTMLTableCellElement[] => Array.from(table.querySelectorAll<HTMLTableCellElement>('.is-selected'));
     const getAllCells = (): HTMLTableCellElement[] => Array.from(table.querySelectorAll<HTMLTableCellElement>('th, td'));
+    const cellAtStoredPosition = (position: { row: number; column: number }): HTMLTableCellElement =>
+      getAllCells().find((cell) => cellPositionsMatch(position, getCellPosition(cell))) ?? getAllCells()[0];
     const updateSelectionOutline = (): void => {
       const selectedCells = getSelectedCells();
       if (selectedCells.length === 0) {
@@ -355,6 +364,9 @@ export class TableWidget extends WidgetType {
       clearCellSelection();
     };
     const clearExternalDragStart = (): void => {
+      if (activeTableDrag?.key === tableSelectionKey) {
+        activeTableDrag = null;
+      }
       externalDragStart = null;
       dragOrigin = null;
       table.classList.remove('is-cell-dragging');
@@ -394,7 +406,8 @@ export class TableWidget extends WidgetType {
     };
     const extendCellDrag = (event: MouseEvent): void => {
       if (event.buttons !== 1 && externalDragStart === null) return;
-      const activeDragStart = externalDragStart ?? dragOrigin;
+      const continuedDrag = activeTableDrag?.key === tableSelectionKey ? activeTableDrag : null;
+      const activeDragStart = externalDragStart ?? dragOrigin ?? continuedDrag?.origin ?? null;
       if (!pointerMovedBeyondThreshold(activeDragStart, event.clientX, event.clientY)) return;
 
       if (externalDragCrossesTable(event.clientX, event.clientY)) {
@@ -408,15 +421,20 @@ export class TableWidget extends WidgetType {
       const cell = getCellAtPoint(event.clientX, event.clientY);
       if (!cell || !table.contains(cell)) return;
       const cellPosition = getCellPosition(cell);
+      const dragStartPosition = dragStart ?? continuedDrag?.start ?? null;
 
-      if (externalDragStart === null && cellPositionsMatch(dragStart, cellPosition)) {
+      if (externalDragStart === null && cellPositionsMatch(dragStartPosition, cellPosition)) {
         clearCellSelection();
         draggingCells = false;
         return;
       }
 
       dragStart ??= getCellPosition(
-        externalDragStart === null ? cell : (getNearestCellAtPoint(externalDragStart.x, externalDragStart.y) ?? cell)
+        continuedDrag !== null
+          ? cellAtStoredPosition(continuedDrag.start)
+          : externalDragStart === null
+            ? cell
+            : (getNearestCellAtPoint(externalDragStart.x, externalDragStart.y) ?? cell)
       );
       draggingCells = true;
       selectCellRange(dragStart, cellPosition);
@@ -467,6 +485,9 @@ export class TableWidget extends WidgetType {
         clearDocumentSelection();
         table.focus();
       }
+      if (activeTableDrag?.key === tableSelectionKey) {
+        activeTableDrag = null;
+      }
       table.classList.remove('is-cell-dragging');
       draggingCells = false;
     });
@@ -508,9 +529,10 @@ export class TableWidget extends WidgetType {
 
     for (const cell of getAllCells()) {
       cell.addEventListener('mousedown', (event) => {
-        clearStaleTableInteractionSelection();
         dragStart = getCellPosition(cell);
         dragOrigin = { x: event.clientX, y: event.clientY };
+        activeTableDrag = { key: tableSelectionKey, origin: dragOrigin, start: dragStart };
+        clearStaleTableInteractionSelection();
         draggingCells = false;
       });
       cell.addEventListener('mouseenter', (event) => {
@@ -538,11 +560,14 @@ export class TableWidget extends WidgetType {
           clearDocumentSelection();
           table.focus();
         }
+        if (activeTableDrag?.key === tableSelectionKey) {
+          activeTableDrag = null;
+        }
         table.classList.remove('is-cell-dragging');
         draggingCells = false;
       });
       cell.addEventListener('focus', () => {
-        if (!draggingCells) {
+        if (!draggingCells && activeTableDrag?.key !== tableSelectionKey) {
           clearCellSelection();
         }
       });
