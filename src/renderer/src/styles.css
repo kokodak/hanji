@@ -1,6 +1,18 @@
 :root {
-  color: #25211b;
+  color: #202626;
   background: #f7f4ef;
+  --app-ink: #202626;
+  --app-muted: #66706c;
+  --app-hairline: rgb(74 90 86 / 16%);
+  --app-hairline-strong: rgb(74 90 86 / 24%);
+  --app-glass: #f7f4ef;
+  --app-glass-strong: #fffefa;
+  --app-glass-soft: #f7f4ef;
+  --app-hover: rgb(43 91 95 / 10%);
+  --app-active: rgb(43 91 95 / 16%);
+  --app-accent: #2f5f62;
+  --app-accent-quiet: #c9dcda;
+  --app-warm: #b45f4d;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -48,6 +60,7 @@ input:focus {
   grid-template-columns: 260px minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
+  background: #f7f4ef;
 }
 
 .space-panel {
@@ -57,8 +70,8 @@ input:focus {
   min-width: 0;
   height: 100vh;
   overflow: hidden;
-  border-right: 1px solid #dfd6ca;
-  background: #f7f4ef;
+  border-right: 1px solid var(--app-hairline);
+  background: var(--app-glass-soft);
   user-select: none;
   -webkit-user-select: none;
   -webkit-user-drag: none;
@@ -69,13 +82,18 @@ input:focus {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   padding: 14px 12px 12px;
-  border-bottom: 1px solid #ebe3d8;
+  border-bottom: 1px solid var(--app-hairline);
+  background: rgb(255 255 255 / 12%);
   -webkit-user-drag: none;
+}
+
+.space-panel-title {
+  min-width: 0;
 }
 
 .space-name {
   overflow: hidden;
-  color: #25211b;
+  color: var(--app-ink);
   cursor: default;
   font-size: 14px;
   font-weight: 650;
@@ -87,7 +105,7 @@ input:focus {
   width: 100%;
   margin-top: 2px;
   overflow: hidden;
-  color: #766e64;
+  color: var(--app-muted);
   cursor: default;
   font-size: 11px;
   text-overflow: ellipsis;
@@ -99,13 +117,13 @@ input:focus {
   grid-template-columns: minmax(0, 1fr) 32px;
   gap: 8px;
   padding: 10px 12px;
-  border-bottom: 1px solid #ebe3d8;
+  border-bottom: 1px solid var(--app-hairline);
 }
 
 .new-note-row input {
   height: 32px;
   padding: 0 9px;
-  border: 1px solid #dfd6ca;
+  border: 1px solid var(--app-hairline);
   border-radius: 6px;
   background: #fffefa;
   font-size: 12px;
@@ -117,10 +135,10 @@ input:focus {
   min-width: 32px;
   height: 32px;
   place-items: center;
-  border: 1px solid #dfd6ca;
+  border: 1px solid var(--app-hairline);
   border-radius: 6px;
   background: #fffefa;
-  color: #4c463e;
+  color: #394644;
   font-size: 12px;
   cursor: pointer;
   user-select: none;
@@ -129,8 +147,8 @@ input:focus {
 }
 
 .icon-button:hover {
-  border-color: #c7baaa;
-  background: #f2ece2;
+  border-color: var(--app-hairline-strong);
+  background: rgb(43 91 95 / 9%);
 }
 
 .note-list {
@@ -147,7 +165,7 @@ input:focus {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #4c463e;
+  color: #3f4b49;
   font-size: 13px;
   text-align: left;
   text-overflow: ellipsis;
@@ -159,21 +177,21 @@ input:focus {
 }
 
 .note-item:hover {
-  background: #f2ece2;
+  background: var(--app-hover);
 }
 
 .note-item.is-active {
-  background: #e5ded3;
-  color: #25211b;
+  background: var(--app-active);
+  color: var(--app-ink);
 }
 
 .note-item.is-menu-target {
-  background: #dfebe9;
+  background: rgb(180 95 77 / 12%);
   color: #244f52;
 }
 
 .note-item.is-active.is-menu-target {
-  background: #d7e4df;
+  background: rgb(43 91 95 / 20%);
 }
 
 .context-menu {
@@ -181,10 +199,10 @@ input:focus {
   z-index: 20;
   min-width: 132px;
   padding: 5px;
-  border: 1px solid #c7baaa;
+  border: 1px solid var(--app-hairline-strong);
   border-radius: 7px;
   background: #fffefa;
-  box-shadow: 0 10px 28px rgb(37 33 27 / 14%);
+  box-shadow: 0 18px 42px rgb(35 47 45 / 16%);
 }
 
 .context-menu button {
@@ -200,7 +218,7 @@ input:focus {
 }
 
 .context-menu button:hover {
-  background: #f2ece2;
+  background: var(--app-hover);
 }
 
 .workspace {
@@ -221,7 +239,7 @@ input:focus {
   justify-content: space-between;
   gap: 16px;
   padding: 0 18px;
-  border-bottom: 1px solid #dfd6ca;
+  border-bottom: 1px solid var(--app-hairline);
   background: #fbfaf7;
   user-select: none;
   -webkit-user-select: none;
@@ -229,14 +247,14 @@ input:focus {
 }
 
 #current-time {
-  color: #4c463e;
+  color: #344240;
   cursor: default;
   font-size: 13px;
   font-weight: 400;
 }
 
 .cursor-position {
-  color: #766e64;
+  color: var(--app-muted);
   cursor: default;
   font-size: 12px;
 }
@@ -255,13 +273,96 @@ input:focus {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  background: #fffefa;
+  background: var(--app-glass-strong);
+  box-shadow: inset 1px 0 0 rgb(255 255 255 / 42%);
+}
+
+html.is-desktop-app {
+  background: transparent;
+  --app-ink: #ffffff;
+  --app-muted: rgb(255 255 255 / 76%);
+  --app-hairline: rgb(255 255 255 / 24%);
+  --app-hairline-strong: rgb(255 255 255 / 38%);
+  --app-glass: rgb(255 255 255 / 3%);
+  --app-glass-strong: rgb(255 255 252 / 86%);
+  --app-glass-soft: rgb(255 255 255 / 12%);
+  --app-hover: rgb(255 255 255 / 12%);
+  --app-active: rgb(255 255 255 / 20%);
+}
+
+html.is-desktop-app,
+html.is-desktop-app body,
+html.is-desktop-app #app {
+  background: transparent;
+}
+
+html.is-desktop-app .shell {
+  border: 1px solid rgb(255 255 255 / 24%);
+  border-radius: 16px;
+  background: var(--app-glass);
+  backdrop-filter: blur(42px) saturate(1.95) brightness(1.08);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 42%),
+    inset 0 -1px 0 rgb(16 19 20 / 10%);
+  -webkit-backdrop-filter: blur(42px) saturate(1.95) brightness(1.08);
+}
+
+html.is-desktop-app .space-panel {
+  backdrop-filter: blur(36px) saturate(1.75) brightness(1.08);
+  -webkit-backdrop-filter: blur(36px) saturate(1.75) brightness(1.08);
+}
+
+html.is-desktop-app .space-panel-header {
+  padding: 48px 12px 12px;
+  background: rgb(255 255 255 / 8%);
+}
+
+html.is-desktop-app .new-note-row input,
+html.is-desktop-app .icon-button {
+  background: rgb(16 19 20 / 18%);
+  color: var(--app-ink);
+}
+
+html.is-desktop-app .new-note-row input::placeholder {
+  color: rgb(255 255 255 / 62%);
+}
+
+html.is-desktop-app .context-menu {
+  background: rgb(255 255 255 / 82%);
+  backdrop-filter: blur(32px) saturate(1.75) brightness(1.08);
+  -webkit-backdrop-filter: blur(32px) saturate(1.75) brightness(1.08);
+}
+
+html.is-desktop-app .toolbar {
+  background: rgb(255 255 255 / 10%);
+  backdrop-filter: blur(34px) saturate(1.75) brightness(1.08);
+  -webkit-backdrop-filter: blur(34px) saturate(1.75) brightness(1.08);
+}
+
+html.is-desktop-app .space-name,
+html.is-desktop-app .note-item,
+html.is-desktop-app #current-time {
+  color: var(--app-ink);
+}
+
+html.is-desktop-app .space-path,
+html.is-desktop-app .cursor-position {
+  color: var(--app-muted);
+}
+
+html.is-desktop-app #editor {
+  box-shadow:
+    inset 1px 0 0 rgb(16 19 20 / 12%),
+    0 0 0 1px rgb(16 19 20 / 10%);
+  backdrop-filter: blur(10px) saturate(1.08) brightness(1.05);
+  -webkit-backdrop-filter: blur(10px) saturate(1.08) brightness(1.05);
 }
 
 #editor .cm-editor {
   height: 100%;
   min-height: 0;
-  color: #25211b;
+  background: transparent;
+  color: #151817;
   font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
   font-size: 15px;
   line-height: 1.65;
@@ -274,6 +375,7 @@ input:focus {
   overflow: auto;
   overscroll-behavior: contain;
   padding: 34px 38px;
+  background: transparent;
   font-family: inherit;
 }
 
@@ -451,9 +553,9 @@ input:focus {
   flex: 0 0 1em;
   width: 1em;
   height: 1em;
-  border: 1px solid #b9aea1;
+  border: 1px solid rgb(91 112 107 / 34%);
   border-radius: 3px;
-  background: #fffefa;
+  background: rgb(255 255 252 / 72%);
   cursor: pointer;
 }
 
@@ -475,7 +577,7 @@ input:focus {
 }
 
 #editor .cm-live-task-checked {
-  color: #9a9389;
+  color: #87928e;
 }
 
 #editor .cm-live-strong {
@@ -487,7 +589,7 @@ input:focus {
 }
 
 #editor .cm-live-strikethrough {
-  color: #82786e;
+  color: #76847f;
   text-decoration: line-through;
 }
 
@@ -499,10 +601,10 @@ input:focus {
 }
 
 #editor .cm-live-code {
-  border: 1px solid #e1d6c8;
+  border: 1px solid #d7e3df;
   border-radius: 5px;
   padding: 1px 5px;
-  background: #f2ece2;
+  background: rgb(232 240 238 / 74%);
   color: #244f52;
 }
 
@@ -532,7 +634,7 @@ input:focus {
   display: inline-block;
   width: 100%;
   height: 1px;
-  background: #dfd6ca;
+  background: #cbd8d5;
   vertical-align: middle;
 }
 
@@ -575,7 +677,7 @@ input:focus {
   border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
-  color: #8a7f72;
+  color: #788682;
   font: inherit;
   line-height: 1;
   opacity: 0;
@@ -611,15 +713,15 @@ input:focus {
 #editor .cm-live-table-handle:hover,
 #editor .cm-live-table-handle.is-drop-target,
 #editor .cm-live-table-add:hover {
-  border-color: #d5cabc;
-  background: #fffefa;
+  border-color: #bacbc6;
+  background: rgb(255 255 252 / 74%);
   color: #4f7776;
 }
 
 #editor .cm-live-table-handle.is-drag-source {
   z-index: 3;
-  border-color: #d5cabc;
-  background: #fffefa;
+  border-color: #bacbc6;
+  background: rgb(255 255 252 / 84%);
   color: #4f7776;
   opacity: 1;
   pointer-events: auto;
@@ -656,8 +758,8 @@ input:focus {
 }
 
 #editor .cm-live-table .is-structure-preview-header-cell {
-  background: #f2ece2;
-  color: #3e3832;
+  background: #edf4f2;
+  color: #2b3533;
   font-weight: 700;
 }
 
@@ -706,8 +808,8 @@ input:focus {
 }
 
 #editor .cm-live-table th {
-  background: #f2ece2;
-  color: #3e3832;
+  background: #edf4f2;
+  color: #2b3533;
   font-weight: 700;
 }
 
@@ -793,9 +895,9 @@ input:focus {
   display: block;
   max-width: 100%;
   max-height: 360px;
-  border: 1px solid #e1d6c8;
+  border: 1px solid #d7e3df;
   border-radius: 7px;
-  background: #f7f4ef;
+  background: #eef4f2;
   object-fit: contain;
 }
 
@@ -805,7 +907,7 @@ input:focus {
   box-sizing: border-box;
   padding-right: 14px;
   padding-left: 14px;
-  background: #f2ece2;
+  background: rgb(232 240 238 / 76%);
   background-clip: padding-box;
 }
 
@@ -826,7 +928,7 @@ input:focus {
   right: 12px;
   z-index: 1;
   transform: translateY(-50%);
-  color: #766e64;
+  color: var(--app-muted);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -839,7 +941,7 @@ input:focus {
 }
 
 #editor .cm-live-frontmatter {
-  color: #6d665d;
+  color: #65726d;
 }
 
 #editor .cm-live-blockquote {
@@ -878,6 +980,31 @@ input:focus {
   top: 0;
   height: calc(1lh - 0.12em);
   border-radius: 0 0 999px 999px;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  html.is-desktop-app .shell,
+  html.is-desktop-app .space-panel,
+  html.is-desktop-app .toolbar,
+  html.is-desktop-app #editor,
+  html.is-desktop-app .context-menu {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  html.is-desktop-app .shell {
+    background: #f7f9f8;
+  }
+
+  html.is-desktop-app .space-panel {
+    background: #eef4f2;
+  }
+
+  html.is-desktop-app .toolbar,
+  html.is-desktop-app #editor,
+  html.is-desktop-app .context-menu {
+    background: #fffffc;
+  }
 }
 
 @media (max-width: 900px) {

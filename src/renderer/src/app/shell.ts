@@ -16,8 +16,8 @@ export function createAppShell(root: HTMLDivElement): AppShell {
   root.innerHTML = `
     <main class="shell">
       <aside class="space-panel" aria-label="Space" draggable="false">
-        <div class="space-panel-header">
-          <div>
+        <div class="space-panel-header" data-tauri-drag-region>
+          <div class="space-panel-title" data-tauri-drag-region>
             <div id="space-name" class="space-name">Lithe</div>
             <div id="space-path" class="space-path" aria-label="Space path"></div>
           </div>
@@ -36,7 +36,7 @@ export function createAppShell(root: HTMLDivElement): AppShell {
       </aside>
 
       <section class="workspace" aria-label="Editor">
-        <header class="toolbar" draggable="false">
+        <header class="toolbar" draggable="false" data-tauri-drag-region>
           <time id="current-time" dateTime=""></time>
           <span id="cursor-position" class="cursor-position"></span>
         </header>

@@ -1,5 +1,6 @@
 import type { EditorView } from '@codemirror/view';
 import { open } from '@tauri-apps/plugin-dialog';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { startClock } from './app/clock';
 import { createAppShell } from './app/shell';
 import {
@@ -21,6 +22,17 @@ const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) {
   throw new Error('App root was not found.');
 }
+
+function hasTauriRuntime(): boolean {
+  return '__TAURI_INTERNALS__' in window;
+}
+
+function applyRuntimeStyleMode(): void {
+  document.documentElement.classList.toggle('is-desktop-app', hasTauriRuntime());
+  document.documentElement.classList.toggle('is-web-preview', !hasTauriRuntime());
+}
+
+applyRuntimeStyleMode();
 
 const shell = createAppShell(app);
 let saveTimer: number | undefined;
@@ -63,6 +75,30 @@ function updateCursorPosition(view: EditorView): void {
   shell.cursorPosition.textContent = `Line ${currentLine} / ${totalLines}`;
 }
 
+function isInteractiveChromeTarget(target: HTMLElement): boolean {
+  return Boolean(target.closest('button, input, textarea, select, [contenteditable="true"], .context-menu'));
+}
+
+function registerWindowDragging(): void {
+  if (!hasTauriRuntime()) return;
+
+  const appWindow = getCurrentWindow();
+
+  document.addEventListener(
+    'mousedown',
+    (event) => {
+      if (event.button !== 0) return;
+      if (!(event.target instanceof HTMLElement)) return;
+      if (!event.target.closest('[data-tauri-drag-region]')) return;
+      if (isInteractiveChromeTarget(event.target)) return;
+
+      event.preventDefault();
+      void appWindow.startDragging().catch(() => undefined);
+    },
+    { capture: true }
+  );
+}
+
 function blockChromeDragInteractions(): void {
   document.addEventListener('selectstart', (event) => {
     if (event.target instanceof Node && shell.editor.contains(event.target)) return;
@@ -78,6 +114,7 @@ function blockChromeDragInteractions(): void {
     'pointerdown',
     (event) => {
       if (event.target instanceof Node && shell.editor.contains(event.target)) return;
+      if (event.target instanceof HTMLElement && event.target.closest('[data-tauri-drag-region]')) return;
       if (event.target instanceof HTMLButtonElement) return;
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
 
@@ -262,6 +299,7 @@ async function startApp(): Promise<void> {
   });
 
   startClock(shell.currentTime);
+  registerWindowDragging();
   blockChromeDragInteractions();
   warmCodeLanguages();
   updateCursorPosition(editorView);

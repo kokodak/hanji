@@ -10,6 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
@@ -18,7 +19,20 @@
         "height": 760,
         "minWidth": 820,
         "minHeight": 560,
-        "backgroundColor": "#f7f4ef"
+        "backgroundColor": "#00000000",
+        "transparent": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 18
+        },
+        "shadow": true,
+        "windowEffects": {
+          "effects": ["popover"],
+          "state": "active",
+          "radius": 16
+        }
       }
     ],
     "security": {

@@ -94,3 +94,4 @@ Files required to build the app should be committed. For example, `src-tauri/ico
 
 - The renderer build may warn about a large JavaScript chunk because CodeMirror language support is broad. This is a known optimization target, not a build failure.
 - The local app bundle build command is the safest command while the packaging story is still being refined.
+- The desktop shell uses a transparent macOS window with a native background effect for local app builds. This enables the lighter glass-like editor chrome, but it relies on Tauri's macOS private API setting and is not App Store compatible as configured.
