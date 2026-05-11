@@ -1,5 +1,5 @@
 import { RangeSetBuilder, type Text } from '@codemirror/state';
-import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from '@codemirror/view';
 import { addInlinePreviewDecorations, lineIsOnlyInlineCode } from './inlinePreview';
 import {
   collectFencedCodeBlocks,
@@ -36,6 +36,14 @@ export function safePosAtCoords(view: Pick<EditorView, 'posAtCoords'>, coords: {
   }
 }
 
+class EmptyLineSelectionWidget extends WidgetType {
+  toDOM(): HTMLElement {
+    const selection = document.createElement('span');
+    selection.className = 'cm-compact-empty-selection';
+    return selection;
+  }
+}
+
 function moveSingleInlineCodeClickToLineEnd(view: EditorView, event: MouseEvent): boolean {
   const position = safePosAtCoords(view, { x: event.clientX, y: event.clientY });
   if (position === null) return false;
@@ -69,13 +77,23 @@ function tableIntersectsSelection(view: EditorView, table: MarkdownTable): boole
 }
 
 function addCompactSelectionDecorations(view: EditorView, pending: PendingDecoration[], from: number, to: number): void {
-  if (from >= to) return;
-
   for (const range of view.state.selection.ranges) {
     if (range.empty) continue;
 
     const selectionFrom = Math.min(range.from, range.to);
     const selectionTo = Math.max(range.from, range.to);
+
+    if (from === to) {
+      if (selectionFrom <= from && selectionTo >= from) {
+        pending.push({
+          from,
+          to: from,
+          decoration: Decoration.widget({ widget: new EmptyLineSelectionWidget(), side: 1 })
+        });
+      }
+      continue;
+    }
+
     const selectedFrom = Math.max(selectionFrom, from);
     const selectedTo = Math.min(selectionTo, to);
 

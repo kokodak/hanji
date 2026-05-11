@@ -48,10 +48,14 @@ export const tests = [
       const selectionLayerRule = getRuleBody('#editor .cm-selectionBackground,\n#editor .cm-focused .cm-selectionBackground');
       const nativeSelectionRule = getRuleBody('#editor .cm-content ::selection');
       const compactSelectionRule = getRuleBody('#editor .cm-compact-selection');
+      const emptySelectionRule = getRuleBody('#editor .cm-compact-empty-selection');
 
       assert.match(selectionLayerRule, /background:\s*transparent;/);
       assert.match(nativeSelectionRule, /background:\s*transparent;/);
       assert.match(compactSelectionRule, /background:\s*#c9dcda;/);
+      assert.match(emptySelectionRule, /width:\s*1ch;/);
+      assert.match(emptySelectionRule, /height:\s*1lh;/);
+      assert.match(emptySelectionRule, /background:\s*#c9dcda;/);
     }
   },
   {

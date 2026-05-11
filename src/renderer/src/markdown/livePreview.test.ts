@@ -58,6 +58,15 @@ export const tests = [
     }
   },
   {
+    name: 'keeps a compact selection mark for empty selected lines',
+    run() {
+      assert.match(livePreviewSource, /class EmptyLineSelectionWidget extends WidgetType/);
+      assert.match(livePreviewSource, /cm-compact-empty-selection/);
+      assert.match(livePreviewSource, /from === to/);
+      assert.match(livePreviewSource, /Decoration\.widget\(\{ widget: new EmptyLineSelectionWidget\(\), side: 1 \}\)/);
+    }
+  },
+  {
     name: 'ignores transient coordinate lookup failures',
     run() {
       const view = {

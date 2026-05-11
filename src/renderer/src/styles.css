@@ -307,6 +307,14 @@ input:focus {
   background: #c9dcda;
 }
 
+#editor .cm-compact-empty-selection {
+  display: inline-block;
+  width: 1ch;
+  height: 1lh;
+  background: #c9dcda;
+  vertical-align: top;
+}
+
 #editor .cm-cursor {
   border-left-color: #2f5f62;
 }
