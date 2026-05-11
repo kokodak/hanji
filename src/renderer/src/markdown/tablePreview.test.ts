@@ -122,6 +122,7 @@ export const tests = [
     run() {
       const tableSelectionRule = getRuleBody('#editor .cm-live-table.has-cell-selection');
       const tableRule = getRuleBody('#editor .cm-live-table');
+      const tableCellRule = getRuleBody('#editor .cm-live-table th,\n#editor .cm-live-table td');
       const selectionOutlineRule = getRuleBody('#editor .cm-live-table.has-cell-selection::after');
       const focusedHeaderRule = getRuleBody('#editor .cm-live-table.has-cell-selection th[contenteditable]:focus');
       const focusedCellRule = getRuleBody('#editor .cm-live-table.has-cell-selection td[contenteditable]:focus');
@@ -135,7 +136,9 @@ export const tests = [
       assert.match(selectionOutlineRule, /pointer-events:\s*none;/);
       assert.match(selectionOutlineRule, /top:\s*var\(--selection-outline-top\);/);
       assert.match(selectionOutlineRule, /left:\s*var\(--selection-outline-left\);/);
-      assert.match(widgetsSource, /const outlineInset = 1;/);
+      assert.match(tableCellRule, /min-width:\s*32px;/);
+      assert.match(tableCellRule, /height:\s*30px;/);
+      assert.match(widgetsSource, /const outlineInset = 0\.5;/);
       assert.match(widgetsSource, /--selection-outline-width/);
       assert.match(widgetsSource, /right - left/);
     }
@@ -251,8 +254,8 @@ export const tests = [
       assert.match(previewCellRule, /transition:\s*transform 150ms ease;/);
       assert.match(previewHeaderRule, /font-weight:\s*700;/);
       assert.match(previewBodyRule, /font-weight:\s*400;/);
-      assert.match(styles, /height:\s*22px;/);
-      assert.match(styles, /min-width:\s*26px;/);
+      assert.match(styles, /height:\s*18px;/);
+      assert.match(styles, /min-width:\s*22px;/);
     }
   }
 ];

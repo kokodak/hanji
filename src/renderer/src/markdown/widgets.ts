@@ -400,7 +400,7 @@ export class TableWidget extends WidgetType {
         if (!handle) continue;
         const rect = cell.getBoundingClientRect();
         handle.style.left = `${rect.left - frameRect.left}px`;
-        handle.style.top = `${tableRect.top - frameRect.top - 24}px`;
+        handle.style.top = `${tableRect.top - frameRect.top - 21}px`;
         handle.style.width = `${rect.width}px`;
       }
 
@@ -408,9 +408,9 @@ export class TableWidget extends WidgetType {
         const handle = rowHandles[index];
         if (!handle) continue;
         const rect = cell.getBoundingClientRect();
-        handle.style.left = `${tableRect.left - frameRect.left - 30}px`;
+        handle.style.left = `${tableRect.left - frameRect.left - 26}px`;
         handle.style.top = `${rect.top - frameRect.top}px`;
-        handle.style.width = '28px';
+        handle.style.width = '22px';
         handle.style.height = `${rect.height}px`;
       }
 
@@ -477,7 +477,7 @@ export class TableWidget extends WidgetType {
 
       const tableRect = table.getBoundingClientRect();
       const selectedRects = selectedCells.map((cell) => cell.getBoundingClientRect());
-      const outlineInset = 1;
+      const outlineInset = 0.5;
       const left = Math.min(...selectedRects.map((rect) => rect.left)) - tableRect.left - outlineInset;
       const top = Math.min(...selectedRects.map((rect) => rect.top)) - tableRect.top - outlineInset;
       const right = Math.max(...selectedRects.map((rect) => rect.right)) - tableRect.left + outlineInset;
