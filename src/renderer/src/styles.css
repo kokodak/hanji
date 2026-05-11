@@ -287,13 +287,12 @@ input:focus {
   width: fit-content;
   max-width: 100%;
   min-width: 1ch;
-  margin-bottom: 0.32em;
-  padding: 0;
+  padding: 0 0 0.32em;
 }
 
 #editor .cm-line.cm-live-codeblock {
   width: 100%;
-  margin-bottom: 0;
+  padding-bottom: 0;
 }
 
 #editor .cm-line:has(.cm-live-horizontal-rule) {
@@ -711,7 +710,6 @@ input:focus {
 #editor .cm-line.cm-live-table-source-hidden {
   height: 0;
   min-height: 0;
-  margin-bottom: 0;
   overflow: hidden;
   padding: 0;
   font-size: 0;
