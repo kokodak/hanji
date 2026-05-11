@@ -81,7 +81,7 @@ export const tests = [
     }
   },
   {
-    name: 'does not enter fenced code edit mode for range selections',
+    name: 'enters fenced code edit mode for range selections',
     run() {
       const doc = text(['before', '```ts', 'const ok = true;', '```', 'after']);
       const block = collectFencedCodeBlocks(doc)[0];
@@ -92,7 +92,7 @@ export const tests = [
         })
       } as unknown as EditorView;
 
-      assert.equal(isActiveFencedCodeBlock(view, block), false);
+      assert.equal(isActiveFencedCodeBlock(view, block), true);
     }
   },
   {

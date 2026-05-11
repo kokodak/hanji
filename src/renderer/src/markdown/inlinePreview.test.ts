@@ -72,12 +72,12 @@ export const tests = [
     }
   },
   {
-    name: 'keeps inline previews active during range selection',
+    name: 'keeps inline syntax visible during range selection',
     run() {
       const classes = decorationClassesFor('*emphasis*', { anchor: 0, head: '*emphasis*'.length });
 
       assert.equal(classes.includes('cm-live-emphasis'), true);
-      assert.equal(classes.includes('cm-markdown-syntax-hidden'), true);
+      assert.equal(classes.includes('cm-markdown-syntax-hidden'), false);
     }
   }
 ];

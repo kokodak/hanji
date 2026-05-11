@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { Text } from '@codemirror/state';
+import { EditorState, Text } from '@codemirror/state';
+import type { Decoration, EditorView } from '@codemirror/view';
 import {
+  buildLivePreviewDecorations,
   collectYamlFrontmatterBlock,
   getTableCursorTarget,
   lineIsHorizontalRule,
@@ -10,6 +12,34 @@ import {
 } from './livePreview';
 
 const livePreviewSource = readFileSync(new URL('./livePreview.ts', import.meta.url), 'utf8');
+
+interface DecorationSummary {
+  from: number;
+  to: number;
+  className: string | undefined;
+  widgetName: string | undefined;
+}
+
+function collectDecorationSummaries(docText: string, selection: { anchor: number; head?: number }): DecorationSummary[] {
+  const state = EditorState.create({ doc: docText, selection });
+  const view = {
+    state,
+    visibleRanges: [{ from: 0, to: state.doc.length }]
+  } as unknown as EditorView;
+  const decorations = buildLivePreviewDecorations(view, null);
+  const summaries: DecorationSummary[] = [];
+
+  decorations.between(0, state.doc.length, (from: number, to: number, decoration: Decoration) => {
+    summaries.push({
+      from,
+      to,
+      className: decoration.spec.class as string | undefined,
+      widgetName: decoration.spec.widget?.constructor.name
+    });
+  });
+
+  return summaries;
+}
 
 export const tests = [
   {
@@ -75,6 +105,37 @@ export const tests = [
       assert.match(livePreviewSource, /listWrapLine\(taskMatch\[1\]\.length\)/);
       assert.match(livePreviewSource, /listWrapLine\(listMatch\[1\]\.length\)/);
       assert.match(livePreviewSource, /listWrapLine\(numberedListMatch\[1\]\.length\)/);
+    }
+  },
+  {
+    name: 'reveals source markers on selected preview lines while tables stay rendered',
+    run() {
+      assert.match(livePreviewSource, /lineIntersectsSelection\(view, line\.from, line\.to\)/);
+      assert.match(livePreviewSource, /rangeContainsSelection\(view, markerStart, markerEnd\)/);
+      assert.match(livePreviewSource, /lineContainsSelection\(view, line\.from, line\.to\)/);
+      assert.match(livePreviewSource, /new TableWidget\(table, selectedTable\)/);
+    }
+  },
+  {
+    name: 'keeps selected non-table Markdown source visible under preview styling',
+    run() {
+      const doc = '# Heading\n- item\n---\n*emphasis*';
+      const summaries = collectDecorationSummaries(doc, { anchor: 0, head: doc.length });
+
+      assert.equal(summaries.some((summary) => summary.className === 'cm-live-heading-1'), true);
+      assert.equal(summaries.some((summary) => summary.className === 'cm-markdown-syntax-hidden'), false);
+      assert.equal(summaries.some((summary) => summary.widgetName === 'BulletWidget'), false);
+      assert.equal(summaries.some((summary) => summary.widgetName === 'HorizontalRuleWidget'), false);
+    }
+  },
+  {
+    name: 'keeps selected Markdown tables rendered as preview widgets',
+    run() {
+      const doc = '| Name | Status |\n| --- | --- |\n| Lithe | Ready |';
+      const summaries = collectDecorationSummaries(doc, { anchor: 0, head: doc.length });
+
+      assert.equal(summaries.some((summary) => summary.className === 'cm-live-table-line cm-live-table-selection-hidden'), true);
+      assert.equal(summaries.some((summary) => summary.widgetName === 'TableWidget'), true);
     }
   },
   {
