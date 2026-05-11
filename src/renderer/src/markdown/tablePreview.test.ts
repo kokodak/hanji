@@ -203,7 +203,10 @@ export const tests = [
       const addColumnRule = getRuleBody('#editor .cm-live-table-add-column');
       const addRowRule = getRuleBody('#editor .cm-live-table-add-row');
       const sourceCellRule = getRuleBody('#editor .cm-live-table .is-structure-drag-source-cell');
-      const dragGhostRule = getRuleBody('.cm-live-table-drag-ghost');
+      const previewCellRule = getRuleBody('#editor .cm-live-table .is-structure-preview-cell');
+      const visibleControlRule = getRuleBody(
+        '#editor .cm-live-table-handle.is-control-visible,\n#editor .cm-live-table-add.is-control-visible,\n#editor .cm-live-table-handle.is-drop-target,\n#editor .cm-live-table-handle.is-drag-source'
+      );
 
       assert.match(widgetsSource, /cm-live-table-column-handle/);
       assert.match(widgetsSource, /cm-live-table-row-handle/);
@@ -215,12 +218,12 @@ export const tests = [
       assert.match(widgetsSource, /insertMarkdownTableRow/);
       assert.match(widgetsSource, /moveMarkdownTableColumn/);
       assert.match(widgetsSource, /moveMarkdownTableVisualRow/);
-      assert.match(widgetsSource, /createStructureDragGhost/);
-      assert.match(widgetsSource, /cm-live-table-drag-ghost/);
+      assert.match(widgetsSource, /updateVisibleTableControls/);
+      assert.match(widgetsSource, /applyStructureDragPreview/);
+      assert.match(widgetsSource, /clearStructureDragPreview/);
       assert.match(widgetsSource, /selectColumn\(from\)/);
       assert.match(widgetsSource, /selectVisualRow\(from\)/);
       assert.match(widgetsSource, /is-structure-drag-source-cell/);
-      assert.match(widgetsSource, /cm-live-table-drag-ghost-cell/);
       assert.match(widgetsSource, /firstVisualRowCells/);
       assert.match(widgetsSource, /createRowHandle\(0\)/);
       assert.match(widgetsSource, /ResizeObserver/);
@@ -228,8 +231,9 @@ export const tests = [
       assert.match(controlsRule, /pointer-events:\s*none;/);
       assert.match(addColumnRule, /border-radius:\s*5px;/);
       assert.match(addRowRule, /height:\s*20px;/);
-      assert.match(sourceCellRule, /transform:\s*translateY\(-2px\);/);
-      assert.match(dragGhostRule, /display:\s*inline-grid;/);
+      assert.match(visibleControlRule, /opacity:\s*1;/);
+      assert.match(sourceCellRule, /box-shadow:\s*inset 0 0 0 2px #6fa09f;/);
+      assert.match(previewCellRule, /transition:\s*transform 150ms ease;/);
     }
   }
 ];
