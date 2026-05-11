@@ -1,5 +1,5 @@
 import { Decoration, type EditorView } from '@codemirror/view';
-import { hiddenSyntax, liveCode, liveEmphasis, liveStrikethrough, liveStrong } from './decorations';
+import { collapsedInlineSyntax, hiddenSyntax, liveCode, liveEmphasis, liveStrikethrough, liveStrong } from './decorations';
 import { inlineCodeRangeIsActive, syntaxRangeIsActive } from './selection';
 import type { PendingDecoration } from './types';
 import { ImageWidget, LinkWidget } from './widgets';
@@ -217,7 +217,7 @@ export function addInlinePreviewDecorations(
     const activeStrong = strongRange ? rangeIsActive(strongRange, activeRanges) : syntaxRangeIsActive(view, openingFrom, closingTo);
 
     if (!activeStrong) {
-      pending.push({ from: openingFrom, to: openingTo, decoration: hiddenSyntax });
+      pending.push({ from: openingFrom, to: openingTo, decoration: collapsedInlineSyntax });
     }
 
     addStyledContentDecoration(
@@ -230,7 +230,7 @@ export function addInlinePreviewDecorations(
     );
 
     if (!activeStrong) {
-      pending.push({ from: closingFrom, to: closingTo, decoration: hiddenSyntax });
+      pending.push({ from: closingFrom, to: closingTo, decoration: collapsedInlineSyntax });
     }
   }
 
@@ -328,7 +328,7 @@ export function addInlinePreviewDecorations(
       : syntaxRangeIsActive(view, openingFrom, closingTo);
 
     if (!activeEmphasis) {
-      pending.push({ from: openingFrom, to: openingTo, decoration: hiddenSyntax });
+      pending.push({ from: openingFrom, to: openingTo, decoration: collapsedInlineSyntax });
     }
 
     addStyledContentDecoration(
@@ -341,7 +341,7 @@ export function addInlinePreviewDecorations(
     );
 
     if (!activeEmphasis) {
-      pending.push({ from: closingFrom, to: closingTo, decoration: hiddenSyntax });
+      pending.push({ from: closingFrom, to: closingTo, decoration: collapsedInlineSyntax });
     }
   }
 

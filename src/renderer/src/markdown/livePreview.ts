@@ -230,6 +230,7 @@ export function buildLivePreviewDecorations(view: EditorView, hoverLine: number 
         pending.push({ from: line.from, to: line.from, decoration: listWrapLine(indentLength) });
         const markerStart = line.from + indentLength;
         const taskEnd = line.from + taskMatch[0].length;
+        const markerWidth = taskMatch[0].length - indentLength;
         const checkPosition = markerStart + taskMatch[2].length + 2;
         const isChecked = taskMatch[3].toLowerCase() === 'x';
         const editingTaskMarker = rangeContainsSelection(view, markerStart, taskEnd);
@@ -238,7 +239,7 @@ export function buildLivePreviewDecorations(view: EditorView, hoverLine: number 
           pending.push({
             from: line.from,
             to: taskEnd,
-            decoration: Decoration.replace({ widget: new CheckboxWidget(isChecked, checkPosition, indentLength) })
+            decoration: Decoration.replace({ widget: new CheckboxWidget(isChecked, checkPosition, indentLength, markerWidth) })
           });
         }
 
@@ -250,9 +251,10 @@ export function buildLivePreviewDecorations(view: EditorView, hoverLine: number 
         pending.push({ from: line.from, to: line.from, decoration: listWrapLine(indentLength) });
         const markerStart = line.from + indentLength;
         const markerEnd = line.from + listMatch[0].length;
+        const markerWidth = listMatch[0].length - indentLength;
 
         if (!rangeContainsSelection(view, markerStart, markerEnd)) {
-          pending.push({ from: line.from, to: markerEnd, decoration: Decoration.replace({ widget: new BulletWidget(indentLength) }) });
+          pending.push({ from: line.from, to: markerEnd, decoration: Decoration.replace({ widget: new BulletWidget(indentLength, markerWidth) }) });
         }
       } else if (numberedListMatch) {
         const indentLength = numberedListMatch[1].length;
@@ -260,12 +262,13 @@ export function buildLivePreviewDecorations(view: EditorView, hoverLine: number 
         const markerStart = line.from + indentLength;
         const markerEnd = line.from + numberedListMatch[0].length;
         const markerText = `${numberedListMatch[2]}${numberedListMatch[3]}`;
+        const markerWidth = numberedListMatch[0].length - indentLength;
 
         if (!rangeContainsSelection(view, markerStart, markerEnd)) {
           pending.push({
             from: line.from,
             to: markerEnd,
-            decoration: Decoration.replace({ widget: new NumberedListWidget(markerText, indentLength) })
+            decoration: Decoration.replace({ widget: new NumberedListWidget(markerText, indentLength, markerWidth) })
           });
         }
       }

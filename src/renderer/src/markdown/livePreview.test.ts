@@ -105,6 +105,9 @@ export const tests = [
       assert.match(livePreviewSource, /const indentLength = taskMatch\[1\]\.length;/);
       assert.match(livePreviewSource, /const indentLength = listMatch\[1\]\.length;/);
       assert.match(livePreviewSource, /const indentLength = numberedListMatch\[1\]\.length;/);
+      assert.match(livePreviewSource, /const markerWidth = taskMatch\[0\]\.length - indentLength;/);
+      assert.match(livePreviewSource, /const markerWidth = listMatch\[0\]\.length - indentLength;/);
+      assert.match(livePreviewSource, /const markerWidth = numberedListMatch\[0\]\.length - indentLength;/);
       assert.match(livePreviewSource, /listWrapLine\(indentLength\)/);
     }
   },

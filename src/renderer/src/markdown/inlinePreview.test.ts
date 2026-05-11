@@ -4,10 +4,16 @@ import type { EditorView } from '@codemirror/view';
 import { addInlinePreviewDecorations, lineIsOnlyInlineCode } from './inlinePreview';
 import type { PendingDecoration } from './types';
 
-function decorationClassesFor(
+interface DecorationSummary {
+  from: number;
+  to: number;
+  className: string | undefined;
+}
+
+function decorationSummariesFor(
   lineText: string,
   selection: { anchor: number; head?: number } = { anchor: lineText.length + 1 }
-): Array<string | undefined> {
+): DecorationSummary[] {
   const pending: PendingDecoration[] = [];
   const view = {
     state: EditorState.create({
@@ -18,7 +24,18 @@ function decorationClassesFor(
 
   addInlinePreviewDecorations(view, pending, 0, lineText);
 
-  return pending.map((item) => item.decoration.spec.class as string | undefined);
+  return pending.map((item) => ({
+    from: item.from,
+    to: item.to,
+    className: item.decoration.spec.class as string | undefined
+  }));
+}
+
+function decorationClassesFor(
+  lineText: string,
+  selection: { anchor: number; head?: number } = { anchor: lineText.length + 1 }
+): Array<string | undefined> {
+  return decorationSummariesFor(lineText, selection).map((item) => item.className);
 }
 
 export const tests = [
@@ -69,6 +86,24 @@ export const tests = [
       assert.equal(classes.includes('cm-live-emphasis'), false);
       assert.equal(classes.includes('cm-live-strong'), false);
       assert.equal(classes.includes('cm-markdown-syntax-hidden'), false);
+    }
+  },
+  {
+    name: 'collapses bold and italic syntax markers in preview mode',
+    run() {
+      const emphasis = decorationSummariesFor('*emphasis*');
+      const strong = decorationSummariesFor('**strong**');
+
+      assert.deepEqual(
+        emphasis.filter((item) => item.from === 0 || item.to === '*emphasis*'.length).map((item) => item.className),
+        [undefined, undefined]
+      );
+      assert.deepEqual(
+        strong.filter((item) => item.from === 0 || item.to === '**strong**'.length).map((item) => item.className),
+        [undefined, undefined]
+      );
+      assert.equal(emphasis.some((item) => item.className === 'cm-markdown-syntax-hidden'), false);
+      assert.equal(strong.some((item) => item.className === 'cm-markdown-syntax-hidden'), false);
     }
   },
   {
