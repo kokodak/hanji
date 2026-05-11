@@ -268,7 +268,7 @@ export const tests = [
       assert.match(frameRule, /position:\s*relative;/);
       assert.match(controlsRule, /pointer-events:\s*none;/);
       assert.match(addColumnRule, /border-radius:\s*5px;/);
-      assert.match(addRowRule, /height:\s*20px;/);
+      assert.match(addRowRule, /height:\s*18px;/);
       assert.match(visibleControlRule, /opacity:\s*1;/);
       assert.match(sourceCellRule, /box-shadow:\s*none;/);
       assert.match(previewCellRule, /transition:\s*transform 150ms ease;/);
@@ -276,6 +276,8 @@ export const tests = [
       assert.match(previewHeaderRule, /font-weight:\s*700;/);
       assert.match(previewBodyRule, /font-weight:\s*400;/);
       assert.match(styles, /height:\s*18px;/);
+      assert.match(styles, /width:\s*18px;/);
+      assert.match(styles, /min-height:\s*18px;/);
       assert.match(styles, /min-width:\s*22px;/);
     }
   }

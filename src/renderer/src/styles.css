@@ -636,11 +636,11 @@ input:focus {
 }
 
 #editor .cm-live-table-add {
-  width: 20px;
-  min-height: 20px;
+  width: 18px;
+  min-height: 18px;
   padding: 0;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 #editor .cm-live-table-add-column {
@@ -648,7 +648,7 @@ input:focus {
 }
 
 #editor .cm-live-table-add-row {
-  height: 20px;
+  height: 18px;
   border-radius: 5px;
 }
 
