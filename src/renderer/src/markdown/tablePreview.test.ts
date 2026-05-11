@@ -132,9 +132,11 @@ export const tests = [
 
       assert.match(tableRule, /position:\s*relative;/);
       assert.match(tableSelectionRule, /outline:\s*0;/);
-      assert.match(focusedEditableCellRule, /outline:\s*0;/);
-      assert.match(focusedEditableCellRule, /0 0 0 1px #6fa09f/);
-      assert.match(focusedEditableCellRule, /inset 0 0 0 1px #6fa09f/);
+      assert.match(focusedEditableCellRule, /position:\s*relative;/);
+      assert.match(focusedEditableCellRule, /z-index:\s*2;/);
+      assert.match(focusedEditableCellRule, /outline:\s*2px solid #6fa09f;/);
+      assert.match(focusedEditableCellRule, /outline-offset:\s*-1px;/);
+      assert.match(focusedEditableCellRule, /box-shadow:\s*none;/);
       assert.match(focusedHeaderRule, /outline:\s*0 !important;/);
       assert.match(focusedHeaderRule, /box-shadow:\s*none;/);
       assert.match(focusedCellRule, /outline:\s*0 !important;/);

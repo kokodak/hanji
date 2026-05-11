@@ -676,10 +676,11 @@ input:focus {
 
 #editor .cm-live-table th[contenteditable]:focus,
 #editor .cm-live-table td[contenteditable]:focus {
-  outline: 0;
-  box-shadow:
-    0 0 0 1px #6fa09f,
-    inset 0 0 0 1px #6fa09f;
+  position: relative;
+  z-index: 2;
+  outline: 2px solid #6fa09f;
+  outline-offset: -1px;
+  box-shadow: none;
 }
 
 #editor .cm-live-table.has-cell-selection th[contenteditable]:focus {
