@@ -30,7 +30,10 @@ export const tests = [
     name: 'ignores stale note snapshots after rapid switching',
     run() {
       assert.match(mainSource, /let snapshotRequestId = 0;/);
-      assert.match(mainSource, /function applyLatestSnapshot\(requestId: number, snapshot: SpaceSnapshot\): void/);
+      assert.match(
+        mainSource,
+        /function applyLatestSnapshot\(requestId: number, snapshot: SpaceSnapshot, cursorPosition\?: number\): void/
+      );
       assert.match(mainSource, /if \(requestId !== snapshotRequestId\) return;/);
       assert.match(mainSource, /void rememberActiveNote\(snapshot\.active_note\.path\);/);
       assert.match(mainSource, /const requestId = \+\+snapshotRequestId;\n\s+await flushPendingSave\(\);/);

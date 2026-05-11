@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Component, Path, PathBuf},
@@ -25,6 +25,27 @@ struct SpaceSnapshot {
     notes: Vec<NoteEntry>,
     active_note: NoteEntry,
     content: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct CaptureMetadataRecord {
+    id: String,
+    path: String,
+    start_line: usize,
+    end_line: usize,
+    created_at: String,
+    year: i32,
+    month: u32,
+    day: u32,
+    date: String,
+    weekday: String,
+    time: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CaptureMetadataStore {
+    version: u8,
+    records: Vec<CaptureMetadataRecord>,
 }
 
 fn default_space_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -61,6 +82,10 @@ fn current_space_path(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn default_note_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(current_space_path(app)?.join("default.md"))
+}
+
+fn capture_metadata_path(space_path: &Path) -> PathBuf {
+    space_path.join(".lithe").join("captures.json")
 }
 
 fn ensure_space_path(path: &Path) -> Result<(), String> {
@@ -224,6 +249,18 @@ fn snapshot_for_note(app: &AppHandle, note: NoteEntry) -> Result<SpaceSnapshot, 
     })
 }
 
+fn read_capture_metadata(path: &Path) -> Result<CaptureMetadataStore, String> {
+    if !path.exists() {
+        return Ok(CaptureMetadataStore {
+            version: 1,
+            records: Vec::new(),
+        });
+    }
+
+    let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    serde_json::from_str(&content).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn load_space(app: AppHandle) -> Result<SpaceSnapshot, String> {
     let space_path = ensure_current_space(&app)?;
@@ -286,6 +323,22 @@ fn write_note(app: AppHandle, path: String, content: String) -> Result<(), Strin
 }
 
 #[tauri::command]
+fn record_capture_metadata(app: AppHandle, record: CaptureMetadataRecord) -> Result<(), String> {
+    let space_path = ensure_current_space(&app)?;
+    let metadata_path = capture_metadata_path(&space_path);
+    let mut metadata = read_capture_metadata(&metadata_path)?;
+
+    metadata.records.push(record);
+
+    if let Some(parent) = metadata_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+
+    let content = serde_json::to_string_pretty(&metadata).map_err(|error| error.to_string())?;
+    fs::write(metadata_path, content).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn delete_note(app: AppHandle, path: String) -> Result<SpaceSnapshot, String> {
     let space_path = ensure_current_space(&app)?;
     let note_path = resolve_note_path(&space_path, &path)?;
@@ -332,6 +385,7 @@ pub fn run() {
             create_note,
             read_note,
             write_note,
+            record_capture_metadata,
             delete_note,
             load_default_document,
             save_default_document

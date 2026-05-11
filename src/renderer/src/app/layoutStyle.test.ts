@@ -69,6 +69,34 @@ export const tests = [
     }
   },
   {
+    name: 'contains the capture composer flow',
+    run() {
+      const overlayRule = getRuleBody('.capture-overlay');
+      const composerRule = getRuleBody('.capture-composer');
+      const textareaRule = getRuleBody('.capture-composer textarea');
+      const desktopComposerRule = getRuleBody('html.is-desktop-app .capture-composer');
+      const desktopTextareaRule = getRuleBody('html.is-desktop-app .capture-composer textarea');
+
+      assert.match(shellSource, /id="capture-overlay"/);
+      assert.match(shellSource, /id="capture-composer"/);
+      assert.match(shellSource, /id="capture-save"/);
+      assert.match(mainSource, /captureToNote\(text\)/);
+      assert.match(mainSource, /applyLatestSnapshot\(requestId, snapshot, snapshot\.content\.length\)/);
+      assert.match(mainSource, /function isCaptureShortcut\(event: KeyboardEvent\): boolean/);
+      assert.match(mainSource, /event\.shiftKey && event\.key === ' '/);
+      assert.match(mainSource, /shell\.captureComposer\.addEventListener\('keydown'/);
+      assert.match(mainSource, /if \(isTextEntryTarget\(event\.target\)\) return;/);
+      assert.match(overlayRule, /position:\s*fixed;/);
+      assert.match(overlayRule, /justify-content:\s*flex-end;/);
+      assert.match(composerRule, /max-width:\s*44vw;/);
+      assert.match(composerRule, /border-radius:\s*8px;/);
+      assert.match(textareaRule, /max-height:\s*52vh;/);
+      assert.match(textareaRule, /resize:\s*none;/);
+      assert.match(desktopComposerRule, /background:\s*rgb\(16 19 20 \/ 52%\);/);
+      assert.match(desktopTextareaRule, /color:\s*#ffffff;/);
+    }
+  },
+  {
     name: 'keeps the app chrome fixed inside the viewport',
     run() {
       assert.match(getRuleBody('body'), /overflow:\s*hidden;/);

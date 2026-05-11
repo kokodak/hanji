@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createNote, deleteNote, loadSpace, readNote, rememberActiveNote, writeNote } from './spaceStorage';
+import { captureNotePath, captureToNote, createNote, deleteNote, loadSpace, readNote, rememberActiveNote, writeNote } from './spaceStorage';
 
 class LocalStorageStub {
   private values = new Map<string, string>();
@@ -29,6 +29,117 @@ function resetWebSpace(): void {
 }
 
 export const tests = [
+  {
+    name: 'uses one markdown note for captures',
+    run() {
+      assert.equal(captureNotePath(), 'Captures.md');
+    }
+  },
+  {
+    name: 'captures single-line thoughts in the shared capture note',
+    async run() {
+      resetWebSpace();
+
+      const snapshot = await captureToNote('Capture first. Organize later.', {
+        now: new Date(2026, 4, 11, 19, 42)
+      });
+
+      assert.equal(snapshot.active_note.path, 'Captures.md');
+      assert.equal(snapshot.content, '# Captures\n\n- Capture first. Organize later.\n');
+      assert.equal((await readNote('Captures.md')).content, snapshot.content);
+    }
+  },
+  {
+    name: 'appends later captures to the shared capture note',
+    async run() {
+      resetWebSpace();
+
+      await captureToNote('First thought', { now: new Date(2026, 4, 11, 9, 0) });
+      const snapshot = await captureToNote('Second thought', { now: new Date(2026, 4, 11, 9, 5) });
+
+      assert.equal(snapshot.content, '# Captures\n\n- First thought\n- Second thought\n');
+    }
+  },
+  {
+    name: 'captures multiline thoughts as one markdown list item',
+    async run() {
+      resetWebSpace();
+
+      const snapshot = await captureToNote('A longer thought\nwith a second line', {
+        now: new Date(2026, 4, 11, 20, 7)
+      });
+
+      assert.equal(snapshot.content, '# Captures\n\n- A longer thought\n  with a second line\n');
+    }
+  },
+  {
+    name: 'stores capture time metadata outside markdown content',
+    async run() {
+      resetWebSpace();
+
+      await captureToNote('A timestamped thought', { now: new Date(2026, 4, 11, 20, 7) });
+
+      const stored = JSON.parse(localStorageStub.getItem('lithe:web-space') ?? '{}') as {
+        captureMetadata?: {
+          records: Array<{
+            path: string;
+            start_line: number;
+            end_line: number;
+            year: number;
+            month: number;
+            day: number;
+            date: string;
+            weekday: string;
+            time: string;
+          }>;
+        };
+      };
+      const [record] = stored.captureMetadata?.records ?? [];
+
+      assert.ok(record);
+      assert.equal(record.path, 'Captures.md');
+      assert.equal(record.start_line, 3);
+      assert.equal(record.end_line, 3);
+      assert.equal(record.year, 2026);
+      assert.equal(record.month, 5);
+      assert.equal(record.day, 11);
+      assert.equal(record.date, '2026-05-11');
+      assert.equal(record.weekday, 'Monday');
+      assert.equal(record.time, '20:07');
+    }
+  },
+  {
+    name: 'tracks consecutive capture line ranges',
+    async run() {
+      resetWebSpace();
+
+      await captureToNote('First thought', { now: new Date(2026, 4, 11, 9, 0) });
+      await captureToNote('Second thought\nwith detail', { now: new Date(2026, 4, 11, 9, 5) });
+
+      const stored = JSON.parse(localStorageStub.getItem('lithe:web-space') ?? '{}') as {
+        captureMetadata?: {
+          records: Array<{
+            start_line: number;
+            end_line: number;
+          }>;
+        };
+      };
+      const records = stored.captureMetadata?.records ?? [];
+
+      assert.equal(records[0]?.start_line, 3);
+      assert.equal(records[0]?.end_line, 3);
+      assert.equal(records[1]?.start_line, 4);
+      assert.equal(records[1]?.end_line, 5);
+    }
+  },
+  {
+    name: 'rejects empty captures',
+    async run() {
+      resetWebSpace();
+
+      await assert.rejects(() => captureToNote('   '), /Capture text cannot be empty/);
+    }
+  },
   {
     name: 'loads a browser QA space outside the Tauri runtime',
     async run() {

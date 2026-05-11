@@ -4,6 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { startClock } from './app/clock';
 import { createAppShell } from './app/shell';
 import {
+  captureToNote,
   createNote,
   deleteNote,
   loadSpace,
@@ -42,6 +43,7 @@ let loadingDocument = false;
 let contextMenuNote: NoteEntry | undefined;
 let snapshotRequestId = 0;
 let saveChain = Promise.resolve();
+let savingCapture = false;
 
 function saveNoteContent(notePath: string, text: string): Promise<void> {
   const write = saveChain.then(() => writeNote(notePath, text));
@@ -79,6 +81,10 @@ function isInteractiveChromeTarget(target: HTMLElement): boolean {
   return Boolean(target.closest('button, input, textarea, select, [contenteditable="true"], .context-menu'));
 }
 
+function isTextEntryTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && Boolean(target.closest('input, textarea, [contenteditable="true"]'));
+}
+
 function registerWindowDragging(): void {
   if (!hasTauriRuntime()) return;
 
@@ -102,11 +108,13 @@ function registerWindowDragging(): void {
 function blockChromeDragInteractions(): void {
   document.addEventListener('selectstart', (event) => {
     if (event.target instanceof Node && shell.editor.contains(event.target)) return;
+    if (isTextEntryTarget(event.target)) return;
     event.preventDefault();
   });
 
   document.addEventListener('dragstart', (event) => {
     if (event.target instanceof Node && shell.editor.contains(event.target)) return;
+    if (isTextEntryTarget(event.target)) return;
     event.preventDefault();
   });
 
@@ -122,6 +130,63 @@ function blockChromeDragInteractions(): void {
     },
     { capture: true }
   );
+}
+
+function resizeCaptureComposer(): void {
+  shell.captureComposer.style.height = 'auto';
+  shell.captureComposer.style.height = `${shell.captureComposer.scrollHeight}px`;
+}
+
+function openCaptureComposer(): void {
+  shell.captureOverlay.hidden = false;
+  shell.captureStatus.textContent = '';
+  resizeCaptureComposer();
+
+  window.requestAnimationFrame(() => {
+    shell.captureComposer.focus();
+  });
+}
+
+function closeCaptureComposer(): void {
+  shell.captureOverlay.hidden = true;
+  shell.captureStatus.textContent = '';
+  shell.captureComposer.value = '';
+  shell.captureComposer.style.height = '';
+  editorView?.focus();
+}
+
+function isCaptureShortcut(event: KeyboardEvent): boolean {
+  return (event.metaKey || event.ctrlKey) && event.shiftKey && event.key === ' ';
+}
+
+async function saveCapture(): Promise<void> {
+  const text = shell.captureComposer.value.trim();
+
+  if (!text || savingCapture) {
+    if (!text) {
+      shell.captureStatus.textContent = 'Write something first';
+    }
+    return;
+  }
+
+  savingCapture = true;
+  shell.captureSaveButton.disabled = true;
+  shell.captureStatus.textContent = 'Saving...';
+
+  const requestId = ++snapshotRequestId;
+
+  try {
+    await flushPendingSave();
+    const snapshot = await captureToNote(text);
+    closeCaptureComposer();
+    applyLatestSnapshot(requestId, snapshot, snapshot.content.length);
+  } catch (error) {
+    shell.captureStatus.textContent = 'Could not save';
+    console.error(error);
+  } finally {
+    savingCapture = false;
+    shell.captureSaveButton.disabled = false;
+  }
 }
 
 function initialCursorPosition(text: string): number {
@@ -143,8 +208,7 @@ function focusEditorAt(view: EditorView, position: number): void {
   });
 }
 
-function setEditorText(view: EditorView, text: string): void {
-  const cursorPosition = initialCursorPosition(text);
+function setEditorText(view: EditorView, text: string, cursorPosition = initialCursorPosition(text)): void {
 
   loadingDocument = true;
   view.dispatch({
@@ -202,7 +266,7 @@ function showNoteMenu(note: NoteEntry, x: number, y: number): void {
   shell.noteMenu.style.top = `${y}px`;
 }
 
-function applySnapshot(snapshot: SpaceSnapshot): void {
+function applySnapshot(snapshot: SpaceSnapshot, cursorPosition?: number): void {
   hideNoteMenu();
   activeNote = snapshot.active_note;
   activeRenderedNotes = snapshot.notes;
@@ -211,16 +275,16 @@ function applySnapshot(snapshot: SpaceSnapshot): void {
   renderNotes(activeRenderedNotes);
 
   if (editorView) {
-    setEditorText(editorView, snapshot.content);
+    setEditorText(editorView, snapshot.content, cursorPosition);
     updateCursorPosition(editorView);
   }
 }
 
-function applyLatestSnapshot(requestId: number, snapshot: SpaceSnapshot): void {
+function applyLatestSnapshot(requestId: number, snapshot: SpaceSnapshot, cursorPosition?: number): void {
   if (requestId !== snapshotRequestId) return;
 
   void rememberActiveNote(snapshot.active_note.path);
-  applySnapshot(snapshot);
+  applySnapshot(snapshot, cursorPosition);
 }
 
 async function selectNote(notePath: string): Promise<void> {
@@ -262,6 +326,31 @@ async function startApp(): Promise<void> {
     }
   });
 
+  shell.captureComposer.addEventListener('input', resizeCaptureComposer);
+
+  shell.captureComposer.addEventListener('keydown', (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault();
+      void saveCapture();
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeCaptureComposer();
+    }
+  });
+
+  shell.captureSaveButton.addEventListener('click', () => {
+    void saveCapture();
+  });
+
+  shell.captureOverlay.addEventListener('mousedown', (event) => {
+    if (event.target === shell.captureOverlay) {
+      closeCaptureComposer();
+    }
+  });
+
   shell.deleteNoteButton.addEventListener('click', () => {
     if (!contextMenuNote) return;
 
@@ -277,7 +366,18 @@ async function startApp(): Promise<void> {
   });
 
   window.addEventListener('keydown', (event) => {
+    if (isCaptureShortcut(event)) {
+      event.preventDefault();
+      openCaptureComposer();
+      return;
+    }
+
     if (event.key === 'Escape') {
+      if (!shell.captureOverlay.hidden) {
+        closeCaptureComposer();
+        return;
+      }
+
       hideNoteMenu();
     }
   });
