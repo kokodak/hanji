@@ -1,6 +1,6 @@
 import { RangeSetBuilder, type Text } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from '@codemirror/view';
-import { addInlinePreviewDecorations, lineIsOnlyInlineCode } from './inlinePreview';
+import { addInlinePreviewDecorations, getInlinePreviewCursorTarget, lineIsOnlyInlineCode } from './inlinePreview';
 import {
   collectFencedCodeBlocks,
   getFencedCodeBlockForLine,
@@ -48,6 +48,21 @@ function moveSingleInlineCodeClickToLineEnd(view: EditorView, event: MouseEvent)
   if (position === null) return false;
 
   const line = view.state.doc.lineAt(position);
+  const inlinePreviewTarget = getInlinePreviewCursorTarget(line.from, line.text, position);
+  if (inlinePreviewTarget !== null) {
+    const targetCoords = view.coordsAtPos(position);
+    if (!targetCoords || event.clientX >= targetCoords.left - 2) {
+      event.preventDefault();
+      view.dispatch({
+        selection: { anchor: inlinePreviewTarget },
+        scrollIntoView: true
+      });
+      view.focus();
+
+      return true;
+    }
+  }
+
   if (!lineIsOnlyInlineCode(line.text)) return false;
 
   const lineEndCoords = view.coordsAtPos(line.to);

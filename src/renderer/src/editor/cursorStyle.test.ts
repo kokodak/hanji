@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 
 const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
 const createEditorSource = readFileSync(new URL('./createEditor.ts', import.meta.url), 'utf8');
+const highlightingSource = readFileSync(new URL('./highlighting.ts', import.meta.url), 'utf8');
 
 function getRuleBody(selector: string): string {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -62,6 +63,24 @@ export const tests = [
       assert.match(emptySelectionRule, /width:\s*1ch;/);
       assert.match(emptySelectionRule, /height:\s*1lh;/);
       assert.match(emptySelectionRule, /background:\s*#c9dcda;/);
+    }
+  },
+  {
+    name: 'keeps hard line breaks visually distinct from soft wraps',
+    run() {
+      const lineRule = getRuleBody('#editor .cm-line');
+      const codeblockLineRule = getRuleBody('#editor .cm-line.cm-live-codeblock');
+      const hiddenTableLineRule = getRuleBody('#editor .cm-line.cm-live-table-source-hidden');
+
+      assert.match(lineRule, /margin-bottom:\s*0\.32em;/);
+      assert.match(codeblockLineRule, /margin-bottom:\s*0;/);
+      assert.match(hiddenTableLineRule, /margin-bottom:\s*0;/);
+    }
+  },
+  {
+    name: 'does not use parser heading weight for setext-like lines',
+    run() {
+      assert.doesNotMatch(highlightingSource, /tag:\s*t\.heading,\s*fontWeight/);
     }
   },
   {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import { addInlinePreviewDecorations, lineIsOnlyInlineCode } from './inlinePreview';
+import { addInlinePreviewDecorations, getInlinePreviewCursorTarget, lineIsOnlyInlineCode } from './inlinePreview';
 import type { PendingDecoration } from './types';
 
 interface DecorationSummary {
@@ -137,6 +137,15 @@ export const tests = [
 
       assert.equal(classes.includes('cm-live-emphasis'), true);
       assert.equal(classes.includes('cm-markdown-syntax-hidden'), false);
+    }
+  },
+  {
+    name: 'moves clicks at trailing inline preview syntax outside the markers',
+    run() {
+      assert.equal(getInlinePreviewCursorTarget(0, '**strong**', '**strong'.length), '**strong**'.length);
+      assert.equal(getInlinePreviewCursorTarget(0, '*emphasis*', '*emphasis'.length), '*emphasis*'.length);
+      assert.equal(getInlinePreviewCursorTarget(0, '`code`', '`code'.length), '`code`'.length);
+      assert.equal(getInlinePreviewCursorTarget(0, '**strong** after', '**strong'.length), null);
     }
   }
 ];

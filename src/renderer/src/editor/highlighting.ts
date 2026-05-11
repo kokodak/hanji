@@ -15,7 +15,6 @@ export const litheHighlightStyle = HighlightStyle.define([
   { tag: t.strong, fontWeight: '700' },
   { tag: t.emphasis, fontStyle: 'italic' },
   { tag: t.strikethrough, textDecoration: 'line-through' },
-  { tag: t.heading, fontWeight: '700' },
   { tag: [t.atom, t.bool, t.special(t.variableName)], color: '#a04f16' },
   { tag: [t.processingInstruction, t.string, t.inserted], color: '#4f6f25' },
   { tag: t.invalid, color: '#b3261e' }
