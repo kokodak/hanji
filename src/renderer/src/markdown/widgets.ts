@@ -477,7 +477,7 @@ export class TableWidget extends WidgetType {
 
       const frameRect = frame.getBoundingClientRect();
       const selectedRects = selectedCells.map((cell) => cell.getBoundingClientRect());
-      const outlineInset = 0.5;
+      const outlineInset = 1;
       const left = Math.min(...selectedRects.map((rect) => rect.left)) - frameRect.left - outlineInset;
       const top = Math.min(...selectedRects.map((rect) => rect.top)) - frameRect.top - outlineInset;
       const right = Math.max(...selectedRects.map((rect) => rect.right)) - frameRect.left + outlineInset;

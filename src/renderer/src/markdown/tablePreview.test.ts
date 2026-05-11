@@ -138,7 +138,7 @@ export const tests = [
       assert.match(frameSelectionRule, /left:\s*var\(--selection-outline-left\);/);
       assert.match(tableCellRule, /min-width:\s*32px;/);
       assert.match(tableCellRule, /height:\s*30px;/);
-      assert.match(widgetsSource, /const outlineInset = 0\.5;/);
+      assert.match(widgetsSource, /const outlineInset = 1;/);
       assert.match(widgetsSource, /frame\.classList\.toggle\('has-cell-selection'/);
       assert.match(widgetsSource, /--selection-outline-width/);
       assert.match(widgetsSource, /right - left/);
