@@ -43,6 +43,18 @@ export const tests = [
     }
   },
   {
+    name: 'uses compact text selection paint',
+    run() {
+      const selectionLayerRule = getRuleBody('#editor .cm-selectionBackground,\n#editor .cm-focused .cm-selectionBackground');
+      const nativeSelectionRule = getRuleBody('#editor .cm-content ::selection');
+      const compactSelectionRule = getRuleBody('#editor .cm-compact-selection');
+
+      assert.match(selectionLayerRule, /background:\s*transparent;/);
+      assert.match(nativeSelectionRule, /background:\s*transparent;/);
+      assert.match(compactSelectionRule, /background:\s*#c9dcda;/);
+    }
+  },
+  {
     name: 'preserves hidden Markdown syntax layout space',
     run() {
       const syntaxRule = getRuleBody('#editor .cm-markdown-syntax-hidden');

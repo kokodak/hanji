@@ -10,11 +10,14 @@ import {
 } from './fencedCode';
 import {
   bulletMarker,
+  compactSelection,
   headingClasses,
   hiddenHeadingSyntax,
   hiddenSyntax,
   hiddenTableSourceLine,
   liveCheckedTask,
+  selectedHiddenTableSourceLine,
+  selectedTablePreviewLine,
   tablePreviewLine
 } from './decorations';
 import { CheckboxWidget, CodeLanguageWidget, HorizontalRuleWidget, NumberedListWidget, TableWidget } from './widgets';
@@ -53,6 +56,35 @@ function moveSingleInlineCodeClickToLineEnd(view: EditorView, event: MouseEvent)
   return true;
 }
 
+function tableIntersectsSelection(view: EditorView, table: MarkdownTable): boolean {
+  const startLine = view.state.doc.line(table.startLine);
+  const endLine = view.state.doc.line(table.endLine);
+
+  return view.state.selection.ranges.some((range) => {
+    const selectionFrom = Math.min(range.from, range.to);
+    const selectionTo = Math.max(range.from, range.to);
+
+    return selectionFrom < endLine.to && selectionTo > startLine.from;
+  });
+}
+
+function addCompactSelectionDecorations(view: EditorView, pending: PendingDecoration[], from: number, to: number): void {
+  if (from >= to) return;
+
+  for (const range of view.state.selection.ranges) {
+    if (range.empty) continue;
+
+    const selectionFrom = Math.min(range.from, range.to);
+    const selectionTo = Math.max(range.from, range.to);
+    const selectedFrom = Math.max(selectionFrom, from);
+    const selectedTo = Math.min(selectionTo, to);
+
+    if (selectedFrom < selectedTo) {
+      pending.push({ from: selectedFrom, to: selectedTo, decoration: compactSelection });
+    }
+  }
+}
+
 function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   const pending: PendingDecoration[] = [];
@@ -77,6 +109,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
       const horizontalRule = lineIsHorizontalRule(lineText);
 
       if (codeBlock) {
+        addCompactSelectionDecorations(view, pending, line.from, line.to);
         const activeCodeBlock = isActiveFencedCodeBlock(view, codeBlock);
         const fenceLine = line.number === codeBlock.startLine || line.number === codeBlock.endLine;
 
@@ -108,6 +141,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
       }
 
       if (inFrontmatter) {
+        addCompactSelectionDecorations(view, pending, line.from, line.to);
         pending.push({
           from: line.from,
           to: line.from,
@@ -119,21 +153,25 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
       }
 
       if (table) {
+        const selectedTable = tableIntersectsSelection(view, table);
+
         if (line.number === table.startLine) {
-          pending.push({ from: line.from, to: line.from, decoration: tablePreviewLine });
+          pending.push({ from: line.from, to: line.from, decoration: selectedTable ? selectedTablePreviewLine : tablePreviewLine });
           pending.push({
             from: line.from,
             to: line.to,
-            decoration: Decoration.replace({ widget: new TableWidget(table) })
+            decoration: Decoration.replace({ widget: new TableWidget(table, selectedTable) })
           });
         } else {
-          pending.push({ from: line.from, to: line.from, decoration: hiddenTableSourceLine });
+          pending.push({ from: line.from, to: line.from, decoration: selectedTable ? selectedHiddenTableSourceLine : hiddenTableSourceLine });
           pending.push({ from: line.from, to: line.to, decoration: hiddenSyntax });
         }
 
         pos = line.to + 1;
         continue;
       }
+
+      addCompactSelectionDecorations(view, pending, line.from, line.to);
 
       if (headingMatch) {
         const headingLevel = Math.min(headingMatch[1].length, headingClasses.length);

@@ -295,8 +295,15 @@ input:focus {
 }
 
 #editor .cm-selectionBackground,
-#editor .cm-focused .cm-selectionBackground,
+#editor .cm-focused .cm-selectionBackground {
+  background: transparent;
+}
+
 #editor .cm-content ::selection {
+  background: transparent;
+}
+
+#editor .cm-compact-selection {
   background: #c9dcda;
 }
 
@@ -518,6 +525,7 @@ input:focus {
 
 #editor .cm-live-table.has-cell-selection {
   outline: 0;
+  user-select: none;
 }
 
 #editor .cm-live-table.has-cell-selection::after {
@@ -539,6 +547,14 @@ input:focus {
 
 #editor .cm-line.cm-live-table-line {
   line-height: 0;
+}
+
+#editor .cm-line.cm-live-table-selection-hidden .cm-selectionBackground {
+  background: transparent;
+}
+
+#editor .cm-line.cm-live-table-selection-hidden ::selection {
+  background: transparent;
 }
 
 #editor .cm-line.cm-live-table-source-hidden {

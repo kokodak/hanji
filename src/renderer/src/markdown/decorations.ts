@@ -9,9 +9,14 @@ export const liveStrikethrough = Decoration.mark({ class: 'cm-live-strikethrough
 export const liveLink = Decoration.mark({ class: 'cm-live-link' });
 export const liveCode = Decoration.mark({ class: 'cm-live-code' });
 export const liveCheckedTask = Decoration.mark({ class: 'cm-live-task-checked' });
+export const compactSelection = Decoration.mark({ class: 'cm-compact-selection' });
 export const bulletMarker = Decoration.replace({ widget: new BulletWidget() });
 export const tablePreviewLine = Decoration.line({ class: 'cm-live-table-line' });
 export const hiddenTableSourceLine = Decoration.line({ class: 'cm-live-table-source-hidden' });
+export const selectedTablePreviewLine = Decoration.line({ class: 'cm-live-table-line cm-live-table-selection-hidden' });
+export const selectedHiddenTableSourceLine = Decoration.line({
+  class: 'cm-live-table-source-hidden cm-live-table-selection-hidden'
+});
 
 export const fencedCodeLine = Decoration.line({ class: 'cm-live-codeblock' });
 export const fencedCodeFirstLine = Decoration.line({ class: 'cm-live-codeblock cm-live-codeblock-first' });

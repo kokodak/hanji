@@ -75,7 +75,10 @@ export class HorizontalRuleWidget extends WidgetType {
 }
 
 export class TableWidget extends WidgetType {
-  constructor(private readonly table: MarkdownTable) {
+  constructor(
+    private readonly table: MarkdownTable,
+    private readonly selectedByEditorSelection = false
+  ) {
     super();
   }
 
@@ -83,7 +86,8 @@ export class TableWidget extends WidgetType {
     return (
       other.table.startLine === this.table.startLine &&
       other.table.endLine === this.table.endLine &&
-      this.markdownSource() === other.markdownSource()
+      this.markdownSource() === other.markdownSource() &&
+      other.selectedByEditorSelection === this.selectedByEditorSelection
     );
   }
 
@@ -254,12 +258,14 @@ export class TableWidget extends WidgetType {
       table.classList.toggle('is-cell-dragging', draggingCells);
       updateSelectionOutline();
     };
-    const selectAllCells = (): void => {
+    const selectAllCells = (options: { focus: boolean } = { focus: true }): void => {
       selectCellRange(
         { row: 0, column: 0 },
         { row: this.table.rows.length, column: Math.max(0, this.table.headers.length - 1) }
       );
-      table.focus();
+      if (options.focus) {
+        table.focus();
+      }
     };
     const selectedMarkdown = (): string => {
       const selectedCells = getSelectedCells();
@@ -344,12 +350,21 @@ export class TableWidget extends WidgetType {
 
       return false;
     };
-    const convertNativeSelectionToTableSelection = (): void => {
-      if (!nativeSelectionTouchesTable()) return;
+    const editorSelectionTouchesTable = (): boolean => {
+      const selection = view.state.selection.main;
+      if (selection.empty) return false;
 
-      draggingCells = true;
-      clearDocumentSelection();
-      selectAllCells();
+      const startLine = view.state.doc.line(this.table.startLine);
+      const endLine = view.state.doc.line(this.table.endLine);
+
+      return selection.from < endLine.to && selection.to > startLine.from;
+    };
+    const convertNativeSelectionToTableSelection = (): void => {
+      const nativeSelectionTouchesRenderedTable = nativeSelectionTouchesTable();
+      if (!nativeSelectionTouchesRenderedTable && !editorSelectionTouchesTable()) return;
+
+      draggingCells = nativeSelectionTouchesRenderedTable;
+      selectAllCells({ focus: false });
     };
     const extendCellDrag = (event: MouseEvent): void => {
       if (event.buttons !== 1 && externalDragStart === null) return;
@@ -507,6 +522,10 @@ export class TableWidget extends WidgetType {
           view.focus();
         }
       });
+    }
+
+    if (this.selectedByEditorSelection) {
+      selectAllCells({ focus: false });
     }
 
     return table;

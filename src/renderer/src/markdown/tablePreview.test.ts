@@ -19,7 +19,7 @@ export const tests = [
   {
     name: 'does not create table previews as multiline replacement decorations',
     run() {
-      assert.match(livePreviewSource, /new TableWidget\(table\)/);
+      assert.match(livePreviewSource, /new TableWidget\(table, selectedTable\)/);
       assert.doesNotMatch(livePreviewSource, /activeTable/);
       assert.doesNotMatch(livePreviewSource, /new TableWidget\([^)]*\),\s*block:\s*true/);
       assert.doesNotMatch(livePreviewSource, /to:\s*endLine\.to,\s*decoration:\s*Decoration\.replace/);
@@ -54,9 +54,12 @@ export const tests = [
       assert.match(widgetsSource, /crossesTableX/);
       assert.match(widgetsSource, /crossesTableY/);
       assert.match(widgetsSource, /nativeSelectionTouchesTable/);
+      assert.match(widgetsSource, /nativeSelectionTouchesRenderedTable/);
+      assert.match(widgetsSource, /editorSelectionTouchesTable/);
       assert.match(widgetsSource, /selection\.getRangeAt\(index\)\.getClientRects\(\)/);
       assert.match(widgetsSource, /event\.buttons !== 1 && externalDragStart === null/);
       assert.match(widgetsSource, /selectAllCells\(\);/);
+      assert.match(widgetsSource, /selectAllCells\(\{ focus: false \}\);/);
       assert.match(widgetsSource, /getNearestCellAtPoint\(externalDragStart\.x, externalDragStart\.y\)/);
       assert.match(widgetsSource, /dragOrigin = \{ x: event\.clientX, y: event\.clientY \}/);
       assert.match(widgetsSource, /externalDragStart === null && cellPositionsMatch\(dragStart, cellPosition\)/);
@@ -65,6 +68,7 @@ export const tests = [
       assert.match(widgetsSource, /window\.getSelection\(\)\?\.removeAllRanges\(\)/);
       assert.match(widgetsSource, /classList\.add\('is-selected'\)/);
       assert.match(widgetsSource, /updateSelectionOutline/);
+      assert.match(widgetsSource, /selectedByEditorSelection/);
       assert.match(widgetsSource, /--selection-outline-left/);
       assert.match(widgetsSource, /--selection-outline-height/);
       assert.match(widgetsSource, /deleteDocumentTable/);
@@ -75,6 +79,24 @@ export const tests = [
       assert.match(widgetsSource, /document\.addEventListener\('mousemove', extendCellDrag, \{ capture: true/);
       assert.match(widgetsSource, /document\.addEventListener\('selectionchange', convertNativeSelectionToTableSelection/);
       assert.match(widgetsSource, /abortController\.abort\(\)/);
+    }
+  },
+  {
+    name: 'maps editor table selection to cell selection only',
+    run() {
+      const hiddenSelectionRule = getRuleBody('#editor .cm-line.cm-live-table-selection-hidden .cm-selectionBackground');
+      const nativeSelectionRule = getRuleBody('#editor .cm-line.cm-live-table-selection-hidden ::selection');
+      const tableSelectionRule = getRuleBody('#editor .cm-live-table.has-cell-selection');
+
+      assert.match(decorationsSource, /selectedTablePreviewLine/);
+      assert.match(decorationsSource, /selectedHiddenTableSourceLine/);
+      assert.match(livePreviewSource, /tableIntersectsSelection/);
+      assert.match(livePreviewSource, /new TableWidget\(table, selectedTable\)/);
+      assert.match(livePreviewSource, /selectedTable \? selectedTablePreviewLine : tablePreviewLine/);
+      assert.match(livePreviewSource, /selectedTable \? selectedHiddenTableSourceLine : hiddenTableSourceLine/);
+      assert.match(hiddenSelectionRule, /background:\s*transparent;/);
+      assert.match(nativeSelectionRule, /background:\s*transparent;/);
+      assert.match(tableSelectionRule, /user-select:\s*none;/);
     }
   },
   {
