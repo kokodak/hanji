@@ -859,7 +859,7 @@ input:focus {
 
 #editor .cm-live-blockquote-single::before {
   top: 0.12em;
-  bottom: 0.12em;
+  height: calc(1lh - 0.24em);
   border-radius: 999px;
 }
 
@@ -876,7 +876,7 @@ input:focus {
 
 #editor .cm-live-blockquote-end::before {
   top: 0;
-  bottom: 0.12em;
+  height: calc(1lh - 0.12em);
   border-radius: 0 0 999px 999px;
 }
 

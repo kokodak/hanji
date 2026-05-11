@@ -263,13 +263,13 @@ export const tests = [
       const endRule = getRuleBody('#editor .cm-live-blockquote-end::before');
 
       assert.match(singleRule, /top:\s*0\.12em;/);
-      assert.match(singleRule, /bottom:\s*0\.12em;/);
+      assert.match(singleRule, /height:\s*calc\(1lh - 0\.24em\);/);
       assert.match(startRule, /top:\s*0\.12em;/);
       assert.match(startRule, /bottom:\s*0;/);
       assert.match(middleRule, /top:\s*0;/);
       assert.match(middleRule, /bottom:\s*0;/);
       assert.match(endRule, /top:\s*0;/);
-      assert.match(endRule, /bottom:\s*0\.12em;/);
+      assert.match(endRule, /height:\s*calc\(1lh - 0\.12em\);/);
     }
   },
   {
