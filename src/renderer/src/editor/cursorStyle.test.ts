@@ -90,6 +90,7 @@ export const tests = [
     run() {
       const listLineRule = getRuleBody('#editor .cm-live-list-line');
       const bulletRule = getRuleBody('#editor .cm-live-bullet');
+      const bulletDotRule = getRuleBody('#editor .cm-live-bullet-dot');
       const checkboxRule = getRuleBody('#editor .cm-live-checkbox');
       const checkboxBoxRule = getRuleBody('#editor .cm-live-checkbox-box');
       const numberedRule = getRuleBody('#editor .cm-live-numbered-marker');
@@ -99,11 +100,15 @@ export const tests = [
 
       assert.match(listLineRule, /padding-left:\s*var\(--list-wrap-indent, 0\);/);
       assert.match(listLineRule, /text-indent:\s*calc\(var\(--list-wrap-indent, 0\) \* -1\);/);
-      assert.match(bulletRule, /width:\s*1\.4ch;/);
+      assert.match(bulletRule, /display:\s*inline-flex;/);
+      assert.match(bulletRule, /width:\s*2em;/);
+      assert.match(bulletRule, /justify-content:\s*flex-start;/);
       assert.match(bulletRule, /height:\s*1lh;/);
       assert.match(bulletRule, /line-height:\s*inherit;/);
       assert.match(bulletRule, /text-indent:\s*0;/);
       assert.match(bulletRule, /vertical-align:\s*top;/);
+      assert.match(bulletDotRule, /width:\s*1em;/);
+      assert.match(bulletDotRule, /text-align:\s*center;/);
       assert.match(checkboxRule, /width:\s*2em;/);
       assert.match(checkboxRule, /height:\s*1lh;/);
       assert.match(checkboxRule, /line-height:\s*inherit;/);

@@ -45,7 +45,12 @@ export class BulletWidget extends WidgetType {
   toDOM(): HTMLElement {
     const bullet = document.createElement('span');
     bullet.className = 'cm-live-bullet';
-    bullet.textContent = '•';
+
+    const dot = document.createElement('span');
+    dot.className = 'cm-live-bullet-dot';
+    dot.textContent = '•';
+    bullet.append(dot);
+
     bullet.draggable = false;
     bullet.contentEditable = 'false';
     bullet.setAttribute('aria-hidden', 'true');
