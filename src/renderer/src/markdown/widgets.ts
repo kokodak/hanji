@@ -680,10 +680,8 @@ export class TableWidget extends WidgetType {
       order.splice(to, 0, source);
 
       const finalStarts = Array.from({ length: targets.length }, () => 0);
-      let cursor = targets[0]?.start ?? 0;
-      for (const index of order) {
-        finalStarts[index] = cursor;
-        cursor += targets[index]?.size ?? 0;
+      for (const [slotIndex, index] of order.entries()) {
+        finalStarts[index] = targets[slotIndex]?.start ?? targets[index]?.start ?? 0;
       }
 
       return targets.map((target, index) => finalStarts[index] - target.start);
