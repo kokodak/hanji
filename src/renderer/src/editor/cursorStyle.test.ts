@@ -114,7 +114,9 @@ export const tests = [
       assert.match(checkboxRule, /line-height:\s*inherit;/);
       assert.match(checkboxRule, /text-indent:\s*0;/);
       assert.match(checkboxRule, /vertical-align:\s*top;/);
+      assert.doesNotMatch(checkboxRule, /cursor:\s*pointer;/);
       assert.match(checkboxBoxRule, /height:\s*1em;/);
+      assert.match(checkboxBoxRule, /cursor:\s*pointer;/);
       assert.doesNotMatch(checkboxBoxRule, /transform:/);
       assert.match(numberedRule, /min-width:\s*2\.1ch;/);
       assert.match(numberedRule, /height:\s*1lh;/);

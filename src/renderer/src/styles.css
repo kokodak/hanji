@@ -430,7 +430,6 @@ input:focus {
   line-height: inherit;
   text-indent: 0;
   vertical-align: top;
-  cursor: pointer;
 }
 
 #editor .cm-live-checkbox-box {
@@ -443,6 +442,7 @@ input:focus {
   border: 1px solid #b9aea1;
   border-radius: 3px;
   background: #fffefa;
+  cursor: pointer;
 }
 
 #editor .cm-live-checkbox.is-checked .cm-live-checkbox-box {

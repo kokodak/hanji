@@ -705,10 +705,10 @@ export class CheckboxWidget extends WidgetType {
       view.focus();
     };
 
-    checkbox.addEventListener('mousedown', (event) => {
+    box.addEventListener('mousedown', (event) => {
       event.preventDefault();
     });
-    checkbox.addEventListener('click', toggle);
+    box.addEventListener('click', toggle);
     checkbox.addEventListener('keydown', (event) => {
       if (event.key === ' ' || event.key === 'Enter') {
         toggle(event);
