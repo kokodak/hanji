@@ -697,8 +697,7 @@ input:focus {
   user-select: none;
 }
 
-#editor .cm-live-table-frame.has-cell-selection::after,
-#editor .cm-live-table-frame.has-focused-cell::after {
+#editor .cm-live-table-frame.has-cell-selection::after {
   position: absolute;
   z-index: 1;
   top: var(--selection-outline-top);

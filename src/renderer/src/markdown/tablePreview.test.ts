@@ -121,9 +121,7 @@ export const tests = [
     name: 'shows selected table cells with divider color only',
     run() {
       const tableSelectionRule = getRuleBody('#editor .cm-live-table.has-cell-selection');
-      const frameSelectionRule = getRuleBody(
-        '#editor .cm-live-table-frame.has-cell-selection::after,\n#editor .cm-live-table-frame.has-focused-cell::after'
-      );
+      const frameSelectionRule = getRuleBody('#editor .cm-live-table-frame.has-cell-selection::after');
       const tableRule = getRuleBody('#editor .cm-live-table');
       const tableCellRule = getRuleBody('#editor .cm-live-table th,\n#editor .cm-live-table td');
       const focusedEditableCellRule = getRuleBody(
@@ -147,13 +145,13 @@ export const tests = [
       assert.match(frameSelectionRule, /pointer-events:\s*none;/);
       assert.match(frameSelectionRule, /top:\s*var\(--selection-outline-top\);/);
       assert.match(frameSelectionRule, /left:\s*var\(--selection-outline-left\);/);
-      assert.doesNotMatch(styles, /#editor \.cm-live-table-frame\.is-structure-dragging\.has-cell-selection::after,\n#editor \.cm-live-table-frame\.is-structure-dragging\.has-focused-cell::after/);
+      assert.doesNotMatch(styles, /#editor \.cm-live-table-frame\.is-structure-dragging\.has-cell-selection::after/);
       assert.match(tableCellRule, /min-width:\s*32px;/);
       assert.match(tableCellRule, /height:\s*30px;/);
       assert.match(widgetsSource, /const outlineOutset = 1\.5;/);
       assert.match(widgetsSource, /frame\.classList\.toggle\('has-cell-selection'/);
-      assert.match(widgetsSource, /frame\.classList\.add\('has-focused-cell'\)/);
-      assert.match(widgetsSource, /setSelectionOutlineForCells\(\[cell\]\)/);
+      assert.doesNotMatch(widgetsSource, /frame\.classList\.add\('has-focused-cell'\)/);
+      assert.doesNotMatch(widgetsSource, /setSelectionOutlineForCells\(\[cell\]\)/);
       assert.match(widgetsSource, /--selection-outline-width/);
       assert.match(widgetsSource, /right - left/);
     }
@@ -227,9 +225,7 @@ export const tests = [
       const previewCellRule = getRuleBody('#editor .cm-live-table .is-structure-preview-cell');
       const previewHeaderRule = getRuleBody('#editor .cm-live-table .is-structure-preview-header-cell');
       const previewBodyRule = getRuleBody('#editor .cm-live-table .is-structure-preview-body-cell');
-      const frameSelectionRule = getRuleBody(
-        '#editor .cm-live-table-frame.has-cell-selection::after,\n#editor .cm-live-table-frame.has-focused-cell::after'
-      );
+      const frameSelectionRule = getRuleBody('#editor .cm-live-table-frame.has-cell-selection::after');
       const visibleControlRule = getRuleBody(
         '#editor .cm-live-table-handle.is-control-visible,\n#editor .cm-live-table-add.is-control-visible,\n#editor .cm-live-table-handle.is-drop-target,\n#editor .cm-live-table-handle.is-drag-source'
       );
