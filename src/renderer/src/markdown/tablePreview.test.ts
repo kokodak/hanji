@@ -135,6 +135,9 @@ export const tests = [
       assert.match(selectionOutlineRule, /pointer-events:\s*none;/);
       assert.match(selectionOutlineRule, /top:\s*var\(--selection-outline-top\);/);
       assert.match(selectionOutlineRule, /left:\s*var\(--selection-outline-left\);/);
+      assert.match(widgetsSource, /const outlineInset = 1;/);
+      assert.match(widgetsSource, /--selection-outline-width/);
+      assert.match(widgetsSource, /right - left/);
     }
   },
   {
@@ -204,6 +207,8 @@ export const tests = [
       const addRowRule = getRuleBody('#editor .cm-live-table-add-row');
       const sourceCellRule = getRuleBody('#editor .cm-live-table .is-structure-drag-source-cell');
       const previewCellRule = getRuleBody('#editor .cm-live-table .is-structure-preview-cell');
+      const previewHeaderRule = getRuleBody('#editor .cm-live-table .is-structure-preview-header-cell');
+      const previewBodyRule = getRuleBody('#editor .cm-live-table .is-structure-preview-body-cell');
       const visibleControlRule = getRuleBody(
         '#editor .cm-live-table-handle.is-control-visible,\n#editor .cm-live-table-add.is-control-visible,\n#editor .cm-live-table-handle.is-drop-target,\n#editor .cm-live-table-handle.is-drag-source'
       );
@@ -223,6 +228,9 @@ export const tests = [
       assert.match(widgetsSource, /nearestStructureTarget/);
       assert.match(widgetsSource, /getStructureDragTargets/);
       assert.match(widgetsSource, /structureTargetAtPoint/);
+      assert.match(widgetsSource, /rowIndexAfterMove/);
+      assert.match(widgetsSource, /setStructurePreviewCellState/);
+      assert.match(widgetsSource, /sourceTarget\.size/);
       assert.match(widgetsSource, /to:\s*from/);
       assert.match(widgetsSource, /if \(nextTarget === null\) return;/);
       assert.match(widgetsSource, /activeStructureDrag\.to/);
@@ -241,6 +249,8 @@ export const tests = [
       assert.match(visibleControlRule, /opacity:\s*1;/);
       assert.match(sourceCellRule, /box-shadow:\s*inset 0 0 0 2px #6fa09f;/);
       assert.match(previewCellRule, /transition:\s*transform 150ms ease;/);
+      assert.match(previewHeaderRule, /font-weight:\s*700;/);
+      assert.match(previewBodyRule, /font-weight:\s*400;/);
       assert.match(styles, /height:\s*22px;/);
       assert.match(styles, /min-width:\s*26px;/);
     }
