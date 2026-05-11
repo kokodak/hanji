@@ -187,7 +187,7 @@ export const tests = [
       assert.match(decorationsSource, /tablePreviewLine/);
       assert.match(livePreviewSource, /tablePreviewLine/);
       assert.match(frameRule, /display:\s*inline-block;/);
-      assert.match(frameRule, /padding:\s*18px 24px 24px 22px;/);
+      assert.match(frameRule, /padding:\s*18px 24px 24px 0;/);
       assert.match(tableRule, /display:\s*table;/);
       assert.match(tableRule, /margin:\s*0;/);
       assert.match(tableRule, /line-height:\s*1\.4;/);
@@ -212,12 +212,16 @@ export const tests = [
       assert.match(widgetsSource, /insertMarkdownTableColumn/);
       assert.match(widgetsSource, /insertMarkdownTableRow/);
       assert.match(widgetsSource, /moveMarkdownTableColumn/);
-      assert.match(widgetsSource, /moveMarkdownTableRow/);
+      assert.match(widgetsSource, /moveMarkdownTableVisualRow/);
+      assert.match(widgetsSource, /createStructureDragGhost/);
+      assert.match(widgetsSource, /cm-live-table-drag-ghost/);
+      assert.match(widgetsSource, /firstVisualRowCells/);
+      assert.match(widgetsSource, /createRowHandle\(0\)/);
       assert.match(widgetsSource, /ResizeObserver/);
       assert.match(frameRule, /position:\s*relative;/);
       assert.match(controlsRule, /pointer-events:\s*none;/);
-      assert.match(addColumnRule, /right:\s*2px;/);
-      assert.match(addRowRule, /bottom:\s*2px;/);
+      assert.match(addColumnRule, /border-radius:\s*5px;/);
+      assert.match(addRowRule, /height:\s*20px;/);
     }
   }
 ];

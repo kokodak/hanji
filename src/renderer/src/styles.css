@@ -529,7 +529,7 @@ input:focus {
   display: inline-block;
   box-sizing: border-box;
   width: 100%;
-  padding: 18px 24px 24px 22px;
+  padding: 18px 24px 24px 0;
   vertical-align: top;
 }
 
@@ -598,26 +598,53 @@ input:focus {
   color: #4f7776;
 }
 
+#editor .cm-live-table-handle.is-drag-source {
+  opacity: 0.45;
+}
+
 #editor .cm-live-table-frame.is-structure-dragging .cm-live-table-handle {
   cursor: grabbing;
 }
 
 #editor .cm-live-table-add {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  min-height: 20px;
   padding: 0;
   cursor: pointer;
   font-size: 14px;
 }
 
 #editor .cm-live-table-add-column {
-  right: 2px;
-  transform: translateY(-50%);
+  border-radius: 5px;
 }
 
 #editor .cm-live-table-add-row {
-  bottom: 2px;
-  transform: translateX(-50%);
+  height: 20px;
+  border-radius: 5px;
+}
+
+.cm-live-table-drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  top: 0;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  border: 1px solid #d5cabc;
+  border-radius: 5px;
+  background: #fffefa;
+  box-shadow: 0 8px 18px rgb(66 54 43 / 16%);
+  color: #4f7776;
+  font:
+    700 12px/1 Inter,
+    ui-sans-serif,
+    system-ui,
+    sans-serif;
+  pointer-events: none;
+  user-select: none;
 }
 
 #editor .cm-live-table th,

@@ -3,7 +3,7 @@ import {
   insertMarkdownTableColumn,
   insertMarkdownTableRow,
   moveMarkdownTableColumn,
-  moveMarkdownTableRow,
+  moveMarkdownTableVisualRow,
   serializeMarkdownTable,
   type MarkdownTable,
   type MarkdownTableContent
@@ -25,6 +25,7 @@ interface ActiveTableDrag {
 }
 
 interface ActiveTableStructureDrag {
+  ghost: HTMLElement;
   from: number;
   target: HTMLElement | null;
   type: 'column' | 'row';
@@ -315,13 +316,7 @@ export class TableWidget extends WidgetType {
     const cellAtStoredPosition = (position: { row: number; column: number }): HTMLTableCellElement =>
       getAllCells().find((cell) => cellPositionsMatch(position, getCellPosition(cell))) ?? getAllCells()[0];
     const headerCells = (): HTMLTableCellElement[] => Array.from(table.querySelectorAll<HTMLTableCellElement>('thead th'));
-    const firstBodyCells = (): HTMLTableCellElement[] => Array.from(table.querySelectorAll<HTMLTableCellElement>('tbody tr td:first-child'));
-    const setBoxFromRect = (element: HTMLElement, rect: DOMRect, frameRect: DOMRect): void => {
-      element.style.left = `${rect.left - frameRect.left}px`;
-      element.style.top = `${rect.top - frameRect.top}px`;
-      element.style.width = `${rect.width}px`;
-      element.style.height = `${rect.height}px`;
-    };
+    const firstVisualRowCells = (): HTMLTableCellElement[] => Array.from(table.querySelectorAll<HTMLTableCellElement>('tr > :first-child'));
     const syncTableControls = (): void => {
       const frameRect = frame.getBoundingClientRect();
       const tableRect = table.getBoundingClientRect();
@@ -337,16 +332,22 @@ export class TableWidget extends WidgetType {
         handle.style.width = `${rect.width}px`;
       }
 
-      for (const [index, cell] of firstBodyCells().entries()) {
+      for (const [index, cell] of firstVisualRowCells().entries()) {
         const handle = rowHandles[index];
         if (!handle) continue;
-        setBoxFromRect(handle, cell.getBoundingClientRect(), frameRect);
+        const rect = cell.getBoundingClientRect();
         handle.style.left = `${tableRect.left - frameRect.left - 20}px`;
+        handle.style.top = `${rect.top - frameRect.top}px`;
         handle.style.width = '18px';
+        handle.style.height = `${rect.height}px`;
       }
 
-      columnAddButton.style.top = `${tableRect.top - frameRect.top + tableRect.height / 2}px`;
-      rowAddButton.style.left = `${tableRect.left - frameRect.left + tableRect.width / 2}px`;
+      columnAddButton.style.left = `${tableRect.right - frameRect.left + 3}px`;
+      columnAddButton.style.top = `${tableRect.top - frameRect.top}px`;
+      columnAddButton.style.height = `${tableRect.height}px`;
+      rowAddButton.style.left = `${tableRect.left - frameRect.left}px`;
+      rowAddButton.style.top = `${tableRect.bottom - frameRect.top + 3}px`;
+      rowAddButton.style.width = `${tableRect.width}px`;
     };
     const scheduleTableControlSync = (): void => {
       requestAnimationFrame(syncTableControls);
@@ -458,7 +459,19 @@ export class TableWidget extends WidgetType {
     };
     const moveRow = (from: number, to: number): void => {
       if (from === to) return;
-      replaceWithCurrentTableContent(moveMarkdownTableRow(this.tableContentFromDOM(table), from, to));
+      replaceWithCurrentTableContent(moveMarkdownTableVisualRow(this.tableContentFromDOM(table), from, to));
+    };
+    const createStructureDragGhost = (type: 'column' | 'row', event: PointerEvent): HTMLElement => {
+      const ghost = document.createElement('span');
+      ghost.className = `cm-live-table-drag-ghost is-${type}`;
+      ghost.textContent = '::';
+      ghost.setAttribute('aria-hidden', 'true');
+      document.body.append(ghost);
+      moveStructureDragGhost(ghost, event);
+      return ghost;
+    };
+    const moveStructureDragGhost = (ghost: HTMLElement, event: PointerEvent): void => {
+      ghost.style.transform = `translate(${event.clientX + 10}px, ${event.clientY + 10}px)`;
     };
     const clearStructureDragTarget = (): void => {
       activeStructureDrag?.target?.classList.remove('is-drop-target');
@@ -474,6 +487,7 @@ export class TableWidget extends WidgetType {
       if (activeStructureDrag === null) return;
 
       event.preventDefault();
+      moveStructureDragGhost(activeStructureDrag.ghost, event);
       const target = handleAtPoint(event.clientX, event.clientY, activeStructureDrag.type);
       if (target === activeStructureDrag.target) return;
 
@@ -490,6 +504,8 @@ export class TableWidget extends WidgetType {
       const to = Number(target?.dataset.index ?? from);
 
       clearStructureDragTarget();
+      frame.querySelectorAll('.is-drag-source').forEach((element) => element.classList.remove('is-drag-source'));
+      activeStructureDrag.ghost.remove();
       frame.classList.remove('is-structure-dragging');
       activeStructureDrag = null;
 
@@ -505,8 +521,9 @@ export class TableWidget extends WidgetType {
       event.stopPropagation();
       clearDocumentSelection();
       const target = event.currentTarget as HTMLElement;
-      activeStructureDrag = { from, target, type };
+      activeStructureDrag = { from, ghost: createStructureDragGhost(type, event), target, type };
       target.classList.add('is-drop-target');
+      target.classList.add('is-drag-source');
       frame.classList.add('is-structure-dragging');
       setEditorTableCursorHidden(true);
     };
@@ -720,6 +737,21 @@ export class TableWidget extends WidgetType {
     document.addEventListener('mouseup', clearExternalDragStart, { capture: true, signal: abortController.signal });
     document.addEventListener('selectionchange', convertNativeSelectionToTableSelection, { signal: abortController.signal });
     frame.addEventListener('lithe-table-destroy', () => abortController.abort(), { once: true });
+    frame.addEventListener('lithe-table-destroy', () => activeStructureDrag?.ghost.remove(), { once: true });
+
+    const createRowHandle = (index: number): HTMLButtonElement => {
+      const handle = document.createElement('button');
+      handle.className = 'cm-live-table-handle cm-live-table-row-handle';
+      handle.type = 'button';
+      handle.textContent = '::';
+      handle.dataset.index = String(index);
+      handle.tabIndex = -1;
+      handle.title = 'Move row';
+      handle.setAttribute('aria-label', 'Move row');
+      handle.addEventListener('mousedown', stopControlPointerEvent);
+      handle.addEventListener('pointerdown', (event) => startStructureDrag(event, 'row', index));
+      return handle;
+    };
 
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
@@ -741,6 +773,7 @@ export class TableWidget extends WidgetType {
     }
     thead.append(headerRow);
     table.append(thead);
+    rowHandleLayer.append(createRowHandle(0));
 
     const tbody = document.createElement('tbody');
     for (const [rowIndex, row] of this.table.rows.entries()) {
@@ -751,17 +784,7 @@ export class TableWidget extends WidgetType {
       }
       tbody.append(tableRow);
 
-      const handle = document.createElement('button');
-      handle.className = 'cm-live-table-handle cm-live-table-row-handle';
-      handle.type = 'button';
-      handle.textContent = '::';
-      handle.dataset.index = String(rowIndex);
-      handle.tabIndex = -1;
-      handle.title = 'Move row';
-      handle.setAttribute('aria-label', 'Move row');
-      handle.addEventListener('mousedown', stopControlPointerEvent);
-      handle.addEventListener('pointerdown', (event) => startStructureDrag(event, 'row', rowIndex));
-      rowHandleLayer.append(handle);
+      rowHandleLayer.append(createRowHandle(rowIndex + 1));
     }
     table.append(tbody);
 
