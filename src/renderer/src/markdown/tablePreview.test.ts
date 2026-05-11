@@ -229,6 +229,9 @@ export const tests = [
       const previewCellBorderRule = getRuleBody('#editor .cm-live-table .is-structure-preview-cell::after');
       const previewHeaderRule = getRuleBody('#editor .cm-live-table .is-structure-preview-header-cell');
       const previewBodyRule = getRuleBody('#editor .cm-live-table .is-structure-preview-body-cell');
+      const draggingPreviewWeightRule = getRuleBody(
+        '#editor .cm-live-table-frame.is-structure-dragging .cm-live-table .is-structure-preview-header-cell,\n#editor .cm-live-table-frame.is-structure-dragging .cm-live-table .is-structure-preview-body-cell'
+      );
       const frameSelectionRule = getRuleBody('#editor .cm-live-table-frame.has-cell-selection::after');
       const sourceHandleRule = getRuleBody('#editor .cm-live-table-handle.is-drag-source');
       const draggingDropTargetRule = getRuleBody(
@@ -256,11 +259,8 @@ export const tests = [
       assert.match(widgetsSource, /rowIndexAfterMove/);
       assert.match(widgetsSource, /setStructurePreviewCellState/);
       assert.match(widgetsSource, /applyStructureHandlePreview/);
-      assert.match(widgetsSource, /captureStructureColumnWidths/);
-      assert.match(widgetsSource, /freezeStructureColumnWidths/);
-      assert.match(widgetsSource, /table\.style\.tableLayout = 'fixed'/);
-      assert.match(widgetsSource, /columnWidths: captureStructureColumnWidths\(\)/);
-      assert.match(widgetsSource, /freezeStructureColumnWidths\(drag\.columnWidths\)/);
+      assert.doesNotMatch(widgetsSource, /freezeStructureColumnWidths/);
+      assert.doesNotMatch(widgetsSource, /table\.style\.tableLayout = 'fixed'/);
       assert.match(widgetsSource, /structureDragOffsets/);
       assert.match(widgetsSource, /target\.start/);
       assert.match(widgetsSource, /cursor \+= targets\[index\]\?\.size/);
@@ -273,8 +273,6 @@ export const tests = [
       assert.match(widgetsSource, /document\.addEventListener\('pointermove', updateVisibleTableControls/);
       assert.match(widgetsSource, /clearStructureDragPreview/);
       assert.match(widgetsSource, /handle\.style\.transform = ''/);
-      assert.match(widgetsSource, /table\.style\.removeProperty\('table-layout'\)/);
-      assert.match(widgetsSource, /cell\.style\.width = ''/);
       assert.match(widgetsSource, /selectColumn\(from\)/);
       assert.match(widgetsSource, /selectVisualRow\(from\)/);
       assert.match(widgetsSource, /is-structure-drag-source-cell/);
@@ -302,6 +300,7 @@ export const tests = [
       assert.match(frameSelectionRule, /z-index:\s*4;/);
       assert.match(previewHeaderRule, /font-weight:\s*700;/);
       assert.match(previewBodyRule, /font-weight:\s*400;/);
+      assert.match(draggingPreviewWeightRule, /font-weight:\s*inherit;/);
       assert.match(styles, /height:\s*18px;/);
       assert.match(styles, /width:\s*18px;/);
       assert.match(styles, /min-height:\s*18px;/);

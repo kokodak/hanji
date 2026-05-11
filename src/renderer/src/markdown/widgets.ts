@@ -42,7 +42,6 @@ interface TableSelectionRect {
 
 interface ActiveTableStructureDrag {
   bounds: Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'>;
-  columnWidths: number[];
   from: number;
   sourceRects: TableSelectionRect[];
   target: HTMLElement | null;
@@ -647,28 +646,13 @@ export class TableWidget extends WidgetType {
       if (from === to) return;
       replaceWithCurrentTableContent(moveMarkdownTableVisualRow(this.tableContentFromDOM(table), from, to));
     };
-    const captureStructureColumnWidths = (): number[] => headerCells().map((cell) => cell.getBoundingClientRect().width);
-    const freezeStructureColumnWidths = (columnWidths: number[]): void => {
-      table.style.tableLayout = 'fixed';
-      table.style.width = `${table.getBoundingClientRect().width}px`;
-      for (const cell of getAllCells()) {
-        const column = getCellPosition(cell).column;
-        const width = columnWidths[column];
-        if (width !== undefined) {
-          cell.style.width = `${width}px`;
-        }
-      }
-    };
     const clearStructureDragPreview = (): void => {
-      table.style.removeProperty('table-layout');
-      table.style.removeProperty('width');
       for (const cell of getAllCells()) {
         cell.classList.remove('is-structure-preview-cell');
         cell.classList.remove('is-structure-drag-source-cell');
         cell.classList.remove('is-structure-preview-header-cell');
         cell.classList.remove('is-structure-preview-body-cell');
         cell.style.transform = '';
-        cell.style.width = '';
       }
       for (const handle of controlLayer.querySelectorAll<HTMLElement>('.cm-live-table-handle')) {
         handle.style.transform = '';
@@ -838,7 +822,6 @@ export class TableWidget extends WidgetType {
       }
       const drag = {
         bounds: getStructureDragBounds(type),
-        columnWidths: captureStructureColumnWidths(),
         from,
         sourceRects: getSelectionRects(getSelectedCells()),
         target,
@@ -851,7 +834,6 @@ export class TableWidget extends WidgetType {
       target.classList.add('is-drag-source');
       frame.classList.add('is-structure-dragging');
       clearVisibleControls();
-      freezeStructureColumnWidths(drag.columnWidths);
       applyStructureDragPreview(drag, from);
       setEditorTableCursorHidden(true);
     };
