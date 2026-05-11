@@ -66,6 +66,13 @@ export const tests = [
       assert.match(widgetsSource, /clearCellSelection\(\);\n\s+draggingCells = false;\n\s+return;/);
       assert.match(widgetsSource, /dragStart \?\?= getCellPosition\(/);
       assert.match(widgetsSource, /window\.getSelection\(\)\?\.removeAllRanges\(\)/);
+      assert.match(widgetsSource, /clearStaleTableInteractionSelection/);
+      assert.match(widgetsSource, /clearStaleTableInteractionSelection\(\);\n\s+dragStart = getCellPosition\(cell\);/);
+      assert.match(widgetsSource, /storedTableSelection/);
+      assert.match(widgetsSource, /selectionKey/);
+      assert.match(widgetsSource, /preserveStoredSelection/);
+      assert.match(widgetsSource, /storedTableSelection = \{ key: tableSelectionKey, from, to \};/);
+      assert.match(widgetsSource, /storedTableSelection\?\.key === tableSelectionKey/);
       assert.match(widgetsSource, /classList\.add\('is-selected'\)/);
       assert.match(widgetsSource, /updateSelectionOutline/);
       assert.match(widgetsSource, /selectedByEditorSelection/);

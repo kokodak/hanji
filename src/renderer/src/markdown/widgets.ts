@@ -4,6 +4,14 @@ import { serializeMarkdownTable, type MarkdownTable } from './table';
 const CELL_DRAG_THRESHOLD_PX = 6;
 const selectedCellClasses = ['is-selected'];
 
+interface StoredTableSelection {
+  from: { row: number; column: number };
+  key: string;
+  to: { row: number; column: number };
+}
+
+let storedTableSelection: StoredTableSelection | null = null;
+
 function pointerMovedBeyondThreshold(start: { x: number; y: number } | null, x: number, y: number): boolean {
   return start !== null && Math.hypot(x - start.x, y - start.y) >= CELL_DRAG_THRESHOLD_PX;
 }
@@ -93,6 +101,10 @@ export class TableWidget extends WidgetType {
 
   private markdownSource(): string {
     return serializeMarkdownTable(this.table.headers, this.table.rows);
+  }
+
+  private selectionKey(): string {
+    return `${this.table.startLine}:${this.table.endLine}:${this.markdownSource()}`;
   }
 
   private markdownFromDOM(table: HTMLTableElement): string {
@@ -204,12 +216,19 @@ export class TableWidget extends WidgetType {
 
       return startedAboveOrBelow && crossesTableX && crossesTableY;
     };
+    const tableSelectionKey = this.selectionKey();
     const clearDocumentSelection = (): void => {
       window.getSelection()?.removeAllRanges();
       const selection = view.state.selection.main;
       if (!selection.empty) {
         view.dispatch({ selection: { anchor: selection.head } });
       }
+    };
+    const clearStaleTableInteractionSelection = (): void => {
+      const selection = view.state.selection.main;
+      if (selection.empty && getSelectedCells().length === 0) return;
+
+      window.getSelection()?.removeAllRanges();
     };
 
     const getSelectedCells = (): HTMLTableCellElement[] => Array.from(table.querySelectorAll<HTMLTableCellElement>('.is-selected'));
@@ -236,16 +255,19 @@ export class TableWidget extends WidgetType {
       table.style.setProperty('--selection-outline-width', `${right - left}px`);
       table.style.setProperty('--selection-outline-height', `${bottom - top}px`);
     };
-    const clearCellSelection = (): void => {
+    const clearCellSelection = (options: { preserveStoredSelection?: boolean } = {}): void => {
       table.classList.remove('has-cell-selection');
       table.classList.remove('is-cell-dragging');
       for (const cell of getSelectedCells()) {
         cell.classList.remove(...selectedCellClasses);
       }
+      if (!options.preserveStoredSelection && storedTableSelection?.key === tableSelectionKey) {
+        storedTableSelection = null;
+      }
       updateSelectionOutline();
     };
     const selectCellRange = (from: { row: number; column: number }, to: { row: number; column: number }): void => {
-      clearCellSelection();
+      clearCellSelection({ preserveStoredSelection: true });
       const minRow = Math.min(from.row, to.row);
       const maxRow = Math.max(from.row, to.row);
       const minColumn = Math.min(from.column, to.column);
@@ -257,6 +279,7 @@ export class TableWidget extends WidgetType {
           cell.classList.add('is-selected');
         }
       }
+      storedTableSelection = { key: tableSelectionKey, from, to };
       table.classList.toggle('has-cell-selection', getSelectedCells().length > 0);
       table.classList.toggle('is-cell-dragging', draggingCells);
       updateSelectionOutline();
@@ -485,6 +508,7 @@ export class TableWidget extends WidgetType {
 
     for (const cell of getAllCells()) {
       cell.addEventListener('mousedown', (event) => {
+        clearStaleTableInteractionSelection();
         dragStart = getCellPosition(cell);
         dragOrigin = { x: event.clientX, y: event.clientY };
         draggingCells = false;
@@ -537,7 +561,9 @@ export class TableWidget extends WidgetType {
       });
     }
 
-    if (this.selectedByEditorSelection) {
+    if (storedTableSelection?.key === tableSelectionKey) {
+      selectCellRange(storedTableSelection.from, storedTableSelection.to);
+    } else if (this.selectedByEditorSelection) {
       selectAllCells({ focus: false });
     }
 
