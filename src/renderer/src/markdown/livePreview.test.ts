@@ -142,6 +142,36 @@ export const tests = [
     }
   },
   {
+    name: 'keeps fenced code preview background on fence lines',
+    run() {
+      const doc = '```ts\nconst ok = true;\n```\nBody';
+      const text = Text.of(doc.split('\n'));
+      const openingFence = text.line(1);
+      const codeLine = text.line(2);
+      const closingFence = text.line(3);
+      const summaries = collectDecorationSummaries(doc, { anchor: doc.length });
+
+      assert.equal(
+        summaries.some(
+          (summary) =>
+            summary.from === openingFence.from &&
+            summary.className === 'cm-live-codeblock cm-live-codeblock-first cm-live-codeblock-preview-fence'
+        ),
+        true
+      );
+      assert.equal(summaries.some((summary) => summary.from === codeLine.from && summary.className === 'cm-live-codeblock'), true);
+      assert.equal(
+        summaries.some(
+          (summary) =>
+            summary.from === closingFence.from &&
+            summary.className === 'cm-live-codeblock cm-live-codeblock-last cm-live-codeblock-preview-fence'
+        ),
+        true
+      );
+      assert.equal(summaries.some((summary) => summary.from === openingFence.from && summary.widgetName === 'CodeLanguageWidget'), true);
+    }
+  },
+  {
     name: 'collapses blockquote markers in preview mode',
     run() {
       const doc = '> Hi. This is Lee.\n> - kokodak\n\nBody';

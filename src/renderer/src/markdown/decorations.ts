@@ -23,6 +23,15 @@ export const fencedCodeLastLine = Decoration.line({ class: 'cm-live-codeblock cm
 export const fencedCodeSingleLine = Decoration.line({
   class: 'cm-live-codeblock cm-live-codeblock-first cm-live-codeblock-last'
 });
+export const previewFencedCodeFirstLine = Decoration.line({
+  class: 'cm-live-codeblock cm-live-codeblock-first cm-live-codeblock-preview-fence'
+});
+export const previewFencedCodeLastLine = Decoration.line({
+  class: 'cm-live-codeblock cm-live-codeblock-last cm-live-codeblock-preview-fence'
+});
+export const previewFencedCodeSingleLine = Decoration.line({
+  class: 'cm-live-codeblock cm-live-codeblock-first cm-live-codeblock-last cm-live-codeblock-preview-fence'
+});
 
 export const headingClasses = [
   'cm-live-heading-1',

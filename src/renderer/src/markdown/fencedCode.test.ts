@@ -122,22 +122,37 @@ export const tests = [
     }
   },
   {
-    name: 'assigns preview-mode line decorations to content lines',
+    name: 'assigns preview-mode line decorations across fence lines',
     run() {
       const block = collectFencedCodeBlocks(text(['```', 'one', 'two', '```']))[0];
 
-      assert.equal(getPreviewCodeLineDecoration(block, 2).spec.class, 'cm-live-codeblock cm-live-codeblock-first');
-      assert.equal(getPreviewCodeLineDecoration(block, 3).spec.class, 'cm-live-codeblock cm-live-codeblock-last');
+      assert.equal(
+        getPreviewCodeLineDecoration(block, 1).spec.class,
+        'cm-live-codeblock cm-live-codeblock-first cm-live-codeblock-preview-fence'
+      );
+      assert.equal(getPreviewCodeLineDecoration(block, 2).spec.class, 'cm-live-codeblock');
+      assert.equal(getPreviewCodeLineDecoration(block, 3).spec.class, 'cm-live-codeblock');
+      assert.equal(
+        getPreviewCodeLineDecoration(block, 4).spec.class,
+        'cm-live-codeblock cm-live-codeblock-last cm-live-codeblock-preview-fence'
+      );
     }
   },
   {
     name: 'keeps fenced code preview lines full width',
     run() {
       const lineRule = getRuleBody('#editor .cm-line.cm-live-codeblock');
+      const previewFenceRule = getRuleBody('#editor .cm-line.cm-live-codeblock.cm-live-codeblock-preview-fence');
       const blockRule = getRuleBody('#editor .cm-live-codeblock');
+      const languageRule = getRuleBody('#editor .cm-live-code-language');
 
       assert.match(lineRule, /width:\s*100%;/);
+      assert.match(lineRule, /padding-top:\s*0\.1em;/);
+      assert.match(lineRule, /padding-bottom:\s*0\.1em;/);
+      assert.match(previewFenceRule, /line-height:\s*0\.75;/);
       assert.match(blockRule, /width:\s*100%;/);
+      assert.match(languageRule, /top:\s*50%;/);
+      assert.match(languageRule, /transform:\s*translateY\(-50%\);/);
     }
   }
 ];

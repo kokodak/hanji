@@ -172,20 +172,17 @@ export function buildLivePreviewDecorations(view: EditorView, hoverLine: number 
         addCompactSelectionDecorations(view, pending, line.from, line.to);
         const activeCodeBlock = isActiveFencedCodeBlock(view, codeBlock);
         const fenceLine = line.number === codeBlock.startLine || line.number === codeBlock.endLine;
+        const lineDecoration = activeCodeBlock
+          ? getFencedCodeLineDecoration(codeBlock, line.number)
+          : getPreviewCodeLineDecoration(codeBlock, line.number);
 
-        if (activeCodeBlock || !fenceLine) {
-          const lineDecoration = activeCodeBlock
-            ? getFencedCodeLineDecoration(codeBlock, line.number)
-            : getPreviewCodeLineDecoration(codeBlock, line.number);
-
-          pending.push({ from: line.from, to: line.from, decoration: lineDecoration });
-        }
+        pending.push({ from: line.from, to: line.from, decoration: lineDecoration });
 
         if (!activeCodeBlock && fenceLine) {
           pending.push({ from: line.from, to: line.to, decoration: hiddenSyntax });
         }
 
-        if (line.number === (activeCodeBlock ? codeBlock.startLine : codeBlock.startLine + 1)) {
+        if (line.number === codeBlock.startLine) {
           pending.push({
             from: line.from,
             to: line.from,

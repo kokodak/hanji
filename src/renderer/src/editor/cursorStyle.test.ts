@@ -74,7 +74,8 @@ export const tests = [
 
       assert.match(lineRule, /padding:\s*0 0 0\.48em;/);
       assert.doesNotMatch(lineRule, /margin-bottom:/);
-      assert.match(codeblockLineRule, /padding-bottom:\s*0;/);
+      assert.match(codeblockLineRule, /padding-top:\s*0\.1em;/);
+      assert.match(codeblockLineRule, /padding-bottom:\s*0\.1em;/);
       assert.match(hiddenTableLineRule, /padding:\s*0;/);
     }
   },
