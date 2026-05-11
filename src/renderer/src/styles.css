@@ -614,12 +614,23 @@ input:focus {
 }
 
 #editor .cm-live-table .is-structure-preview-cell {
+  position: relative;
+  z-index: 1;
+  border-color: transparent;
   transition: transform 150ms ease;
 }
 
+#editor .cm-live-table .is-structure-preview-cell::after {
+  position: absolute;
+  inset: -1px;
+  box-sizing: border-box;
+  border: 1px solid #ded4c7;
+  content: "";
+  pointer-events: none;
+}
+
 #editor .cm-live-table .is-structure-drag-source-cell {
-  position: relative;
-  z-index: 1;
+  z-index: 2;
   box-shadow: none;
 }
 

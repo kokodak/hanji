@@ -225,6 +225,7 @@ export const tests = [
       const addRowRule = getRuleBody('#editor .cm-live-table-add-row');
       const sourceCellRule = getRuleBody('#editor .cm-live-table .is-structure-drag-source-cell');
       const previewCellRule = getRuleBody('#editor .cm-live-table .is-structure-preview-cell');
+      const previewCellBorderRule = getRuleBody('#editor .cm-live-table .is-structure-preview-cell::after');
       const previewHeaderRule = getRuleBody('#editor .cm-live-table .is-structure-preview-header-cell');
       const previewBodyRule = getRuleBody('#editor .cm-live-table .is-structure-preview-body-cell');
       const frameSelectionRule = getRuleBody('#editor .cm-live-table-frame.has-cell-selection::after');
@@ -272,7 +273,11 @@ export const tests = [
       assert.match(addRowRule, /height:\s*18px;/);
       assert.match(visibleControlRule, /opacity:\s*1;/);
       assert.match(sourceCellRule, /box-shadow:\s*none;/);
+      assert.match(sourceCellRule, /z-index:\s*2;/);
+      assert.match(previewCellRule, /border-color:\s*transparent;/);
       assert.match(previewCellRule, /transition:\s*transform 150ms ease;/);
+      assert.match(previewCellBorderRule, /inset:\s*-1px;/);
+      assert.match(previewCellBorderRule, /border:\s*1px solid #ded4c7;/);
       assert.match(frameSelectionRule, /top 150ms ease/);
       assert.match(previewHeaderRule, /font-weight:\s*700;/);
       assert.match(previewBodyRule, /font-weight:\s*400;/);
