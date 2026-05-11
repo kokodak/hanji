@@ -394,7 +394,7 @@ input:focus {
 
 #editor .cm-live-bullet {
   display: inline-flex;
-  width: 2em;
+  width: 1.45em;
   height: 1lh;
   align-items: center;
   justify-content: flex-start;
@@ -419,7 +419,7 @@ input:focus {
 
 #editor .cm-live-checkbox {
   display: inline-flex;
-  width: 2em;
+  width: 1.45em;
   height: 1lh;
   align-items: center;
   justify-content: flex-start;
@@ -502,7 +502,7 @@ input:focus {
 
 #editor .cm-live-numbered-marker {
   display: inline-block;
-  min-width: 2.4ch;
+  min-width: 2.1ch;
   height: 1lh;
   color: #6f7f2f;
   font-family:
