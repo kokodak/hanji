@@ -279,6 +279,7 @@ export const tests = [
       assert.match(widgetsSource, /firstVisualRowCells/);
       assert.match(widgetsSource, /createRowHandle\(0\)/);
       assert.match(widgetsSource, /ResizeObserver/);
+      assert.match(widgetsSource, /for \(const cell of getAllCells\(\)\) \{\n\s+resizeObserver\.observe\(cell\);/);
       assert.match(frameRule, /position:\s*relative;/);
       assert.match(controlsRule, /pointer-events:\s*none;/);
       assert.match(addColumnRule, /border-radius:\s*5px;/);

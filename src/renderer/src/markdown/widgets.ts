@@ -1179,6 +1179,9 @@ export class TableWidget extends WidgetType {
 
     const resizeObserver = new ResizeObserver(scheduleTableControlSync);
     resizeObserver.observe(table);
+    for (const cell of getAllCells()) {
+      resizeObserver.observe(cell);
+    }
     frame.addEventListener('lithe-table-destroy', () => resizeObserver.disconnect(), { once: true });
 
     return frame;
