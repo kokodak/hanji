@@ -87,6 +87,48 @@ function matchOverlapsInlineCode(
   return rangeOverlapsInlineCode(lineFrom + matchStart, lineFrom + matchStart + matchLength, inlineCodeRanges);
 }
 
+function rangeOverlapsSyntaxRange(from: number, to: number, ranges: InlineSyntaxRange[]): boolean {
+  return ranges.some((range) => from < range.to && to > range.from);
+}
+
+function collectAsteriskEmphasisRanges(
+  lineFrom: number,
+  lineText: string,
+  inlineCodeRanges: InlineSyntaxRange[],
+  protectedRanges: InlineSyntaxRange[]
+): InlineSyntaxRange[] {
+  const ranges: InlineSyntaxRange[] = [];
+  const usedMarkerPositions = new Set<number>();
+
+  for (let opening = 0; opening < lineText.length; opening += 1) {
+    if (lineText[opening] !== '*' || usedMarkerPositions.has(opening)) continue;
+    if (lineText[opening + 1] === '*' || /\s/.test(lineText[opening + 1] ?? '')) continue;
+
+    for (let closing = opening + 1; closing < lineText.length; closing += 1) {
+      if (lineText[closing] !== '*' || usedMarkerPositions.has(closing)) continue;
+      if (lineText[closing - 1] === '*' || /\s/.test(lineText[closing - 1] ?? '')) continue;
+
+      const from = lineFrom + opening;
+      const to = lineFrom + closing + 1;
+      if (rangeOverlapsInlineCode(from, to, inlineCodeRanges) || rangeOverlapsSyntaxRange(from, to, protectedRanges)) break;
+
+      ranges.push({
+        from,
+        to,
+        markers: [
+          { from, to: from + 1 },
+          { from: lineFrom + closing, to }
+        ]
+      });
+      usedMarkerPositions.add(opening);
+      usedMarkerPositions.add(closing);
+      break;
+    }
+  }
+
+  return ranges;
+}
+
 function addStyledContentDecoration(
   pending: PendingDecoration[],
   from: number,
@@ -128,6 +170,7 @@ export function addInlinePreviewDecorations(
   const syntaxRanges: InlineSyntaxRange[] = [];
   const inlineCodeRanges = collectInlineCodeRanges(lineFrom, lineText);
   syntaxRanges.push(...inlineCodeRanges);
+  const strongRanges: InlineSyntaxRange[] = [];
 
   for (const match of lineText.matchAll(/(\*\*)(.+?)\1/g)) {
     const matchStart = match.index ?? 0;
@@ -135,14 +178,16 @@ export function addInlinePreviewDecorations(
 
     const contentStart = matchStart + match[1].length;
     const contentEnd = matchStart + match[0].length - match[1].length;
-    syntaxRanges.push({
+    const strongRange = {
       from: lineFrom + matchStart,
       to: lineFrom + matchStart + match[0].length,
       markers: [
         { from: lineFrom + matchStart, to: lineFrom + contentStart },
         { from: lineFrom + contentEnd, to: lineFrom + matchStart + match[0].length }
       ]
-    });
+    };
+    strongRanges.push(strongRange);
+    syntaxRanges.push(strongRange);
   }
 
   for (const match of lineText.matchAll(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
@@ -170,23 +215,8 @@ export function addInlinePreviewDecorations(
     });
   }
 
-  for (const match of lineText.matchAll(/(^|[^\*])\*([^\s*][^*]*?[^\s*]|\S)\*(?!\*)/g)) {
-    const prefix = match[1];
-    const matchStart = (match.index ?? 0) + prefix.length;
-    if (matchOverlapsInlineCode(lineFrom, matchStart, match[0].length - prefix.length, inlineCodeRanges)) continue;
-
-    syntaxRanges.push({
-      from: lineFrom + matchStart,
-      to: lineFrom + matchStart + match[0].length - prefix.length,
-      markers: [
-        { from: lineFrom + matchStart, to: lineFrom + matchStart + 1 },
-        {
-          from: lineFrom + matchStart + match[0].length - prefix.length - 1,
-          to: lineFrom + matchStart + match[0].length - prefix.length
-        }
-      ]
-    });
-  }
+  const emphasisRanges = collectAsteriskEmphasisRanges(lineFrom, lineText, inlineCodeRanges, strongRanges);
+  syntaxRanges.push(...emphasisRanges);
 
   for (const match of lineText.matchAll(/(^|[^!])\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
     const prefix = match[1];
@@ -311,21 +341,12 @@ export function addInlinePreviewDecorations(
     }
   }
 
-  for (const match of lineText.matchAll(/(^|[^\*])\*([^\s*][^*]*?[^\s*]|\S)\*(?!\*)/g)) {
-    const prefix = match[1];
-    const matchStart = (match.index ?? 0) + prefix.length;
-    if (matchOverlapsInlineCode(lineFrom, matchStart, match[0].length - prefix.length, inlineCodeRanges)) continue;
-
-    const contentStart = matchStart + 1;
-    const contentEnd = matchStart + match[0].length - prefix.length - 1;
-    const openingFrom = lineFrom + matchStart;
-    const openingTo = lineFrom + contentStart;
-    const closingFrom = lineFrom + contentEnd;
-    const closingTo = lineFrom + matchStart + match[0].length - prefix.length;
-    const emphasisRange = syntaxRanges.find((range) => range.from === openingFrom && range.to === closingTo);
-    const activeEmphasis = emphasisRange
-      ? rangeIsActive(emphasisRange, activeRanges)
-      : syntaxRangeIsActive(view, openingFrom, closingTo);
+  for (const emphasisRange of emphasisRanges) {
+    const openingFrom = emphasisRange.markers[0].from;
+    const openingTo = emphasisRange.markers[0].to;
+    const closingFrom = emphasisRange.markers[1].from;
+    const closingTo = emphasisRange.markers[1].to;
+    const activeEmphasis = rangeIsActive(emphasisRange, activeRanges) || syntaxRangeIsActive(view, openingFrom, closingTo);
 
     if (!activeEmphasis) {
       pending.push({ from: openingFrom, to: openingTo, decoration: collapsedInlineSyntax });
@@ -333,8 +354,8 @@ export function addInlinePreviewDecorations(
 
     addStyledContentDecoration(
       pending,
-      lineFrom + contentStart,
-      lineFrom + contentEnd,
+      openingTo,
+      closingFrom,
       liveEmphasis,
       syntaxRanges,
       activeRanges

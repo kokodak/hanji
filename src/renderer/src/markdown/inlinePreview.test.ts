@@ -113,6 +113,24 @@ export const tests = [
     }
   },
   {
+    name: 'previews emphasis after one strong marker is deleted',
+    run() {
+      const leftDeleted = decorationSummariesFor('*qwe**');
+      const rightDeleted = decorationSummariesFor('**qwe*');
+
+      assert.deepEqual(leftDeleted, [
+        { from: 0, to: 1, className: undefined },
+        { from: 1, to: 4, className: 'cm-live-emphasis' },
+        { from: 4, to: 5, className: undefined }
+      ]);
+      assert.deepEqual(rightDeleted, [
+        { from: 1, to: 2, className: undefined },
+        { from: 2, to: 5, className: 'cm-live-emphasis' },
+        { from: 5, to: 6, className: undefined }
+      ]);
+    }
+  },
+  {
     name: 'keeps inline syntax visible during range selection',
     run() {
       const classes = decorationClassesFor('*emphasis*', { anchor: 0, head: '*emphasis*'.length });
