@@ -99,23 +99,19 @@ export const tests = [
 
       assert.match(listLineRule, /padding-left:\s*var\(--list-wrap-indent, 0\);/);
       assert.match(listLineRule, /text-indent:\s*calc\(var\(--list-wrap-indent, 0\) \* -1\);/);
-      assert.match(bulletRule, /width:\s*calc\(var\(--list-marker-indent, 0ch\) \+ var\(--list-marker-width, 2ch\)\);/);
-      assert.match(bulletRule, /padding-left:\s*var\(--list-marker-indent, 0ch\);/);
+      assert.match(bulletRule, /width:\s*1\.4ch;/);
       assert.match(bulletRule, /height:\s*1lh;/);
       assert.match(bulletRule, /line-height:\s*inherit;/);
       assert.match(bulletRule, /text-indent:\s*0;/);
       assert.match(bulletRule, /vertical-align:\s*top;/);
-      assert.match(checkboxRule, /width:\s*calc\(var\(--list-marker-indent, 0ch\) \+ var\(--list-marker-width, 6ch\)\);/);
-      assert.match(checkboxRule, /padding-left:\s*var\(--list-marker-indent, 0ch\);/);
+      assert.match(checkboxRule, /width:\s*2em;/);
       assert.match(checkboxRule, /height:\s*1lh;/);
       assert.match(checkboxRule, /line-height:\s*inherit;/);
       assert.match(checkboxRule, /text-indent:\s*0;/);
       assert.match(checkboxRule, /vertical-align:\s*top;/);
       assert.match(checkboxBoxRule, /height:\s*1em;/);
-      assert.match(checkboxBoxRule, /margin-left:\s*2ch;/);
       assert.doesNotMatch(checkboxBoxRule, /transform:/);
-      assert.match(numberedRule, /min-width:\s*calc\(var\(--list-marker-indent, 0ch\) \+ var\(--list-marker-width, 3ch\)\);/);
-      assert.match(numberedRule, /padding-left:\s*var\(--list-marker-indent, 0ch\);/);
+      assert.match(numberedRule, /min-width:\s*2\.4ch;/);
       assert.match(numberedRule, /height:\s*1lh;/);
       assert.match(numberedRule, /line-height:\s*inherit;/);
       assert.match(numberedRule, /text-indent:\s*0;/);

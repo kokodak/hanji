@@ -105,14 +105,11 @@ export const tests = [
       assert.match(livePreviewSource, /const indentLength = taskMatch\[1\]\.length;/);
       assert.match(livePreviewSource, /const indentLength = listMatch\[1\]\.length;/);
       assert.match(livePreviewSource, /const indentLength = numberedListMatch\[1\]\.length;/);
-      assert.match(livePreviewSource, /const markerWidth = taskMatch\[0\]\.length - indentLength;/);
-      assert.match(livePreviewSource, /const markerWidth = listMatch\[0\]\.length - indentLength;/);
-      assert.match(livePreviewSource, /const markerWidth = numberedListMatch\[0\]\.length - indentLength;/);
       assert.match(livePreviewSource, /listWrapLine\(indentLength\)/);
     }
   },
   {
-    name: 'replaces nested list indentation with depth-aware marker widgets',
+    name: 'keeps nested list indentation in source and replaces only markers',
     run() {
       const doc = '- root\n    - nested\n    1. numbered\n    - [ ] task';
       const summaries = collectDecorationSummaries(doc, { anchor: doc.length });
@@ -121,15 +118,15 @@ export const tests = [
       const taskLine = Text.of(doc.split('\n')).line(4);
 
       assert.equal(
-        summaries.some((summary) => summary.widgetName === 'BulletWidget' && summary.from === nestedLine.from && summary.to === nestedLine.from + 6),
+        summaries.some((summary) => summary.widgetName === 'BulletWidget' && summary.from === nestedLine.from + 4 && summary.to === nestedLine.from + 6),
         true
       );
       assert.equal(
-        summaries.some((summary) => summary.widgetName === 'NumberedListWidget' && summary.from === numberedLine.from && summary.to === numberedLine.from + 7),
+        summaries.some((summary) => summary.widgetName === 'NumberedListWidget' && summary.from === numberedLine.from + 4 && summary.to === numberedLine.from + 7),
         true
       );
       assert.equal(
-        summaries.some((summary) => summary.widgetName === 'CheckboxWidget' && summary.from === taskLine.from && summary.to === taskLine.from + 10),
+        summaries.some((summary) => summary.widgetName === 'CheckboxWidget' && summary.from === taskLine.from + 4 && summary.to === taskLine.from + 10),
         true
       );
     }

@@ -42,22 +42,9 @@ function safeHref(href: string): string {
 }
 
 export class BulletWidget extends WidgetType {
-  constructor(
-    private readonly indentLength = 0,
-    private readonly markerWidth = 2
-  ) {
-    super();
-  }
-
-  eq(other: BulletWidget): boolean {
-    return other.indentLength === this.indentLength && other.markerWidth === this.markerWidth;
-  }
-
   toDOM(): HTMLElement {
     const bullet = document.createElement('span');
     bullet.className = 'cm-live-bullet';
-    bullet.style.setProperty('--list-marker-indent', `${this.indentLength}ch`);
-    bullet.style.setProperty('--list-marker-width', `${this.markerWidth}ch`);
     bullet.textContent = '•';
     bullet.draggable = false;
     bullet.contentEditable = 'false';
@@ -71,23 +58,17 @@ export class BulletWidget extends WidgetType {
 }
 
 export class NumberedListWidget extends WidgetType {
-  constructor(
-    private readonly marker: string,
-    private readonly indentLength = 0,
-    private readonly markerWidth = marker.length + 1
-  ) {
+  constructor(private readonly marker: string) {
     super();
   }
 
   eq(other: NumberedListWidget): boolean {
-    return other.marker === this.marker && other.indentLength === this.indentLength && other.markerWidth === this.markerWidth;
+    return other.marker === this.marker;
   }
 
   toDOM(): HTMLElement {
     const marker = document.createElement('span');
     marker.className = 'cm-live-numbered-marker';
-    marker.style.setProperty('--list-marker-indent', `${this.indentLength}ch`);
-    marker.style.setProperty('--list-marker-width', `${this.markerWidth}ch`);
     marker.textContent = this.marker;
     marker.draggable = false;
     marker.contentEditable = 'false';
@@ -684,27 +665,18 @@ export class LinkWidget extends WidgetType {
 export class CheckboxWidget extends WidgetType {
   constructor(
     private readonly checked: boolean,
-    private readonly checkPosition: number,
-    private readonly indentLength = 0,
-    private readonly markerWidth = 6
+    private readonly checkPosition: number
   ) {
     super();
   }
 
   eq(other: CheckboxWidget): boolean {
-    return (
-      other.checked === this.checked &&
-      other.checkPosition === this.checkPosition &&
-      other.indentLength === this.indentLength &&
-      other.markerWidth === this.markerWidth
-    );
+    return other.checked === this.checked && other.checkPosition === this.checkPosition;
   }
 
   toDOM(view: EditorView): HTMLElement {
     const checkbox = document.createElement('span');
     checkbox.className = `cm-live-checkbox${this.checked ? ' is-checked' : ''}`;
-    checkbox.style.setProperty('--list-marker-indent', `${this.indentLength}ch`);
-    checkbox.style.setProperty('--list-marker-width', `${this.markerWidth}ch`);
     checkbox.setAttribute('aria-label', this.checked ? 'Mark task incomplete' : 'Mark task complete');
     checkbox.setAttribute('role', 'checkbox');
     checkbox.setAttribute('aria-checked', String(this.checked));
