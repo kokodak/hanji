@@ -266,7 +266,7 @@ export const tests = [
       assert.match(addColumnRule, /border-radius:\s*5px;/);
       assert.match(addRowRule, /height:\s*20px;/);
       assert.match(visibleControlRule, /opacity:\s*1;/);
-      assert.match(sourceCellRule, /box-shadow:\s*none;/);
+      assert.match(sourceCellRule, /box-shadow:\s*inset 0 0 0 2px #6fa09f;/);
       assert.match(previewCellRule, /transition:\s*transform 150ms ease;/);
       assert.match(previewHeaderRule, /font-weight:\s*700;/);
       assert.match(previewBodyRule, /font-weight:\s*400;/);
