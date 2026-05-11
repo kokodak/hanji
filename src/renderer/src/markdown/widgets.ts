@@ -465,9 +465,16 @@ export class TableWidget extends WidgetType {
         ];
       });
     };
-    const updateSelectionOutline = (): void => {
-      const selectedCells = getSelectedCells();
-      if (selectedCells.length === 0) {
+    const clearSelectionOutlineProperties = (): void => {
+      if (frame.classList.contains('has-focused-cell') || frame.classList.contains('has-cell-selection')) return;
+
+      frame.style.removeProperty('--selection-outline-left');
+      frame.style.removeProperty('--selection-outline-top');
+      frame.style.removeProperty('--selection-outline-width');
+      frame.style.removeProperty('--selection-outline-height');
+    };
+    const setSelectionOutlineForCells = (cells: HTMLTableCellElement[]): void => {
+      if (cells.length === 0) {
         frame.style.removeProperty('--selection-outline-left');
         frame.style.removeProperty('--selection-outline-top');
         frame.style.removeProperty('--selection-outline-width');
@@ -476,7 +483,7 @@ export class TableWidget extends WidgetType {
       }
 
       const frameRect = frame.getBoundingClientRect();
-      const selectedRects = selectedCells.map((cell) => cell.getBoundingClientRect());
+      const selectedRects = cells.map((cell) => cell.getBoundingClientRect());
       const outlineOutset = 1.5;
       const left = Math.min(...selectedRects.map((rect) => rect.left)) - frameRect.left - outlineOutset;
       const top = Math.min(...selectedRects.map((rect) => rect.top)) - frameRect.top - outlineOutset;
@@ -487,6 +494,26 @@ export class TableWidget extends WidgetType {
       frame.style.setProperty('--selection-outline-top', `${top}px`);
       frame.style.setProperty('--selection-outline-width', `${right - left}px`);
       frame.style.setProperty('--selection-outline-height', `${bottom - top}px`);
+    };
+    const clearFocusedCellOutline = (): void => {
+      frame.classList.remove('has-focused-cell');
+      clearSelectionOutlineProperties();
+    };
+    const updateFocusedCellOutline = (cell: HTMLTableCellElement): void => {
+      if (frame.classList.contains('has-cell-selection')) return;
+
+      frame.classList.add('has-focused-cell');
+      setSelectionOutlineForCells([cell]);
+    };
+    const updateSelectionOutline = (): void => {
+      const selectedCells = getSelectedCells();
+      if (selectedCells.length === 0) {
+        clearSelectionOutlineProperties();
+        return;
+      }
+
+      frame.classList.remove('has-focused-cell');
+      setSelectionOutlineForCells(selectedCells);
     };
     const clearCellSelection = (options: { preserveStoredSelection?: boolean } = {}): void => {
       table.classList.remove('has-cell-selection');
@@ -873,6 +900,10 @@ export class TableWidget extends WidgetType {
     };
     const cancelCellDragSelection = (): void => {
       clearCellSelection();
+      const focusedCell = document.activeElement instanceof HTMLTableCellElement ? document.activeElement : null;
+      if (focusedCell && table.contains(focusedCell)) {
+        updateFocusedCellOutline(focusedCell);
+      }
       draggingCells = false;
     };
 
@@ -957,6 +988,7 @@ export class TableWidget extends WidgetType {
       if (frame.contains(event.relatedTarget as Node | null)) return;
 
       setEditorTableCursorHidden(false);
+      clearFocusedCellOutline();
       clearCellSelection();
     });
     table.addEventListener('keydown', handleKeydown);
@@ -1065,9 +1097,13 @@ export class TableWidget extends WidgetType {
         if (!draggingCells && activeTableDrag?.key !== tableSelectionKey) {
           clearCellSelection();
         }
+        updateFocusedCellOutline(cell);
       });
       cell.addEventListener('blur', () => {
         this.updateDocument(view, table);
+        if (!frame.contains(document.activeElement)) {
+          clearFocusedCellOutline();
+        }
       });
       cell.addEventListener('keydown', (event) => {
         handleKeydown(event);

@@ -121,7 +121,9 @@ export const tests = [
     name: 'shows selected table cells with divider color only',
     run() {
       const tableSelectionRule = getRuleBody('#editor .cm-live-table.has-cell-selection');
-      const frameSelectionRule = getRuleBody('#editor .cm-live-table-frame.has-cell-selection::after');
+      const frameSelectionRule = getRuleBody(
+        '#editor .cm-live-table-frame.has-cell-selection::after,\n#editor .cm-live-table-frame.has-focused-cell::after'
+      );
       const tableRule = getRuleBody('#editor .cm-live-table');
       const tableCellRule = getRuleBody('#editor .cm-live-table th,\n#editor .cm-live-table td');
       const focusedEditableCellRule = getRuleBody(
@@ -134,8 +136,7 @@ export const tests = [
       assert.match(tableSelectionRule, /outline:\s*0;/);
       assert.match(focusedEditableCellRule, /position:\s*relative;/);
       assert.match(focusedEditableCellRule, /z-index:\s*2;/);
-      assert.match(focusedEditableCellRule, /outline:\s*2px solid #6fa09f;/);
-      assert.match(focusedEditableCellRule, /outline-offset:\s*-1px;/);
+      assert.match(focusedEditableCellRule, /outline:\s*0;/);
       assert.match(focusedEditableCellRule, /box-shadow:\s*none;/);
       assert.match(focusedHeaderRule, /outline:\s*0 !important;/);
       assert.match(focusedHeaderRule, /box-shadow:\s*none;/);
@@ -150,6 +151,8 @@ export const tests = [
       assert.match(tableCellRule, /height:\s*30px;/);
       assert.match(widgetsSource, /const outlineOutset = 1\.5;/);
       assert.match(widgetsSource, /frame\.classList\.toggle\('has-cell-selection'/);
+      assert.match(widgetsSource, /frame\.classList\.add\('has-focused-cell'\)/);
+      assert.match(widgetsSource, /setSelectionOutlineForCells\(\[cell\]\)/);
       assert.match(widgetsSource, /--selection-outline-width/);
       assert.match(widgetsSource, /right - left/);
     }

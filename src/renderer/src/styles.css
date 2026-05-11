@@ -678,8 +678,7 @@ input:focus {
 #editor .cm-live-table td[contenteditable]:focus {
   position: relative;
   z-index: 2;
-  outline: 2px solid #6fa09f;
-  outline-offset: -1px;
+  outline: 0;
   box-shadow: none;
 }
 
@@ -698,7 +697,8 @@ input:focus {
   user-select: none;
 }
 
-#editor .cm-live-table-frame.has-cell-selection::after {
+#editor .cm-live-table-frame.has-cell-selection::after,
+#editor .cm-live-table-frame.has-focused-cell::after {
   position: absolute;
   z-index: 1;
   top: var(--selection-outline-top);
