@@ -52,10 +52,20 @@ export const tests = [
   {
     name: 'still applies emphasis preview outside inline code',
     run() {
-      const classes = decorationClassesFor('`code_value` and _emphasis_');
+      const classes = decorationClassesFor('`code_value` and *emphasis*');
 
       assert.equal(classes.includes('cm-live-code'), true);
       assert.equal(classes.includes('cm-live-emphasis'), true);
+    }
+  },
+  {
+    name: 'does not treat underscores as emphasis syntax',
+    run() {
+      const classes = decorationClassesFor('_ㅂㅈㄷ_ and __strong__');
+
+      assert.equal(classes.includes('cm-live-emphasis'), false);
+      assert.equal(classes.includes('cm-live-strong'), false);
+      assert.equal(classes.includes('cm-markdown-syntax-hidden'), false);
     }
   }
 ];

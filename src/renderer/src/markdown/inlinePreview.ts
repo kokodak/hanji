@@ -129,7 +129,7 @@ export function addInlinePreviewDecorations(
   const inlineCodeRanges = collectInlineCodeRanges(lineFrom, lineText);
   syntaxRanges.push(...inlineCodeRanges);
 
-  for (const match of lineText.matchAll(/(\*\*|__)(.+?)\1/g)) {
+  for (const match of lineText.matchAll(/(\*\*)(.+?)\1/g)) {
     const matchStart = match.index ?? 0;
     if (matchOverlapsInlineCode(lineFrom, matchStart, match[0].length, inlineCodeRanges)) continue;
 
@@ -188,24 +188,6 @@ export function addInlinePreviewDecorations(
     });
   }
 
-  for (const match of lineText.matchAll(/(^|[^_])_([^\s_][^_]*?[^\s_]|\S)_(?!_)/g)) {
-    const prefix = match[1];
-    const matchStart = (match.index ?? 0) + prefix.length;
-    if (matchOverlapsInlineCode(lineFrom, matchStart, match[0].length - prefix.length, inlineCodeRanges)) continue;
-
-    syntaxRanges.push({
-      from: lineFrom + matchStart,
-      to: lineFrom + matchStart + match[0].length - prefix.length,
-      markers: [
-        { from: lineFrom + matchStart, to: lineFrom + matchStart + 1 },
-        {
-          from: lineFrom + matchStart + match[0].length - prefix.length - 1,
-          to: lineFrom + matchStart + match[0].length - prefix.length
-        }
-      ]
-    });
-  }
-
   for (const match of lineText.matchAll(/(^|[^!])\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
     const prefix = match[1];
     const matchStart = (match.index ?? 0) + prefix.length;
@@ -220,7 +202,7 @@ export function addInlinePreviewDecorations(
 
   const activeRanges = getActiveInlineRanges(view, syntaxRanges);
 
-  for (const match of lineText.matchAll(/(\*\*|__)(.+?)\1/g)) {
+  for (const match of lineText.matchAll(/(\*\*)(.+?)\1/g)) {
     const marker = match[1];
     const matchStart = match.index ?? 0;
     if (matchOverlapsInlineCode(lineFrom, matchStart, match[0].length, inlineCodeRanges)) continue;
@@ -330,40 +312,6 @@ export function addInlinePreviewDecorations(
   }
 
   for (const match of lineText.matchAll(/(^|[^\*])\*([^\s*][^*]*?[^\s*]|\S)\*(?!\*)/g)) {
-    const prefix = match[1];
-    const matchStart = (match.index ?? 0) + prefix.length;
-    if (matchOverlapsInlineCode(lineFrom, matchStart, match[0].length - prefix.length, inlineCodeRanges)) continue;
-
-    const contentStart = matchStart + 1;
-    const contentEnd = matchStart + match[0].length - prefix.length - 1;
-    const openingFrom = lineFrom + matchStart;
-    const openingTo = lineFrom + contentStart;
-    const closingFrom = lineFrom + contentEnd;
-    const closingTo = lineFrom + matchStart + match[0].length - prefix.length;
-    const emphasisRange = syntaxRanges.find((range) => range.from === openingFrom && range.to === closingTo);
-    const activeEmphasis = emphasisRange
-      ? rangeIsActive(emphasisRange, activeRanges)
-      : syntaxRangeIsActive(view, openingFrom, closingTo);
-
-    if (!activeEmphasis) {
-      pending.push({ from: openingFrom, to: openingTo, decoration: hiddenSyntax });
-    }
-
-    addStyledContentDecoration(
-      pending,
-      lineFrom + contentStart,
-      lineFrom + contentEnd,
-      liveEmphasis,
-      syntaxRanges,
-      activeRanges
-    );
-
-    if (!activeEmphasis) {
-      pending.push({ from: closingFrom, to: closingTo, decoration: hiddenSyntax });
-    }
-  }
-
-  for (const match of lineText.matchAll(/(^|[^_])_([^\s_][^_]*?[^\s_]|\S)_(?!_)/g)) {
     const prefix = match[1];
     const matchStart = (match.index ?? 0) + prefix.length;
     if (matchOverlapsInlineCode(lineFrom, matchStart, match[0].length - prefix.length, inlineCodeRanges)) continue;
