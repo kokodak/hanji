@@ -142,7 +142,7 @@ export const tests = [
     run() {
       const cursorRule = getRuleBody('#editor .cm-editor.has-live-table-cursor-hidden .cm-cursor');
       const hoverCursorRule = getRuleBody(
-        '#editor .cm-editor:has(.cm-live-table:hover) .cm-cursor,\n#editor .cm-editor:has(.cm-live-table:focus-within) .cm-cursor,\n#editor .cm-editor:has(.cm-live-table.has-cell-selection) .cm-cursor'
+        '#editor .cm-editor:has(.cm-live-table-frame:hover) .cm-cursor,\n#editor .cm-editor:has(.cm-live-table-frame:focus-within) .cm-cursor,\n#editor .cm-editor:has(.cm-live-table.has-cell-selection) .cm-cursor'
       );
 
       assert.match(cursorRule, /border-left-color:\s*transparent;/);
@@ -180,16 +180,44 @@ export const tests = [
   {
     name: 'keeps rendered tables tight to surrounding editor lines',
     run() {
+      const frameRule = getRuleBody('#editor .cm-live-table-frame');
       const tableRule = getRuleBody('#editor .cm-live-table');
       const tableLineRule = getRuleBody('#editor .cm-line.cm-live-table-line');
 
       assert.match(decorationsSource, /tablePreviewLine/);
       assert.match(livePreviewSource, /tablePreviewLine/);
+      assert.match(frameRule, /display:\s*inline-block;/);
+      assert.match(frameRule, /padding:\s*18px 24px 24px 22px;/);
       assert.match(tableRule, /display:\s*table;/);
       assert.match(tableRule, /margin:\s*0;/);
       assert.match(tableRule, /line-height:\s*1\.4;/);
       assert.match(tableRule, /vertical-align:\s*top;/);
       assert.match(tableLineRule, /line-height:\s*0;/);
+    }
+  },
+  {
+    name: 'supports rendered table structure controls',
+    run() {
+      const frameRule = getRuleBody('#editor .cm-live-table-frame');
+      const controlsRule = getRuleBody('#editor .cm-live-table-controls');
+      const addColumnRule = getRuleBody('#editor .cm-live-table-add-column');
+      const addRowRule = getRuleBody('#editor .cm-live-table-add-row');
+
+      assert.match(widgetsSource, /cm-live-table-column-handle/);
+      assert.match(widgetsSource, /cm-live-table-row-handle/);
+      assert.match(widgetsSource, /cm-live-table-add-column/);
+      assert.match(widgetsSource, /cm-live-table-add-row/);
+      assert.match(widgetsSource, /startStructureDrag/);
+      assert.match(widgetsSource, /finishStructureDrag/);
+      assert.match(widgetsSource, /insertMarkdownTableColumn/);
+      assert.match(widgetsSource, /insertMarkdownTableRow/);
+      assert.match(widgetsSource, /moveMarkdownTableColumn/);
+      assert.match(widgetsSource, /moveMarkdownTableRow/);
+      assert.match(widgetsSource, /ResizeObserver/);
+      assert.match(frameRule, /position:\s*relative;/);
+      assert.match(controlsRule, /pointer-events:\s*none;/);
+      assert.match(addColumnRule, /right:\s*2px;/);
+      assert.match(addRowRule, /bottom:\s*2px;/);
     }
   }
 ];

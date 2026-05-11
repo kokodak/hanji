@@ -1,5 +1,13 @@
 import { EditorView, WidgetType } from '@codemirror/view';
-import { serializeMarkdownTable, type MarkdownTable } from './table';
+import {
+  insertMarkdownTableColumn,
+  insertMarkdownTableRow,
+  moveMarkdownTableColumn,
+  moveMarkdownTableRow,
+  serializeMarkdownTable,
+  type MarkdownTable,
+  type MarkdownTableContent
+} from './table';
 
 const CELL_DRAG_THRESHOLD_PX = 6;
 const selectedCellClasses = ['is-selected'];
@@ -14,6 +22,12 @@ interface ActiveTableDrag {
   key: string;
   origin: { x: number; y: number };
   start: { row: number; column: number };
+}
+
+interface ActiveTableStructureDrag {
+  from: number;
+  target: HTMLElement | null;
+  type: 'column' | 'row';
 }
 
 let activeTableDrag: ActiveTableDrag | null = null;
@@ -119,28 +133,50 @@ export class TableWidget extends WidgetType {
     return `${this.table.startLine}:${this.table.endLine}:${this.markdownSource()}`;
   }
 
-  private markdownFromDOM(table: HTMLTableElement): string {
+  private tableContentFromDOM(table: HTMLTableElement): MarkdownTableContent {
     const headers = Array.from(table.querySelectorAll('thead th')).map((cell) => cell.textContent ?? '');
     const rows = Array.from(table.querySelectorAll('tbody tr')).map((row) =>
       Array.from(row.querySelectorAll('td')).map((cell) => cell.textContent ?? '')
     );
+
+    return { headers, rows };
+  }
+
+  private markdownFromDOM(table: HTMLTableElement): string {
+    const { headers, rows } = this.tableContentFromDOM(table);
     return serializeMarkdownTable(headers, rows);
   }
 
-  private updateDocument(view: EditorView, table: HTMLTableElement): void {
-    const markdown = this.markdownFromDOM(table);
+  private replaceDocumentTable(view: EditorView, markdown: string, selectionAnchor?: number): void {
     if (markdown === this.markdownSource()) return;
     if (this.table.endLine > view.state.doc.lines) return;
 
     const startLine = view.state.doc.line(this.table.startLine);
     const endLine = view.state.doc.line(this.table.endLine);
-    view.dispatch({
+    const transaction: Parameters<EditorView['dispatch']>[0] = {
       changes: {
         from: startLine.from,
         to: endLine.to,
         insert: markdown
       }
-    });
+    };
+
+    if (selectionAnchor !== undefined) {
+      transaction.selection = { anchor: selectionAnchor };
+      transaction.scrollIntoView = true;
+    }
+
+    view.dispatch(transaction);
+  }
+
+  private updateDocument(view: EditorView, table: HTMLTableElement): void {
+    this.replaceDocumentTable(view, this.markdownFromDOM(table));
+  }
+
+  private updateDocumentContent(view: EditorView, content: MarkdownTableContent): void {
+    const startLine = this.table.endLine <= view.state.doc.lines ? view.state.doc.line(this.table.startLine) : null;
+    this.replaceDocumentTable(view, serializeMarkdownTable(content.headers, content.rows), startLine?.from);
+    view.focus();
   }
 
   private deleteDocumentTable(view: EditorView): void {
@@ -172,6 +208,36 @@ export class TableWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
+    const frame = document.createElement('span');
+    frame.className = 'cm-live-table-frame';
+
+    const controlLayer = document.createElement('span');
+    controlLayer.className = 'cm-live-table-controls';
+
+    const columnAddButton = document.createElement('button');
+    columnAddButton.className = 'cm-live-table-add cm-live-table-add-column';
+    columnAddButton.type = 'button';
+    columnAddButton.textContent = '+';
+    columnAddButton.tabIndex = -1;
+    columnAddButton.title = 'Add column';
+    columnAddButton.setAttribute('aria-label', 'Add column');
+
+    const rowAddButton = document.createElement('button');
+    rowAddButton.className = 'cm-live-table-add cm-live-table-add-row';
+    rowAddButton.type = 'button';
+    rowAddButton.textContent = '+';
+    rowAddButton.tabIndex = -1;
+    rowAddButton.title = 'Add row';
+    rowAddButton.setAttribute('aria-label', 'Add row');
+
+    const columnHandleLayer = document.createElement('span');
+    columnHandleLayer.className = 'cm-live-table-column-handles';
+
+    const rowHandleLayer = document.createElement('span');
+    rowHandleLayer.className = 'cm-live-table-row-handles';
+
+    controlLayer.append(columnHandleLayer, rowHandleLayer, columnAddButton, rowAddButton);
+
     const table = document.createElement('table');
     table.className = 'cm-live-table';
     table.dataset.markdown = this.markdownSource();
@@ -182,6 +248,7 @@ export class TableWidget extends WidgetType {
     let dragOrigin: { x: number; y: number } | null = null;
     let externalDragStart: { x: number; y: number } | null = null;
     let draggingCells = false;
+    let activeStructureDrag: ActiveTableStructureDrag | null = null;
 
     const setEditorTableCursorHidden = (hidden: boolean): void => {
       view.dom.classList.toggle('has-live-table-cursor-hidden', hidden);
@@ -247,6 +314,43 @@ export class TableWidget extends WidgetType {
     const getAllCells = (): HTMLTableCellElement[] => Array.from(table.querySelectorAll<HTMLTableCellElement>('th, td'));
     const cellAtStoredPosition = (position: { row: number; column: number }): HTMLTableCellElement =>
       getAllCells().find((cell) => cellPositionsMatch(position, getCellPosition(cell))) ?? getAllCells()[0];
+    const headerCells = (): HTMLTableCellElement[] => Array.from(table.querySelectorAll<HTMLTableCellElement>('thead th'));
+    const firstBodyCells = (): HTMLTableCellElement[] => Array.from(table.querySelectorAll<HTMLTableCellElement>('tbody tr td:first-child'));
+    const setBoxFromRect = (element: HTMLElement, rect: DOMRect, frameRect: DOMRect): void => {
+      element.style.left = `${rect.left - frameRect.left}px`;
+      element.style.top = `${rect.top - frameRect.top}px`;
+      element.style.width = `${rect.width}px`;
+      element.style.height = `${rect.height}px`;
+    };
+    const syncTableControls = (): void => {
+      const frameRect = frame.getBoundingClientRect();
+      const tableRect = table.getBoundingClientRect();
+      const columnHandles = Array.from(columnHandleLayer.querySelectorAll<HTMLElement>('.cm-live-table-column-handle'));
+      const rowHandles = Array.from(rowHandleLayer.querySelectorAll<HTMLElement>('.cm-live-table-row-handle'));
+
+      for (const [index, cell] of headerCells().entries()) {
+        const handle = columnHandles[index];
+        if (!handle) continue;
+        const rect = cell.getBoundingClientRect();
+        handle.style.left = `${rect.left - frameRect.left}px`;
+        handle.style.top = `${tableRect.top - frameRect.top - 18}px`;
+        handle.style.width = `${rect.width}px`;
+      }
+
+      for (const [index, cell] of firstBodyCells().entries()) {
+        const handle = rowHandles[index];
+        if (!handle) continue;
+        setBoxFromRect(handle, cell.getBoundingClientRect(), frameRect);
+        handle.style.left = `${tableRect.left - frameRect.left - 20}px`;
+        handle.style.width = '18px';
+      }
+
+      columnAddButton.style.top = `${tableRect.top - frameRect.top + tableRect.height / 2}px`;
+      rowAddButton.style.left = `${tableRect.left - frameRect.left + tableRect.width / 2}px`;
+    };
+    const scheduleTableControlSync = (): void => {
+      requestAnimationFrame(syncTableControls);
+    };
     const updateSelectionOutline = (): void => {
       const selectedCells = getSelectedCells();
       if (selectedCells.length === 0) {
@@ -338,6 +442,74 @@ export class TableWidget extends WidgetType {
       clearCellSelection();
       table.focus();
     };
+    const replaceWithCurrentTableContent = (content: MarkdownTableContent): void => {
+      clearCellSelection();
+      this.updateDocumentContent(view, content);
+    };
+    const addColumn = (): void => {
+      replaceWithCurrentTableContent(insertMarkdownTableColumn(this.tableContentFromDOM(table), this.table.headers.length));
+    };
+    const addRow = (): void => {
+      replaceWithCurrentTableContent(insertMarkdownTableRow(this.tableContentFromDOM(table), this.table.rows.length));
+    };
+    const moveColumn = (from: number, to: number): void => {
+      if (from === to) return;
+      replaceWithCurrentTableContent(moveMarkdownTableColumn(this.tableContentFromDOM(table), from, to));
+    };
+    const moveRow = (from: number, to: number): void => {
+      if (from === to) return;
+      replaceWithCurrentTableContent(moveMarkdownTableRow(this.tableContentFromDOM(table), from, to));
+    };
+    const clearStructureDragTarget = (): void => {
+      activeStructureDrag?.target?.classList.remove('is-drop-target');
+      activeStructureDrag = activeStructureDrag === null ? null : { ...activeStructureDrag, target: null };
+    };
+    const handleAtPoint = (x: number, y: number, type: 'column' | 'row'): HTMLElement | null => {
+      const selector = type === 'column' ? '.cm-live-table-column-handle' : '.cm-live-table-row-handle';
+      const target = document.elementFromPoint(x, y);
+      const handle = target instanceof Element ? target.closest<HTMLElement>(selector) : null;
+      return handle !== null && frame.contains(handle) ? handle : null;
+    };
+    const updateStructureDragTarget = (event: PointerEvent): void => {
+      if (activeStructureDrag === null) return;
+
+      event.preventDefault();
+      const target = handleAtPoint(event.clientX, event.clientY, activeStructureDrag.type);
+      if (target === activeStructureDrag.target) return;
+
+      activeStructureDrag.target?.classList.remove('is-drop-target');
+      target?.classList.add('is-drop-target');
+      activeStructureDrag.target = target;
+    };
+    const finishStructureDrag = (event: PointerEvent): void => {
+      if (activeStructureDrag === null) return;
+
+      event.preventDefault();
+      const { from, type } = activeStructureDrag;
+      const target = activeStructureDrag.target ?? handleAtPoint(event.clientX, event.clientY, type);
+      const to = Number(target?.dataset.index ?? from);
+
+      clearStructureDragTarget();
+      frame.classList.remove('is-structure-dragging');
+      activeStructureDrag = null;
+
+      if (type === 'column') {
+        moveColumn(from, to);
+        return;
+      }
+
+      moveRow(from, to);
+    };
+    const startStructureDrag = (event: PointerEvent, type: 'column' | 'row', from: number): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      clearDocumentSelection();
+      const target = event.currentTarget as HTMLElement;
+      activeStructureDrag = { from, target, type };
+      target.classList.add('is-drop-target');
+      frame.classList.add('is-structure-dragging');
+      setEditorTableCursorHidden(true);
+    };
     const handleKeydown = (event: KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
         event.preventDefault();
@@ -357,7 +529,7 @@ export class TableWidget extends WidgetType {
       }
     };
     const clearSelectionOnOutsidePointer = (event: MouseEvent): void => {
-      if (table.contains(event.target as Node | null)) {
+      if (frame.contains(event.target as Node | null)) {
         externalDragStart = null;
         return;
       }
@@ -455,6 +627,41 @@ export class TableWidget extends WidgetType {
       draggingCells = false;
     };
 
+    const stopFramePointerEvent = (event: Event): void => {
+      event.stopPropagation();
+    };
+    const stopControlPointerEvent = (event: Event): void => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    frame.addEventListener('mousedown', stopFramePointerEvent);
+    frame.addEventListener('pointerdown', stopFramePointerEvent);
+    frame.addEventListener('click', stopFramePointerEvent);
+    frame.addEventListener('mouseenter', () => {
+      setEditorTableCursorHidden(true);
+      scheduleTableControlSync();
+    });
+    frame.addEventListener('mouseleave', () => {
+      setEditorTableCursorHidden(frame.contains(document.activeElement));
+    });
+    frame.addEventListener('focusin', () => {
+      setEditorTableCursorHidden(true);
+    });
+
+    columnAddButton.addEventListener('mousedown', stopControlPointerEvent);
+    columnAddButton.addEventListener('pointerdown', stopControlPointerEvent);
+    columnAddButton.addEventListener('click', (event) => {
+      stopControlPointerEvent(event);
+      addColumn();
+    });
+    rowAddButton.addEventListener('mousedown', stopControlPointerEvent);
+    rowAddButton.addEventListener('pointerdown', stopControlPointerEvent);
+    rowAddButton.addEventListener('click', (event) => {
+      stopControlPointerEvent(event);
+      addRow();
+    });
+
     table.addEventListener('copy', (event) => {
       event.preventDefault();
       event.clipboardData?.setData('text/plain', selectedMarkdown());
@@ -497,12 +704,14 @@ export class TableWidget extends WidgetType {
       draggingCells = false;
     });
     table.addEventListener('focusout', (event) => {
-      if (table.contains(event.relatedTarget as Node | null)) return;
+      if (frame.contains(event.relatedTarget as Node | null)) return;
 
       setEditorTableCursorHidden(false);
       clearCellSelection();
     });
     table.addEventListener('keydown', handleKeydown);
+    document.addEventListener('pointermove', updateStructureDragTarget, { capture: true, signal: abortController.signal });
+    document.addEventListener('pointerup', finishStructureDrag, { capture: true, signal: abortController.signal });
     document.addEventListener('pointerdown', clearSelectionOnOutsidePointer, { capture: true, signal: abortController.signal });
     document.addEventListener('pointermove', extendCellDrag, { capture: true, signal: abortController.signal });
     document.addEventListener('pointerup', clearExternalDragStart, { capture: true, signal: abortController.signal });
@@ -510,13 +719,25 @@ export class TableWidget extends WidgetType {
     document.addEventListener('mousemove', extendCellDrag, { capture: true, signal: abortController.signal });
     document.addEventListener('mouseup', clearExternalDragStart, { capture: true, signal: abortController.signal });
     document.addEventListener('selectionchange', convertNativeSelectionToTableSelection, { signal: abortController.signal });
-    table.addEventListener('lithe-table-destroy', () => abortController.abort(), { once: true });
+    frame.addEventListener('lithe-table-destroy', () => abortController.abort(), { once: true });
 
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
     for (const [index, header] of this.table.headers.entries()) {
       const cell = this.createCell('th', header, 0, index);
       headerRow.append(cell);
+
+      const handle = document.createElement('button');
+      handle.className = 'cm-live-table-handle cm-live-table-column-handle';
+      handle.type = 'button';
+      handle.textContent = '::';
+      handle.dataset.index = String(index);
+      handle.tabIndex = -1;
+      handle.title = 'Move column';
+      handle.setAttribute('aria-label', 'Move column');
+      handle.addEventListener('mousedown', stopControlPointerEvent);
+      handle.addEventListener('pointerdown', (event) => startStructureDrag(event, 'column', index));
+      columnHandleLayer.append(handle);
     }
     thead.append(headerRow);
     table.append(thead);
@@ -529,6 +750,18 @@ export class TableWidget extends WidgetType {
         tableRow.append(cell);
       }
       tbody.append(tableRow);
+
+      const handle = document.createElement('button');
+      handle.className = 'cm-live-table-handle cm-live-table-row-handle';
+      handle.type = 'button';
+      handle.textContent = '::';
+      handle.dataset.index = String(rowIndex);
+      handle.tabIndex = -1;
+      handle.title = 'Move row';
+      handle.setAttribute('aria-label', 'Move row');
+      handle.addEventListener('mousedown', stopControlPointerEvent);
+      handle.addEventListener('pointerdown', (event) => startStructureDrag(event, 'row', rowIndex));
+      rowHandleLayer.append(handle);
     }
     table.append(tbody);
 
@@ -597,7 +830,14 @@ export class TableWidget extends WidgetType {
       selectAllCells({ focus: false });
     }
 
-    return table;
+    frame.append(controlLayer, table);
+    scheduleTableControlSync();
+
+    const resizeObserver = new ResizeObserver(scheduleTableControlSync);
+    resizeObserver.observe(table);
+    frame.addEventListener('lithe-table-destroy', () => resizeObserver.disconnect(), { once: true });
+
+    return frame;
   }
 
   destroy(dom: HTMLElement): void {

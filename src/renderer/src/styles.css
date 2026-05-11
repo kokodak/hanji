@@ -336,8 +336,8 @@ input:focus {
   border-left-color: transparent;
 }
 
-#editor .cm-editor:has(.cm-live-table:hover) .cm-cursor,
-#editor .cm-editor:has(.cm-live-table:focus-within) .cm-cursor,
+#editor .cm-editor:has(.cm-live-table-frame:hover) .cm-cursor,
+#editor .cm-editor:has(.cm-live-table-frame:focus-within) .cm-cursor,
 #editor .cm-editor:has(.cm-live-table.has-cell-selection) .cm-cursor {
   border-left-color: transparent;
 }
@@ -524,6 +524,15 @@ input:focus {
   vertical-align: middle;
 }
 
+#editor .cm-live-table-frame {
+  position: relative;
+  display: inline-block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 18px 24px 24px 22px;
+  vertical-align: top;
+}
+
 #editor .cm-live-table {
   position: relative;
   display: table;
@@ -536,6 +545,79 @@ input:focus {
   font-size: 14px;
   line-height: 1.4;
   vertical-align: top;
+}
+
+#editor .cm-live-table-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+#editor .cm-live-table-frame:hover .cm-live-table-controls,
+#editor .cm-live-table-frame:focus-within .cm-live-table-controls,
+#editor .cm-live-table-frame.is-structure-dragging .cm-live-table-controls {
+  opacity: 1;
+}
+
+#editor .cm-live-table-handle,
+#editor .cm-live-table-add {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #8a7f72;
+  font: inherit;
+  line-height: 1;
+  pointer-events: auto;
+  user-select: none;
+}
+
+#editor .cm-live-table-handle {
+  height: 16px;
+  min-width: 18px;
+  padding: 0;
+  cursor: grab;
+  font-size: 11px;
+}
+
+#editor .cm-live-table-row-handle {
+  writing-mode: vertical-rl;
+}
+
+#editor .cm-live-table-handle:hover,
+#editor .cm-live-table-handle.is-drop-target,
+#editor .cm-live-table-add:hover {
+  border-color: #d5cabc;
+  background: #fffefa;
+  color: #4f7776;
+}
+
+#editor .cm-live-table-frame.is-structure-dragging .cm-live-table-handle {
+  cursor: grabbing;
+}
+
+#editor .cm-live-table-add {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+#editor .cm-live-table-add-column {
+  right: 2px;
+  transform: translateY(-50%);
+}
+
+#editor .cm-live-table-add-row {
+  bottom: 2px;
+  transform: translateX(-50%);
 }
 
 #editor .cm-live-table th,
