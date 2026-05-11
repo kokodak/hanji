@@ -586,8 +586,8 @@ input:focus {
 }
 
 #editor .cm-live-table-handle {
-  height: 16px;
-  min-width: 18px;
+  height: 22px;
+  min-width: 26px;
   padding: 0;
   cursor: grab;
   font-size: 11px;

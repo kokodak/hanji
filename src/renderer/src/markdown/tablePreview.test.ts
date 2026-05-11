@@ -220,6 +220,10 @@ export const tests = [
       assert.match(widgetsSource, /moveMarkdownTableVisualRow/);
       assert.match(widgetsSource, /updateVisibleTableControls/);
       assert.match(widgetsSource, /applyStructureDragPreview/);
+      assert.match(widgetsSource, /nearestCellIndex/);
+      assert.match(widgetsSource, /to:\s*from/);
+      assert.match(widgetsSource, /if \(target === null\) return;/);
+      assert.match(widgetsSource, /activeStructureDrag\.to/);
       assert.match(widgetsSource, /clearStructureDragPreview/);
       assert.match(widgetsSource, /selectColumn\(from\)/);
       assert.match(widgetsSource, /selectVisualRow\(from\)/);
@@ -234,6 +238,8 @@ export const tests = [
       assert.match(visibleControlRule, /opacity:\s*1;/);
       assert.match(sourceCellRule, /box-shadow:\s*inset 0 0 0 2px #6fa09f;/);
       assert.match(previewCellRule, /transition:\s*transform 150ms ease;/);
+      assert.match(styles, /height:\s*22px;/);
+      assert.match(styles, /min-width:\s*26px;/);
     }
   }
 ];

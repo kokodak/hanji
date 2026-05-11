@@ -27,6 +27,7 @@ interface ActiveTableDrag {
 interface ActiveTableStructureDrag {
   from: number;
   target: HTMLElement | null;
+  to: number;
   type: 'column' | 'row';
 }
 
@@ -319,10 +320,27 @@ export class TableWidget extends WidgetType {
     const firstVisualRowCells = (): HTMLTableCellElement[] => Array.from(table.querySelectorAll<HTMLTableCellElement>('tr > :first-child'));
     const getColumnCells = (column: number): HTMLTableCellElement[] =>
       getAllCells().filter((cell) => getCellPosition(cell).column === column);
-    const distanceToRect = (x: number, y: number, rect: DOMRect): number => {
+    const distanceToRect = (x: number, y: number, rect: Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'>): number => {
       const clampedX = Math.min(Math.max(x, rect.left), rect.right);
       const clampedY = Math.min(Math.max(y, rect.top), rect.bottom);
       return Math.hypot(x - clampedX, y - clampedY);
+    };
+    const isPointInRect = (x: number, y: number, rect: Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'>): boolean =>
+      distanceToRect(x, y, rect) === 0;
+    const nearestCellIndex = (cells: HTMLTableCellElement[], point: number, axis: 'x' | 'y'): number => {
+      let nearest = 0;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+      for (const [index, cell] of cells.entries()) {
+        const rect = cell.getBoundingClientRect();
+        const center = axis === 'x' ? rect.left + rect.width / 2 : rect.top + rect.height / 2;
+        const distance = Math.abs(point - center);
+        if (distance < nearestDistance) {
+          nearest = index;
+          nearestDistance = distance;
+        }
+      }
+
+      return nearest;
     };
     const setControlVisible = (control: HTMLElement, visible: boolean): void => {
       control.classList.toggle('is-control-visible', visible);
@@ -338,9 +356,27 @@ export class TableWidget extends WidgetType {
       const controls = Array.from(
         controlLayer.querySelectorAll<HTMLElement>('.cm-live-table-handle, .cm-live-table-add')
       );
+      const tableRect = table.getBoundingClientRect();
+      const columnCells = headerCells();
+      const rowCells = firstVisualRowCells();
       for (const control of controls) {
-        const threshold = control.classList.contains('cm-live-table-add') ? 14 : 12;
-        setControlVisible(control, distanceToRect(event.clientX, event.clientY, control.getBoundingClientRect()) <= threshold);
+        const index = Number(control.dataset.index ?? -1);
+        const cell = control.classList.contains('cm-live-table-column-handle')
+          ? columnCells[index]
+          : control.classList.contains('cm-live-table-row-handle')
+            ? rowCells[index]
+            : null;
+        const rect = cell?.getBoundingClientRect();
+        const visibilityRect = control.classList.contains('cm-live-table-column-handle') && rect
+          ? { left: rect.left - 8, right: rect.right + 8, top: tableRect.top - 34, bottom: rect.bottom }
+          : control.classList.contains('cm-live-table-row-handle') && rect
+            ? { left: tableRect.left - 34, right: tableRect.left + 42, top: rect.top - 8, bottom: rect.bottom + 8 }
+            : control.classList.contains('cm-live-table-add-column')
+              ? { left: tableRect.right - 10, right: tableRect.right + 36, top: tableRect.top, bottom: tableRect.bottom }
+              : control.classList.contains('cm-live-table-add-row')
+                ? { left: tableRect.left, right: tableRect.right, top: tableRect.bottom - 10, bottom: tableRect.bottom + 36 }
+                : control.getBoundingClientRect();
+        setControlVisible(control, isPointInRect(event.clientX, event.clientY, visibilityRect));
       }
     };
     const syncTableControls = (): void => {
@@ -354,7 +390,7 @@ export class TableWidget extends WidgetType {
         if (!handle) continue;
         const rect = cell.getBoundingClientRect();
         handle.style.left = `${rect.left - frameRect.left}px`;
-        handle.style.top = `${tableRect.top - frameRect.top - 18}px`;
+        handle.style.top = `${tableRect.top - frameRect.top - 24}px`;
         handle.style.width = `${rect.width}px`;
       }
 
@@ -362,9 +398,9 @@ export class TableWidget extends WidgetType {
         const handle = rowHandles[index];
         if (!handle) continue;
         const rect = cell.getBoundingClientRect();
-        handle.style.left = `${tableRect.left - frameRect.left - 20}px`;
+        handle.style.left = `${tableRect.left - frameRect.left - 30}px`;
         handle.style.top = `${rect.top - frameRect.top}px`;
-        handle.style.width = '18px';
+        handle.style.width = '28px';
         handle.style.height = `${rect.height}px`;
       }
 
@@ -588,24 +624,41 @@ export class TableWidget extends WidgetType {
       activeStructureDrag = activeStructureDrag === null ? null : { ...activeStructureDrag, target: null };
     };
     const handleAtPoint = (x: number, y: number, type: 'column' | 'row'): HTMLElement | null => {
+      const tableRect = table.getBoundingClientRect();
       if (type === 'column') {
         const handles = Array.from(columnHandleLayer.querySelectorAll<HTMLElement>('.cm-live-table-column-handle'));
         const cells = headerCells();
-        const columnIndex = cells.findIndex((cell) => {
-          const rect = cell.getBoundingClientRect();
-          return x >= rect.left && x <= rect.right;
-        });
+        if (
+          cells.length === 0 ||
+          !isPointInRect(x, y, {
+            left: tableRect.left - 44,
+            right: tableRect.right + 44,
+            top: tableRect.top - 48,
+            bottom: tableRect.bottom + 36
+          })
+        ) {
+          return null;
+        }
 
+        const columnIndex = nearestCellIndex(cells, x, 'x');
         return columnIndex >= 0 ? (handles[columnIndex] ?? null) : null;
       }
 
       const handles = Array.from(rowHandleLayer.querySelectorAll<HTMLElement>('.cm-live-table-row-handle'));
       const cells = firstVisualRowCells();
-      const rowIndex = cells.findIndex((cell) => {
-        const rect = cell.getBoundingClientRect();
-        return y >= rect.top && y <= rect.bottom;
-      });
+      if (
+        cells.length === 0 ||
+        !isPointInRect(x, y, {
+          left: tableRect.left - 56,
+          right: tableRect.right + 44,
+          top: tableRect.top - 32,
+          bottom: tableRect.bottom + 44
+        })
+      ) {
+        return null;
+      }
 
+      const rowIndex = nearestCellIndex(cells, y, 'y');
       return rowIndex >= 0 ? (handles[rowIndex] ?? null) : null;
     };
     const updateStructureDragTarget = (event: PointerEvent): void => {
@@ -613,12 +666,15 @@ export class TableWidget extends WidgetType {
 
       event.preventDefault();
       const target = handleAtPoint(event.clientX, event.clientY, activeStructureDrag.type);
-      if (target === activeStructureDrag.target) return;
+      if (target === null) return;
+
+      const to = Number(target.dataset.index ?? activeStructureDrag.to);
+      if (target === activeStructureDrag.target && to === activeStructureDrag.to) return;
 
       activeStructureDrag.target?.classList.remove('is-drop-target');
-      target?.classList.add('is-drop-target');
-      activeStructureDrag.target = target;
-      applyStructureDragPreview(activeStructureDrag.type, activeStructureDrag.from, Number(target?.dataset.index ?? activeStructureDrag.from));
+      target.classList.add('is-drop-target');
+      activeStructureDrag = { ...activeStructureDrag, target, to };
+      applyStructureDragPreview(activeStructureDrag.type, activeStructureDrag.from, to);
     };
     const finishStructureDrag = (event: PointerEvent): void => {
       if (activeStructureDrag === null) return;
@@ -626,7 +682,7 @@ export class TableWidget extends WidgetType {
       event.preventDefault();
       const { from, type } = activeStructureDrag;
       const target = activeStructureDrag.target ?? handleAtPoint(event.clientX, event.clientY, type);
-      const to = Number(target?.dataset.index ?? from);
+      const to = Number(target?.dataset.index ?? activeStructureDrag.to);
 
       clearStructureDragTarget();
       frame.querySelectorAll('.is-drag-source').forEach((element) => element.classList.remove('is-drag-source'));
@@ -651,7 +707,7 @@ export class TableWidget extends WidgetType {
       } else {
         selectVisualRow(from);
       }
-      activeStructureDrag = { from, target, type };
+      activeStructureDrag = { from, target, to: from, type };
       target.classList.add('is-drop-target');
       target.classList.add('is-drag-source');
       frame.classList.add('is-structure-dragging');
