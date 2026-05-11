@@ -257,14 +257,19 @@ export const tests = [
   {
     name: 'styles adjacent blockquote lines as one continuous preview',
     run() {
+      const singleRule = getRuleBody('#editor .cm-live-blockquote-single::before');
       const startRule = getRuleBody('#editor .cm-live-blockquote-start::before');
       const middleRule = getRuleBody('#editor .cm-live-blockquote-middle::before');
       const endRule = getRuleBody('#editor .cm-live-blockquote-end::before');
 
+      assert.match(singleRule, /top:\s*50%;/);
+      assert.match(singleRule, /transform:\s*translateY\(-50%\);/);
+      assert.match(startRule, /top:\s*50%;/);
       assert.match(startRule, /bottom:\s*0;/);
       assert.match(middleRule, /top:\s*0;/);
       assert.match(middleRule, /bottom:\s*0;/);
       assert.match(endRule, /top:\s*0;/);
+      assert.match(endRule, /bottom:\s*50%;/);
     }
   },
   {

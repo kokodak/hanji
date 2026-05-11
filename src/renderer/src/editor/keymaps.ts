@@ -7,6 +7,8 @@ const invisibleCaretTextPattern = /[\u200b\u200c\u200d\ufeff]/g;
 const emptyTaskLinePattern = /^(\s*)([-*+])\s+\[([ xX])\][\s\u200b\u200c\u200d\ufeff]*$/;
 const emptyBulletLinePattern = /^(\s*)([-*+])[\s\u200b\u200c\u200d\ufeff]*$/;
 const emptyNumberedLinePattern = /^(\s*)(\d+)([.)])[\s\u200b\u200c\u200d\ufeff]*$/;
+const emptyBlockquoteLinePattern = /^(\s*)>\s+[\u200b\u200c\u200d\ufeff]*$/;
+const blockquoteLinePattern = /^(\s*)>\s+/;
 
 function reduceIndent(indent: string): string {
   return indent.slice(0, Math.max(0, indent.length - TAB_SPACES.length));
@@ -27,9 +29,16 @@ function selectionTouchesFencedCode(view: EditorView): boolean {
   });
 }
 
+function blockquoteContinuationPrefix(lineText: string): string | null {
+  const match = blockquoteLinePattern.exec(lineText);
+  return match ? `${match[1]}> ` : null;
+}
+
 export function insertSoftBreak(view: EditorView): boolean {
-  const insert = selectionTouchesFencedCode(view) ? '\n' : '  \n';
   const selection = view.state.selection.main;
+  const line = view.state.doc.lineAt(selection.head);
+  const quotePrefix = blockquoteContinuationPrefix(line.text);
+  const insert = selectionTouchesFencedCode(view) ? '\n' : quotePrefix ? `  \n${quotePrefix}` : '  \n';
 
   view.dispatch({
     changes: { from: selection.from, to: selection.to, insert },
@@ -44,6 +53,11 @@ function isBlankListContent(text: string): boolean {
 }
 
 function replacementForEmptyListLine(text: string): string | null {
+  const blockquoteMatch = emptyBlockquoteLinePattern.exec(text);
+  if (blockquoteMatch) {
+    return blockquoteMatch[1];
+  }
+
   const taskMatch = emptyTaskLinePattern.exec(text);
   if (taskMatch) {
     const [, indent, marker, checkboxState] = taskMatch;
@@ -112,6 +126,7 @@ export function continueListItem(view: EditorView): boolean {
   const taskMatch = /^(\s*)([-*+])\s+\[([ xX])\]\s*(.*)$/.exec(textBeforeCursor);
   const bulletMatch = /^(\s*)([-*+])\s+(.*)$/.exec(textBeforeCursor);
   const numberedMatch = /^(\s*)(\d+)([.)])\s+(.*)$/.exec(textBeforeCursor);
+  const blockquoteMatch = /^(\s*)>\s+(.*)$/.exec(textBeforeCursor);
 
   if (emptyListLineReplacement !== null) {
     view.dispatch({
@@ -192,6 +207,27 @@ export function continueListItem(view: EditorView): boolean {
 
     const nextNumber = Number(numberText) + 1;
     const insert = `\n${indent}${nextNumber}${marker} `;
+    view.dispatch({
+      changes: { from: selection.head, insert },
+      selection: { anchor: selection.head + insert.length }
+    });
+    return true;
+  }
+
+  if (blockquoteMatch) {
+    const [, indent, content] = blockquoteMatch;
+
+    if (isBlankListContent(content)) {
+      if (!isBlankListContent(textAfterCursor)) return false;
+
+      view.dispatch({
+        changes: { from: line.from, to: selection.head, insert: indent },
+        selection: { anchor: line.from + indent.length }
+      });
+      return true;
+    }
+
+    const insert = `\n${indent}> `;
     view.dispatch({
       changes: { from: selection.head, insert },
       selection: { anchor: selection.head + insert.length }

@@ -190,6 +190,15 @@ export const tests = [
     }
   },
   {
+    name: 'continues blockquotes on Shift Enter',
+    run() {
+      const view = runInsertSoftBreak('> hello');
+
+      assert.equal(view.state.doc.toString(), '> hello  \n> ');
+      assert.equal(view.state.selection.main.head, '> hello  \n> '.length);
+    }
+  },
+  {
     name: 'keeps Shift Enter plain inside fenced code',
     run() {
       const doc = '```ts\nconst ok = true;\n```';
@@ -198,6 +207,24 @@ export const tests = [
 
       assert.equal(view.state.doc.toString(), '```ts\nconst ok = true;\n\n```');
       assert.equal(view.state.selection.main.head, cursor + 1);
+    }
+  },
+  {
+    name: 'continues blockquotes on Enter',
+    run() {
+      const view = runContinueListItem('> hello');
+
+      assert.equal(view.state.doc.toString(), '> hello\n> ');
+      assert.equal(view.state.selection.main.head, '> hello\n> '.length);
+    }
+  },
+  {
+    name: 'exits blockquotes from an empty quote line',
+    run() {
+      const view = runContinueListItem('> hello\n> ');
+
+      assert.equal(view.state.doc.toString(), '> hello\n');
+      assert.equal(view.state.selection.main.head, '> hello\n'.length);
     }
   },
   {
