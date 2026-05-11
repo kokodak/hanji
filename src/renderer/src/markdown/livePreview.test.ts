@@ -12,6 +12,7 @@ import {
 } from './livePreview';
 
 const livePreviewSource = readFileSync(new URL('./livePreview.ts', import.meta.url), 'utf8');
+const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
 
 interface DecorationSummary {
   from: number;
@@ -39,6 +40,15 @@ function collectDecorationSummaries(docText: string, selection: { anchor: number
   });
 
   return summaries;
+}
+
+function getRuleBody(selector: string): string {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`).exec(styles);
+
+  assert.ok(match, `Expected ${selector} rule to exist.`);
+
+  return match[1];
 }
 
 export const tests = [
@@ -132,11 +142,70 @@ export const tests = [
     }
   },
   {
+    name: 'collapses blockquote markers in preview mode',
+    run() {
+      const doc = '> Hi. This is Lee.\n> - kokodak\n\nBody';
+      const text = Text.of(doc.split('\n'));
+      const firstLine = text.line(1);
+      const secondLine = text.line(2);
+      const summaries = collectDecorationSummaries(doc, { anchor: doc.length });
+
+      assert.equal(
+        summaries.some((summary) => summary.from === firstLine.from && summary.to === firstLine.from + 2 && summary.className === undefined),
+        true
+      );
+      assert.equal(
+        summaries.some((summary) => summary.from === secondLine.from && summary.to === secondLine.from + 2 && summary.className === undefined),
+        true
+      );
+      assert.equal(summaries.some((summary) => summary.className === 'cm-markdown-syntax-hidden'), false);
+    }
+  },
+  {
+    name: 'connects adjacent blockquote preview lines',
+    run() {
+      const doc = '> Hi. This is Lee.\n> - kokodak\n\n> Later';
+      const text = Text.of(doc.split('\n'));
+      const firstLine = text.line(1);
+      const secondLine = text.line(2);
+      const laterLine = text.line(4);
+      const summaries = collectDecorationSummaries(doc, { anchor: doc.length });
+
+      assert.equal(
+        summaries.some(
+          (summary) => summary.from === firstLine.from && summary.className === 'cm-live-blockquote cm-live-blockquote-start'
+        ),
+        true
+      );
+      assert.equal(
+        summaries.some((summary) => summary.from === secondLine.from && summary.className === 'cm-live-blockquote cm-live-blockquote-end'),
+        true
+      );
+      assert.equal(
+        summaries.some((summary) => summary.from === laterLine.from && summary.className === 'cm-live-blockquote cm-live-blockquote-single'),
+        true
+      );
+    }
+  },
+  {
+    name: 'styles adjacent blockquote lines as one continuous preview',
+    run() {
+      const startRule = getRuleBody('#editor .cm-live-blockquote-start::before');
+      const middleRule = getRuleBody('#editor .cm-live-blockquote-middle::before');
+      const endRule = getRuleBody('#editor .cm-live-blockquote-end::before');
+
+      assert.match(startRule, /bottom:\s*0;/);
+      assert.match(middleRule, /top:\s*0;/);
+      assert.match(middleRule, /bottom:\s*0;/);
+      assert.match(endRule, /top:\s*0;/);
+    }
+  },
+  {
     name: 'reveals source markers on selected preview lines while tables stay rendered',
     run() {
       assert.match(livePreviewSource, /lineIntersectsSelection\(view, line\.from, line\.to\)/);
       assert.match(livePreviewSource, /rangeContainsSelection\(view, markerStart, markerEnd\)/);
-      assert.match(livePreviewSource, /lineContainsSelection\(view, line\.from, line\.to\)/);
+      assert.match(livePreviewSource, /collapsedBlockquoteSyntax/);
       assert.match(livePreviewSource, /new TableWidget\(table, selectedTable\)/);
     }
   },

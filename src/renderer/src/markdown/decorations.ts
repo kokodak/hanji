@@ -1,6 +1,7 @@
 import { Decoration } from '@codemirror/view';
 export const hiddenSyntax = Decoration.mark({ class: 'cm-markdown-syntax-hidden' });
 export const collapsedInlineSyntax = Decoration.replace({});
+export const collapsedBlockquoteSyntax = Decoration.replace({});
 export const hiddenHeadingSyntax = Decoration.replace({});
 export const liveStrong = Decoration.mark({ class: 'cm-live-strong' });
 export const liveEmphasis = Decoration.mark({ class: 'cm-live-emphasis' });

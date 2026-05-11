@@ -9,6 +9,7 @@ import {
   isActiveFencedCodeBlock
 } from './fencedCode';
 import {
+  collapsedBlockquoteSyntax,
   compactSelection,
   headingClasses,
   hiddenHeadingSyntax,
@@ -20,7 +21,7 @@ import {
   tablePreviewLine
 } from './decorations';
 import { BulletWidget, CheckboxWidget, CodeLanguageWidget, HorizontalRuleWidget, NumberedListWidget, TableWidget } from './widgets';
-import { lineContainsCursor, lineContainsSelection, lineIntersectsSelection, rangeContainsSelection } from './selection';
+import { lineContainsCursor, lineIntersectsSelection, rangeContainsSelection } from './selection';
 import { collectMarkdownTables, getMarkdownTableForLine, type MarkdownTable } from './table';
 import type { PendingDecoration } from './types';
 
@@ -126,6 +127,24 @@ function listWrapLine(indentLength: number): Decoration {
   });
 }
 
+function getBlockquoteMarkerMatch(lineText: string): RegExpExecArray | null {
+  return /^(\s*)>\s?/.exec(lineText);
+}
+
+function blockquoteLineDecoration(doc: Text, lineNumber: number): Decoration {
+  const previousLineIsBlockquote = lineNumber > 1 && getBlockquoteMarkerMatch(doc.line(lineNumber - 1).text) !== null;
+  const nextLineIsBlockquote = lineNumber < doc.lines && getBlockquoteMarkerMatch(doc.line(lineNumber + 1).text) !== null;
+  const continuityClass = previousLineIsBlockquote
+    ? nextLineIsBlockquote
+      ? 'cm-live-blockquote-middle'
+      : 'cm-live-blockquote-end'
+    : nextLineIsBlockquote
+      ? 'cm-live-blockquote-start'
+      : 'cm-live-blockquote-single';
+
+  return Decoration.line({ class: `cm-live-blockquote ${continuityClass}` });
+}
+
 export function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   const pending: PendingDecoration[] = [];
@@ -146,7 +165,7 @@ export function buildLivePreviewDecorations(view: EditorView, hoverLine: number 
       const taskMatch = /^(\s*)([-*+])\s+\[([ xX])\]\s+/.exec(lineText);
       const listMatch = /^(\s*)([-*+])\s+/.exec(lineText);
       const numberedListMatch = /^(\s*)(\d+)([.)])\s+/.exec(lineText);
-      const blockquoteMatch = /^(\s*)>\s?/.exec(lineText);
+      const blockquoteMatch = getBlockquoteMarkerMatch(lineText);
       const horizontalRule = lineIsHorizontalRule(lineText);
 
       if (codeBlock) {
@@ -292,11 +311,11 @@ export function buildLivePreviewDecorations(view: EditorView, hoverLine: number 
         pending.push({
           from: line.from,
           to: line.from,
-          decoration: Decoration.line({ class: 'cm-live-blockquote' })
+          decoration: blockquoteLineDecoration(view.state.doc, line.number)
         });
 
-        if (!lineContainsSelection(view, line.from, line.to)) {
-          pending.push({ from: markerStart, to: markerEnd, decoration: hiddenSyntax });
+        if (!rangeContainsSelection(view, markerStart, markerEnd)) {
+          pending.push({ from: markerStart, to: markerEnd, decoration: collapsedBlockquoteSyntax });
         }
       }
 

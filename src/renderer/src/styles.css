@@ -840,12 +840,32 @@ input:focus {
 #editor .cm-live-blockquote::before {
   position: absolute;
   left: 0;
-  top: 0.16em;
-  bottom: 0.16em;
   width: 3px;
-  border-radius: 999px;
   background: #b45f4d;
   content: "";
+}
+
+#editor .cm-live-blockquote-single::before {
+  top: 0.16em;
+  bottom: 0.16em;
+  border-radius: 999px;
+}
+
+#editor .cm-live-blockquote-start::before {
+  top: 0.16em;
+  bottom: 0;
+  border-radius: 999px 999px 0 0;
+}
+
+#editor .cm-live-blockquote-middle::before {
+  top: 0;
+  bottom: 0;
+}
+
+#editor .cm-live-blockquote-end::before {
+  top: 0;
+  bottom: 0.16em;
+  border-radius: 0 0 999px 999px;
 }
 
 @media (max-width: 900px) {
