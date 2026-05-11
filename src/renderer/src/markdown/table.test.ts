@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { Text } from '@codemirror/state';
-import { collectMarkdownTables, serializeMarkdownTable, splitTableCells } from './table';
+import {
+  collectMarkdownTables,
+  insertMarkdownTableColumn,
+  insertMarkdownTableRow,
+  moveMarkdownTableColumn,
+  moveMarkdownTableRow,
+  serializeMarkdownTable,
+  splitTableCells
+} from './table';
 
 export const tests = [
   {
@@ -45,6 +53,61 @@ export const tests = [
     name: 'escapes Markdown table pipes while serializing cells',
     run() {
       assert.equal(serializeMarkdownTable(['Name'], [['A | B']]), '| Name |\n| --- |\n| A \\| B |');
+    }
+  },
+  {
+    name: 'inserts Markdown table columns at the requested index',
+    run() {
+      assert.deepEqual(insertMarkdownTableColumn({ headers: ['Name', 'Status'], rows: [['Lithe', 'Ready']] }, 1), {
+        headers: ['Name', '', 'Status'],
+        rows: [['Lithe', '', 'Ready']]
+      });
+    }
+  },
+  {
+    name: 'inserts Markdown table rows with the current column count',
+    run() {
+      assert.deepEqual(insertMarkdownTableRow({ headers: ['Name', 'Status'], rows: [['Lithe', 'Ready']] }, 1), {
+        headers: ['Name', 'Status'],
+        rows: [
+          ['Lithe', 'Ready'],
+          ['', '']
+        ]
+      });
+    }
+  },
+  {
+    name: 'moves Markdown table columns across headers and rows',
+    run() {
+      assert.deepEqual(moveMarkdownTableColumn({ headers: ['Name', 'Status', 'Owner'], rows: [['Lithe', 'Ready', 'QA']] }, 2, 0), {
+        headers: ['Owner', 'Name', 'Status'],
+        rows: [['QA', 'Lithe', 'Ready']]
+      });
+    }
+  },
+  {
+    name: 'moves Markdown table body rows',
+    run() {
+      assert.deepEqual(
+        moveMarkdownTableRow(
+          {
+            headers: ['Name', 'Status'],
+            rows: [
+              ['Lithe', 'Ready'],
+              ['Docs', 'Draft']
+            ]
+          },
+          1,
+          0
+        ),
+        {
+          headers: ['Name', 'Status'],
+          rows: [
+            ['Docs', 'Draft'],
+            ['Lithe', 'Ready']
+          ]
+        }
+      );
     }
   }
 ];
