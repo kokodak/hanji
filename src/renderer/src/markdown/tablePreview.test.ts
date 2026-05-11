@@ -147,6 +147,7 @@ export const tests = [
       assert.match(frameSelectionRule, /pointer-events:\s*none;/);
       assert.match(frameSelectionRule, /top:\s*var\(--selection-outline-top\);/);
       assert.match(frameSelectionRule, /left:\s*var\(--selection-outline-left\);/);
+      assert.match(frameSelectionRule, /z-index:\s*4;/);
       assert.doesNotMatch(styles, /#editor \.cm-live-table-frame\.is-structure-dragging\.has-cell-selection::after/);
       assert.match(tableCellRule, /min-width:\s*32px;/);
       assert.match(tableCellRule, /height:\s*30px;/);
@@ -291,6 +292,7 @@ export const tests = [
       assert.match(previewCellBorderRule, /inset:\s*-1px;/);
       assert.match(previewCellBorderRule, /border:\s*1px solid #ded4c7;/);
       assert.match(frameSelectionRule, /top 150ms ease/);
+      assert.match(frameSelectionRule, /z-index:\s*4;/);
       assert.match(previewHeaderRule, /font-weight:\s*700;/);
       assert.match(previewBodyRule, /font-weight:\s*400;/);
       assert.match(styles, /height:\s*18px;/);
