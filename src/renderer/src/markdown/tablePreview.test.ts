@@ -124,11 +124,17 @@ export const tests = [
       const frameSelectionRule = getRuleBody('#editor .cm-live-table-frame.has-cell-selection::after');
       const tableRule = getRuleBody('#editor .cm-live-table');
       const tableCellRule = getRuleBody('#editor .cm-live-table th,\n#editor .cm-live-table td');
+      const focusedEditableCellRule = getRuleBody(
+        '#editor .cm-live-table th[contenteditable]:focus,\n#editor .cm-live-table td[contenteditable]:focus'
+      );
       const focusedHeaderRule = getRuleBody('#editor .cm-live-table.has-cell-selection th[contenteditable]:focus');
       const focusedCellRule = getRuleBody('#editor .cm-live-table.has-cell-selection td[contenteditable]:focus');
 
       assert.match(tableRule, /position:\s*relative;/);
       assert.match(tableSelectionRule, /outline:\s*0;/);
+      assert.match(focusedEditableCellRule, /outline:\s*0;/);
+      assert.match(focusedEditableCellRule, /0 0 0 1px #6fa09f/);
+      assert.match(focusedEditableCellRule, /inset 0 0 0 1px #6fa09f/);
       assert.match(focusedHeaderRule, /outline:\s*0 !important;/);
       assert.match(focusedHeaderRule, /box-shadow:\s*none;/);
       assert.match(focusedCellRule, /outline:\s*0 !important;/);
