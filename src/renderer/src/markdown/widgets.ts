@@ -5,6 +5,7 @@ import {
   moveMarkdownTableColumn,
   moveMarkdownTableVisualRow,
   serializeMarkdownTable,
+  serializeMarkdownTableRows,
   type MarkdownTable,
   type MarkdownTableContent
 } from './table';
@@ -594,16 +595,23 @@ export class TableWidget extends WidgetType {
       if (selectedCells.length === 0) return this.markdownFromDOM(table);
 
       const selectedPositions = selectedCells.map(getCellPosition);
+      const selectedRows = Array.from(new Set(selectedPositions.map((position) => position.row))).sort((a, b) => a - b);
       const selectedColumns = Array.from(new Set(selectedPositions.map((position) => position.column))).sort((a, b) => a - b);
-      const selectedBodyRows = Array.from(new Set(selectedPositions.map((position) => position.row).filter((row) => row > 0))).sort(
-        (a, b) => a - b
-      );
-      const headers = selectedColumns.map((column) => table.querySelector<HTMLTableCellElement>(`th[data-column="${column}"]`)?.textContent ?? '');
-      const rows = selectedBodyRows.map((row) =>
-        selectedColumns.map((column) => table.querySelector<HTMLTableCellElement>(`td[data-row="${row}"][data-column="${column}"]`)?.textContent ?? '')
+      const selectedRowsContent = selectedRows.map((row) =>
+        selectedColumns.map((column) =>
+          table.querySelector<HTMLTableCellElement>(`${row === 0 ? 'th' : 'td'}[data-row="${row}"][data-column="${column}"]`)?.textContent ?? ''
+        )
       );
 
-      return serializeMarkdownTable(headers, rows);
+      if (selectedRowsContent.length === 1 && selectedColumns.length === 1) {
+        return selectedRowsContent[0]?.[0] ?? '';
+      }
+
+      if (selectedRows[0] === 0 && selectedRowsContent.length > 1) {
+        return serializeMarkdownTable(selectedRowsContent[0] ?? [], selectedRowsContent.slice(1));
+      }
+
+      return serializeMarkdownTableRows(selectedRowsContent);
     };
     const clearSelectedCellText = (): void => {
       const selectedCells = getSelectedCells();
@@ -925,7 +933,7 @@ export class TableWidget extends WidgetType {
       clearCellSelection();
       const focusedCell = document.activeElement instanceof HTMLTableCellElement ? document.activeElement : null;
       if (focusedCell && table.contains(focusedCell)) {
-        updateFocusedCellOutline(focusedCell);
+        updateFocusedCellOutline();
       }
       draggingCells = false;
     };
@@ -1120,7 +1128,7 @@ export class TableWidget extends WidgetType {
         if (!draggingCells && activeTableDrag?.key !== tableSelectionKey) {
           clearCellSelection();
         }
-        updateFocusedCellOutline(cell);
+        updateFocusedCellOutline();
       });
       cell.addEventListener('blur', () => {
         this.updateDocument(view, table);

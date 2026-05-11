@@ -8,6 +8,7 @@ import {
   moveMarkdownTableRow,
   moveMarkdownTableVisualRow,
   serializeMarkdownTable,
+  serializeMarkdownTableRows,
   splitTableCells
 } from './table';
 
@@ -54,6 +55,12 @@ export const tests = [
     name: 'escapes Markdown table pipes while serializing cells',
     run() {
       assert.equal(serializeMarkdownTable(['Name'], [['A | B']]), '| Name |\n| --- |\n| A \\| B |');
+    }
+  },
+  {
+    name: 'serializes selected Markdown table rows without adding headers',
+    run() {
+      assert.equal(serializeMarkdownTableRows([['Lithe', 'Ready'], ['Docs', 'Draft']]), '| Lithe | Ready |\n| Docs | Draft |');
     }
   },
   {

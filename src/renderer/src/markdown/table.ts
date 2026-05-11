@@ -76,6 +76,12 @@ function serializeTableRow(cells: string[], columnCount: number): string {
   return `| ${paddedCells.join(' | ')} |`;
 }
 
+export function serializeMarkdownTableRows(rows: string[][]): string {
+  const columnCount = Math.max(...rows.map((row) => row.length), 1);
+
+  return rows.map((row) => serializeTableRow(row, columnCount)).join('\n');
+}
+
 export function serializeMarkdownTable(headers: string[], rows: string[][]): string {
   const columnCount = Math.max(headers.length, ...rows.map((row) => row.length), 1);
   const normalizedHeaders = headers.length > 0 ? headers : Array.from({ length: columnCount }, () => '');

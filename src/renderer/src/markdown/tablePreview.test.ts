@@ -30,6 +30,8 @@ export const tests = [
     run() {
       assert.match(widgetsSource, /contentEditable = 'plaintext-only';/);
       assert.match(widgetsSource, /event\.clipboardData\?\.setData\('text\/plain', selectedMarkdown\(\)\);/);
+      assert.match(widgetsSource, /serializeMarkdownTableRows\(selectedRowsContent\)/);
+      assert.match(widgetsSource, /selectedRows\[0\] === 0 && selectedRowsContent\.length > 1/);
       assert.match(widgetsSource, /view\.dispatch\(\{/);
       assert.match(widgetsSource, /insert: markdown/);
     }
