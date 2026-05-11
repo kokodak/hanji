@@ -129,7 +129,7 @@ function listWrapLine(indentLength: number): Decoration {
 }
 
 function getBlockquoteMarkerMatch(lineText: string): RegExpExecArray | null {
-  return /^(\s*)>\s?/.exec(lineText);
+  return /^(\s*)>\s+/.exec(lineText);
 }
 
 function blockquoteLineDecoration(doc: Text, lineNumber: number): Decoration {

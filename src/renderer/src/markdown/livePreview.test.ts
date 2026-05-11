@@ -205,6 +205,30 @@ export const tests = [
     }
   },
   {
+    name: 'requires a space before starting blockquote preview',
+    run() {
+      const doc = '>\n>text\n> text';
+      const text = Text.of(doc.split('\n'));
+      const bareMarkerLine = text.line(1);
+      const adjacentTextLine = text.line(2);
+      const spacedMarkerLine = text.line(3);
+      const summaries = collectDecorationSummaries(doc, { anchor: doc.length });
+
+      assert.equal(
+        summaries.some((summary) => summary.from === bareMarkerLine.from && summary.className?.startsWith('cm-live-blockquote') === true),
+        false
+      );
+      assert.equal(
+        summaries.some((summary) => summary.from === adjacentTextLine.from && summary.className?.startsWith('cm-live-blockquote') === true),
+        false
+      );
+      assert.equal(
+        summaries.some((summary) => summary.from === spacedMarkerLine.from && summary.className === 'cm-live-blockquote cm-live-blockquote-single'),
+        true
+      );
+    }
+  },
+  {
     name: 'connects adjacent blockquote preview lines',
     run() {
       const doc = '> Hi. This is Lee.\n> - kokodak\n\n> Later';
