@@ -251,7 +251,7 @@ export const tests = [
       assert.match(widgetsSource, /setStructurePreviewCellState/);
       assert.match(widgetsSource, /structureDragOffsets/);
       assert.match(widgetsSource, /target\.start/);
-      assert.match(widgetsSource, /targets\[slotIndex\]\?\.start/);
+      assert.match(widgetsSource, /cursor \+= targets\[index\]\?\.size/);
       assert.match(widgetsSource, /sourceRects: getSelectionRects\(getSelectedCells\(\)\)/);
       assert.match(widgetsSource, /shiftedSelectionRects/);
       assert.match(widgetsSource, /setSelectionOutlineForRects/);
