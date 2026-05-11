@@ -220,10 +220,13 @@ export const tests = [
       assert.match(widgetsSource, /moveMarkdownTableVisualRow/);
       assert.match(widgetsSource, /updateVisibleTableControls/);
       assert.match(widgetsSource, /applyStructureDragPreview/);
-      assert.match(widgetsSource, /nearestCellIndex/);
+      assert.match(widgetsSource, /nearestStructureTarget/);
+      assert.match(widgetsSource, /getStructureDragTargets/);
+      assert.match(widgetsSource, /structureTargetAtPoint/);
       assert.match(widgetsSource, /to:\s*from/);
-      assert.match(widgetsSource, /if \(target === null\) return;/);
+      assert.match(widgetsSource, /if \(nextTarget === null\) return;/);
       assert.match(widgetsSource, /activeStructureDrag\.to/);
+      assert.match(widgetsSource, /document\.addEventListener\('pointermove', updateVisibleTableControls/);
       assert.match(widgetsSource, /clearStructureDragPreview/);
       assert.match(widgetsSource, /selectColumn\(from\)/);
       assert.match(widgetsSource, /selectVisualRow\(from\)/);
