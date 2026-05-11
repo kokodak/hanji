@@ -250,6 +250,7 @@ export const tests = [
       assert.match(widgetsSource, /structureTargetAtPoint/);
       assert.match(widgetsSource, /rowIndexAfterMove/);
       assert.match(widgetsSource, /setStructurePreviewCellState/);
+      assert.match(widgetsSource, /applyStructureHandlePreview/);
       assert.match(widgetsSource, /structureDragOffsets/);
       assert.match(widgetsSource, /target\.start/);
       assert.match(widgetsSource, /cursor \+= targets\[index\]\?\.size/);
@@ -261,6 +262,7 @@ export const tests = [
       assert.match(widgetsSource, /activeStructureDrag\.to/);
       assert.match(widgetsSource, /document\.addEventListener\('pointermove', updateVisibleTableControls/);
       assert.match(widgetsSource, /clearStructureDragPreview/);
+      assert.match(widgetsSource, /handle\.style\.transform = ''/);
       assert.match(widgetsSource, /selectColumn\(from\)/);
       assert.match(widgetsSource, /selectVisualRow\(from\)/);
       assert.match(widgetsSource, /is-structure-drag-source-cell/);
@@ -272,6 +274,7 @@ export const tests = [
       assert.match(addColumnRule, /border-radius:\s*5px;/);
       assert.match(addRowRule, /height:\s*18px;/);
       assert.match(visibleControlRule, /opacity:\s*1;/);
+      assert.match(styles, /transform 150ms ease/);
       assert.match(sourceCellRule, /box-shadow:\s*none;/);
       assert.match(sourceCellRule, /z-index:\s*2;/);
       assert.match(previewCellRule, /border-color:\s*transparent;/);

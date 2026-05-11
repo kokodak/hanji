@@ -654,6 +654,24 @@ export class TableWidget extends WidgetType {
         cell.classList.remove('is-structure-preview-body-cell');
         cell.style.transform = '';
       }
+      for (const handle of controlLayer.querySelectorAll<HTMLElement>('.cm-live-table-handle')) {
+        handle.style.transform = '';
+      }
+    };
+    const applyStructureHandlePreview = (type: 'column' | 'row', offsets: number[]): void => {
+      const handles = Array.from(
+        (type === 'column' ? columnHandleLayer : rowHandleLayer).querySelectorAll<HTMLElement>(
+          type === 'column' ? '.cm-live-table-column-handle' : '.cm-live-table-row-handle'
+        )
+      );
+
+      for (const [index, handle] of handles.entries()) {
+        const offset = offsets[index] ?? 0;
+        const transform = offset === 0 ? '' : type === 'column' ? `translateX(${offset}px)` : `translateY(${offset}px)`;
+        if (handle.style.transform !== transform) {
+          handle.style.transform = transform;
+        }
+      }
     };
     const setStructurePreviewCellState = (
       cell: HTMLTableCellElement,
@@ -709,6 +727,7 @@ export class TableWidget extends WidgetType {
           });
         }
       }
+      applyStructureHandlePreview('row', offsets);
       setSelectionOutlineForRects(shiftedSelectionRects(drag.sourceRects, 0, offsets[from] ?? 0));
     };
     const applyColumnDragPreview = (drag: ActiveTableStructureDrag, to: number): void => {
@@ -730,6 +749,7 @@ export class TableWidget extends WidgetType {
           });
         }
       }
+      applyStructureHandlePreview('column', offsets);
       setSelectionOutlineForRects(shiftedSelectionRects(drag.sourceRects, offsets[from] ?? 0, 0));
     };
     const applyStructureDragPreview = (drag: ActiveTableStructureDrag, to: number): void => {
