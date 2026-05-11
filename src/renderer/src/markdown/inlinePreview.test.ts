@@ -89,11 +89,16 @@ export const tests = [
     }
   },
   {
-    name: 'collapses bold and italic syntax markers in preview mode',
+    name: 'collapses inline syntax markers in preview mode',
     run() {
+      const code = decorationSummariesFor('`code`');
       const emphasis = decorationSummariesFor('*emphasis*');
       const strong = decorationSummariesFor('**strong**');
 
+      assert.deepEqual(
+        code.filter((item) => item.from === 0 || item.to === '`code`'.length).map((item) => item.className),
+        [undefined, undefined]
+      );
       assert.deepEqual(
         emphasis.filter((item) => item.from === 0 || item.to === '*emphasis*'.length).map((item) => item.className),
         [undefined, undefined]
@@ -102,6 +107,7 @@ export const tests = [
         strong.filter((item) => item.from === 0 || item.to === '**strong**'.length).map((item) => item.className),
         [undefined, undefined]
       );
+      assert.equal(code.some((item) => item.className === 'cm-markdown-syntax-hidden'), false);
       assert.equal(emphasis.some((item) => item.className === 'cm-markdown-syntax-hidden'), false);
       assert.equal(strong.some((item) => item.className === 'cm-markdown-syntax-hidden'), false);
     }

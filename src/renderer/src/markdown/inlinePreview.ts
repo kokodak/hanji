@@ -248,14 +248,14 @@ export function addInlinePreviewDecorations(
       : inlineCodeRangeIsActive(view, openingFrom, closingTo);
 
     if (!activeInlineCode) {
-      pending.push({ from: openingFrom, to: openingTo, decoration: hiddenSyntax });
+      pending.push({ from: openingFrom, to: openingTo, decoration: collapsedInlineSyntax });
     }
 
     if (activeInlineCode) {
       pending.push({ from: openingFrom, to: closingTo, decoration: liveCode });
     } else {
       pending.push({ from: lineFrom + contentStart, to: lineFrom + contentEnd, decoration: liveCode });
-      pending.push({ from: closingFrom, to: closingTo, decoration: hiddenSyntax });
+      pending.push({ from: closingFrom, to: closingTo, decoration: collapsedInlineSyntax });
     }
   }
 
