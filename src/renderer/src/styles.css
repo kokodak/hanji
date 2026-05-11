@@ -620,7 +620,7 @@ input:focus {
 #editor .cm-live-table .is-structure-drag-source-cell {
   position: relative;
   z-index: 1;
-  box-shadow: inset 0 0 0 2px #6fa09f;
+  box-shadow: none;
 }
 
 #editor .cm-live-table .is-structure-preview-header-cell {
@@ -709,6 +709,11 @@ input:focus {
   border: 2px solid #6fa09f;
   content: "";
   pointer-events: none;
+}
+
+#editor .cm-live-table-frame.is-structure-dragging.has-cell-selection::after,
+#editor .cm-live-table-frame.is-structure-dragging.has-focused-cell::after {
+  content: none;
 }
 
 #editor .cm-live-table.is-cell-dragging ::selection {
