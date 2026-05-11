@@ -6,6 +6,7 @@ import {
   insertMarkdownTableRow,
   moveMarkdownTableColumn,
   moveMarkdownTableRow,
+  moveMarkdownTableVisualRow,
   serializeMarkdownTable,
   splitTableCells
 } from './table';
@@ -105,6 +106,31 @@ export const tests = [
           rows: [
             ['Docs', 'Draft'],
             ['Lithe', 'Ready']
+          ]
+        }
+      );
+    }
+  },
+  {
+    name: 'moves Markdown table visual rows and keeps the first row as headers',
+    run() {
+      assert.deepEqual(
+        moveMarkdownTableVisualRow(
+          {
+            headers: ['Name', 'Status'],
+            rows: [
+              ['Lithe', 'Ready'],
+              ['Docs', 'Draft']
+            ]
+          },
+          1,
+          0
+        ),
+        {
+          headers: ['Lithe', 'Ready'],
+          rows: [
+            ['Name', 'Status'],
+            ['Docs', 'Draft']
           ]
         }
       );

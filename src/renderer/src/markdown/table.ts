@@ -155,3 +155,17 @@ export function moveMarkdownTableRow(table: MarkdownTableContent, from: number, 
     rows: moveArrayItem(normalizedTableRows(table.rows, columnCount), from, to)
   };
 }
+
+export function moveMarkdownTableVisualRow(table: MarkdownTableContent, from: number, to: number): MarkdownTableContent {
+  const columnCount = getMarkdownTableColumnCount(table);
+  const visualRows = [
+    Array.from({ length: columnCount }, (_, column) => table.headers[column] ?? ''),
+    ...normalizedTableRows(table.rows, columnCount)
+  ];
+  const movedRows = moveArrayItem(visualRows, from, to);
+
+  return {
+    headers: movedRows[0] ?? Array.from({ length: columnCount }, () => ''),
+    rows: movedRows.slice(1)
+  };
+}
