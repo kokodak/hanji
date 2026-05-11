@@ -282,7 +282,8 @@ export const tests = [
       assert.match(sourceHandleRule, /opacity:\s*1;/);
       assert.match(sourceHandleRule, /z-index:\s*3;/);
       assert.match(sourceHandleRule, /pointer-events:\s*auto;/);
-      assert.match(draggingDropTargetRule, /opacity:\s*0\.55;/);
+      assert.match(draggingDropTargetRule, /opacity:\s*0;/);
+      assert.match(draggingDropTargetRule, /pointer-events:\s*none;/);
       assert.match(sourceCellRule, /box-shadow:\s*none;/);
       assert.match(sourceCellRule, /z-index:\s*2;/);
       assert.match(previewCellRule, /border-color:\s*transparent;/);
