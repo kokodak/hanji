@@ -256,6 +256,11 @@ export const tests = [
       assert.match(widgetsSource, /rowIndexAfterMove/);
       assert.match(widgetsSource, /setStructurePreviewCellState/);
       assert.match(widgetsSource, /applyStructureHandlePreview/);
+      assert.match(widgetsSource, /captureStructureColumnWidths/);
+      assert.match(widgetsSource, /freezeStructureColumnWidths/);
+      assert.match(widgetsSource, /table\.style\.tableLayout = 'fixed'/);
+      assert.match(widgetsSource, /columnWidths: captureStructureColumnWidths\(\)/);
+      assert.match(widgetsSource, /freezeStructureColumnWidths\(drag\.columnWidths\)/);
       assert.match(widgetsSource, /structureDragOffsets/);
       assert.match(widgetsSource, /target\.start/);
       assert.match(widgetsSource, /cursor \+= targets\[index\]\?\.size/);
@@ -268,6 +273,8 @@ export const tests = [
       assert.match(widgetsSource, /document\.addEventListener\('pointermove', updateVisibleTableControls/);
       assert.match(widgetsSource, /clearStructureDragPreview/);
       assert.match(widgetsSource, /handle\.style\.transform = ''/);
+      assert.match(widgetsSource, /table\.style\.removeProperty\('table-layout'\)/);
+      assert.match(widgetsSource, /cell\.style\.width = ''/);
       assert.match(widgetsSource, /selectColumn\(from\)/);
       assert.match(widgetsSource, /selectVisualRow\(from\)/);
       assert.match(widgetsSource, /is-structure-drag-source-cell/);
