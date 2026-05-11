@@ -434,6 +434,7 @@ input:focus {
   flex: 0 0 1em;
   width: 1em;
   height: 1em;
+  margin-left: 2ch;
   border: 1px solid #b9aea1;
   border-radius: 3px;
   background: #fffefa;

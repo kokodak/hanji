@@ -112,6 +112,7 @@ export const tests = [
       assert.match(checkboxRule, /text-indent:\s*0;/);
       assert.match(checkboxRule, /vertical-align:\s*top;/);
       assert.match(checkboxBoxRule, /height:\s*1em;/);
+      assert.match(checkboxBoxRule, /margin-left:\s*2ch;/);
       assert.doesNotMatch(checkboxBoxRule, /transform:/);
       assert.match(numberedRule, /min-width:\s*calc\(var\(--list-marker-indent, 0ch\) \+ var\(--list-marker-width, 3ch\)\);/);
       assert.match(numberedRule, /padding-left:\s*var\(--list-marker-indent, 0ch\);/);
