@@ -72,7 +72,7 @@ export const tests = [
       const codeblockLineRule = getRuleBody('#editor .cm-line.cm-live-codeblock');
       const hiddenTableLineRule = getRuleBody('#editor .cm-line.cm-live-table-source-hidden');
 
-      assert.match(lineRule, /padding:\s*0 0 0\.32em;/);
+      assert.match(lineRule, /padding:\s*0 0 0\.48em;/);
       assert.doesNotMatch(lineRule, /margin-bottom:/);
       assert.match(codeblockLineRule, /padding-bottom:\s*0;/);
       assert.match(hiddenTableLineRule, /padding:\s*0;/);

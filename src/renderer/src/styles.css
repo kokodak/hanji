@@ -287,7 +287,7 @@ input:focus {
   width: fit-content;
   max-width: 100%;
   min-width: 1ch;
-  padding: 0 0 0.32em;
+  padding: 0 0 0.48em;
 }
 
 #editor .cm-line.cm-live-codeblock {
