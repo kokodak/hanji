@@ -93,20 +93,30 @@ export const tests = [
       const checkboxRule = getRuleBody('#editor .cm-live-checkbox');
       const checkboxBoxRule = getRuleBody('#editor .cm-live-checkbox-box');
       const numberedRule = getRuleBody('#editor .cm-live-numbered-marker');
+      const selectedCodeRule = getRuleBody(
+        '#editor .cm-compact-selection .cm-live-code,\n#editor .cm-live-code .cm-compact-selection,\n#editor .cm-live-code.cm-compact-selection'
+      );
 
       assert.match(listLineRule, /padding-left:\s*var\(--list-wrap-indent, 0\);/);
       assert.match(listLineRule, /text-indent:\s*calc\(var\(--list-wrap-indent, 0\) \* -1\);/);
+      assert.match(bulletRule, /width:\s*calc\(var\(--list-marker-indent, 0ch\) \+ 1\.4ch\);/);
+      assert.match(bulletRule, /padding-left:\s*var\(--list-marker-indent, 0ch\);/);
       assert.match(bulletRule, /height:\s*1lh;/);
       assert.match(bulletRule, /line-height:\s*inherit;/);
       assert.match(bulletRule, /vertical-align:\s*top;/);
+      assert.match(checkboxRule, /width:\s*calc\(var\(--list-marker-indent, 0ch\) \+ 2em\);/);
+      assert.match(checkboxRule, /padding-left:\s*var\(--list-marker-indent, 0ch\);/);
       assert.match(checkboxRule, /height:\s*1lh;/);
       assert.match(checkboxRule, /line-height:\s*inherit;/);
       assert.match(checkboxRule, /vertical-align:\s*top;/);
       assert.match(checkboxBoxRule, /height:\s*1em;/);
       assert.doesNotMatch(checkboxBoxRule, /transform:/);
+      assert.match(numberedRule, /min-width:\s*calc\(var\(--list-marker-indent, 0ch\) \+ 2\.4ch\);/);
+      assert.match(numberedRule, /padding-left:\s*var\(--list-marker-indent, 0ch\);/);
       assert.match(numberedRule, /height:\s*1lh;/);
       assert.match(numberedRule, /line-height:\s*inherit;/);
       assert.match(numberedRule, /vertical-align:\s*top;/);
+      assert.match(selectedCodeRule, /background:\s*#c9dcda;/);
     }
   }
 ];

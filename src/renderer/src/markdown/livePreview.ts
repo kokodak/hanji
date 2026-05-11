@@ -9,7 +9,6 @@ import {
   isActiveFencedCodeBlock
 } from './fencedCode';
 import {
-  bulletMarker,
   compactSelection,
   headingClasses,
   hiddenHeadingSyntax,
@@ -20,7 +19,7 @@ import {
   selectedTablePreviewLine,
   tablePreviewLine
 } from './decorations';
-import { CheckboxWidget, CodeLanguageWidget, HorizontalRuleWidget, NumberedListWidget, TableWidget } from './widgets';
+import { BulletWidget, CheckboxWidget, CodeLanguageWidget, HorizontalRuleWidget, NumberedListWidget, TableWidget } from './widgets';
 import { lineContainsCursor, lineContainsSelection, lineIntersectsSelection, rangeContainsSelection } from './selection';
 import { collectMarkdownTables, getMarkdownTableForLine, type MarkdownTable } from './table';
 import type { PendingDecoration } from './types';
@@ -227,8 +226,9 @@ export function buildLivePreviewDecorations(view: EditorView, hoverLine: number 
       }
 
       if (taskMatch) {
-        pending.push({ from: line.from, to: line.from, decoration: listWrapLine(taskMatch[1].length) });
-        const markerStart = line.from + taskMatch[1].length;
+        const indentLength = taskMatch[1].length;
+        pending.push({ from: line.from, to: line.from, decoration: listWrapLine(indentLength) });
+        const markerStart = line.from + indentLength;
         const taskEnd = line.from + taskMatch[0].length;
         const checkPosition = markerStart + taskMatch[2].length + 2;
         const isChecked = taskMatch[3].toLowerCase() === 'x';
@@ -236,9 +236,9 @@ export function buildLivePreviewDecorations(view: EditorView, hoverLine: number 
 
         if (!editingTaskMarker) {
           pending.push({
-            from: markerStart,
+            from: line.from,
             to: taskEnd,
-            decoration: Decoration.replace({ widget: new CheckboxWidget(isChecked, checkPosition) })
+            decoration: Decoration.replace({ widget: new CheckboxWidget(isChecked, checkPosition, indentLength) })
           });
         }
 
@@ -246,24 +246,26 @@ export function buildLivePreviewDecorations(view: EditorView, hoverLine: number 
           pending.push({ from: taskEnd, to: line.to, decoration: liveCheckedTask });
         }
       } else if (listMatch) {
-        pending.push({ from: line.from, to: line.from, decoration: listWrapLine(listMatch[1].length) });
-        const markerStart = line.from + listMatch[1].length;
+        const indentLength = listMatch[1].length;
+        pending.push({ from: line.from, to: line.from, decoration: listWrapLine(indentLength) });
+        const markerStart = line.from + indentLength;
         const markerEnd = line.from + listMatch[0].length;
 
         if (!rangeContainsSelection(view, markerStart, markerEnd)) {
-          pending.push({ from: markerStart, to: markerEnd, decoration: bulletMarker });
+          pending.push({ from: line.from, to: markerEnd, decoration: Decoration.replace({ widget: new BulletWidget(indentLength) }) });
         }
       } else if (numberedListMatch) {
-        pending.push({ from: line.from, to: line.from, decoration: listWrapLine(numberedListMatch[1].length) });
-        const markerStart = line.from + numberedListMatch[1].length;
+        const indentLength = numberedListMatch[1].length;
+        pending.push({ from: line.from, to: line.from, decoration: listWrapLine(indentLength) });
+        const markerStart = line.from + indentLength;
         const markerEnd = line.from + numberedListMatch[0].length;
         const markerText = `${numberedListMatch[2]}${numberedListMatch[3]}`;
 
         if (!rangeContainsSelection(view, markerStart, markerEnd)) {
           pending.push({
-            from: markerStart,
+            from: line.from,
             to: markerEnd,
-            decoration: Decoration.replace({ widget: new NumberedListWidget(markerText) })
+            decoration: Decoration.replace({ widget: new NumberedListWidget(markerText, indentLength) })
           });
         }
       }

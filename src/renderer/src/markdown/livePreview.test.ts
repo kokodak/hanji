@@ -102,9 +102,33 @@ export const tests = [
       assert.match(livePreviewSource, /function listWrapLine\(indentLength: number\): Decoration/);
       assert.match(livePreviewSource, /--list-wrap-indent: \$\{indentLength\}ch;/);
       assert.match(livePreviewSource, /class: 'cm-live-list-line'/);
-      assert.match(livePreviewSource, /listWrapLine\(taskMatch\[1\]\.length\)/);
-      assert.match(livePreviewSource, /listWrapLine\(listMatch\[1\]\.length\)/);
-      assert.match(livePreviewSource, /listWrapLine\(numberedListMatch\[1\]\.length\)/);
+      assert.match(livePreviewSource, /const indentLength = taskMatch\[1\]\.length;/);
+      assert.match(livePreviewSource, /const indentLength = listMatch\[1\]\.length;/);
+      assert.match(livePreviewSource, /const indentLength = numberedListMatch\[1\]\.length;/);
+      assert.match(livePreviewSource, /listWrapLine\(indentLength\)/);
+    }
+  },
+  {
+    name: 'replaces nested list indentation with depth-aware marker widgets',
+    run() {
+      const doc = '- root\n    - nested\n    1. numbered\n    - [ ] task';
+      const summaries = collectDecorationSummaries(doc, { anchor: doc.length });
+      const nestedLine = Text.of(doc.split('\n')).line(2);
+      const numberedLine = Text.of(doc.split('\n')).line(3);
+      const taskLine = Text.of(doc.split('\n')).line(4);
+
+      assert.equal(
+        summaries.some((summary) => summary.widgetName === 'BulletWidget' && summary.from === nestedLine.from && summary.to === nestedLine.from + 6),
+        true
+      );
+      assert.equal(
+        summaries.some((summary) => summary.widgetName === 'NumberedListWidget' && summary.from === numberedLine.from && summary.to === numberedLine.from + 7),
+        true
+      );
+      assert.equal(
+        summaries.some((summary) => summary.widgetName === 'CheckboxWidget' && summary.from === taskLine.from && summary.to === taskLine.from + 10),
+        true
+      );
     }
   },
   {

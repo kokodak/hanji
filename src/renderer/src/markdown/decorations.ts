@@ -1,6 +1,4 @@
 import { Decoration } from '@codemirror/view';
-import { BulletWidget } from './widgets';
-
 export const hiddenSyntax = Decoration.mark({ class: 'cm-markdown-syntax-hidden' });
 export const hiddenHeadingSyntax = Decoration.replace({});
 export const liveStrong = Decoration.mark({ class: 'cm-live-strong' });
@@ -10,7 +8,6 @@ export const liveLink = Decoration.mark({ class: 'cm-live-link' });
 export const liveCode = Decoration.mark({ class: 'cm-live-code' });
 export const liveCheckedTask = Decoration.mark({ class: 'cm-live-task-checked' });
 export const compactSelection = Decoration.mark({ class: 'cm-compact-selection' });
-export const bulletMarker = Decoration.replace({ widget: new BulletWidget() });
 export const tablePreviewLine = Decoration.line({ class: 'cm-live-table-line' });
 export const hiddenTableSourceLine = Decoration.line({ class: 'cm-live-table-source-hidden' });
 export const selectedTablePreviewLine = Decoration.line({ class: 'cm-live-table-line cm-live-table-selection-hidden' });

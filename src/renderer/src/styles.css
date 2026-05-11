@@ -394,8 +394,9 @@ input:focus {
 
 #editor .cm-live-bullet {
   display: inline-block;
-  width: 1.4ch;
+  width: calc(var(--list-marker-indent, 0ch) + 1.4ch);
   height: 1lh;
+  padding-left: var(--list-marker-indent, 0ch);
   color: #b45f4d;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -410,10 +411,11 @@ input:focus {
 
 #editor .cm-live-checkbox {
   display: inline-flex;
-  width: 2em;
+  width: calc(var(--list-marker-indent, 0ch) + 2em);
   height: 1lh;
   align-items: center;
   justify-content: flex-start;
+  padding-left: var(--list-marker-indent, 0ch);
   color: #fffefa;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -484,10 +486,17 @@ input:focus {
   color: #244f52;
 }
 
+#editor .cm-compact-selection .cm-live-code,
+#editor .cm-live-code .cm-compact-selection,
+#editor .cm-live-code.cm-compact-selection {
+  background: #c9dcda;
+}
+
 #editor .cm-live-numbered-marker {
   display: inline-block;
-  min-width: 2.4ch;
+  min-width: calc(var(--list-marker-indent, 0ch) + 2.4ch);
   height: 1lh;
+  padding-left: var(--list-marker-indent, 0ch);
   color: #6f7f2f;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
