@@ -290,16 +290,20 @@ input:focus {
   padding: 0 0 0.48em;
 }
 
+#editor .cm-line.cm-soft-break-line {
+  padding-bottom: 0.06em;
+}
+
 #editor .cm-line.cm-live-codeblock {
   width: 100%;
   padding-top: 0.1em;
   padding-bottom: 0.1em;
 }
 
-#editor .cm-line.cm-live-codeblock.cm-live-codeblock-preview-fence {
+#editor .cm-line.cm-live-codeblock.cm-live-codeblock-fence {
   padding-top: 0.04em;
   padding-bottom: 0.04em;
-  line-height: 0.75;
+  line-height: 1.05;
 }
 
 #editor .cm-line:has(.cm-live-horizontal-rule) {

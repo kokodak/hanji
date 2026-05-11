@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { EditorState, type TransactionSpec } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import { continueListItem, indentWithSpaces, outdentSpaces } from './keymaps';
+import { continueListItem, indentWithSpaces, insertSoftBreak, outdentSpaces } from './keymaps';
 
 class TestEditorView {
   state: EditorState;
@@ -23,6 +23,16 @@ class TestEditorView {
 function runContinueListItem(doc: string, cursor: number = doc.length): TestEditorView {
   const view = new TestEditorView(doc, cursor);
   const handled = continueListItem(view as unknown as EditorView);
+
+  assert.equal(handled, true);
+  assert.equal(view.dispatchCount, 1);
+
+  return view;
+}
+
+function runInsertSoftBreak(doc: string, cursor: number = doc.length): TestEditorView {
+  const view = new TestEditorView(doc, cursor);
+  const handled = insertSoftBreak(view as unknown as EditorView);
 
   assert.equal(handled, true);
   assert.equal(view.dispatchCount, 1);
@@ -168,6 +178,26 @@ export const tests = [
       assert.equal(handled, false);
       assert.equal(view.dispatchCount, 0);
       assert.equal(view.state.doc.toString(), 'plain text');
+    }
+  },
+  {
+    name: 'inserts a Markdown soft break for Shift Enter',
+    run() {
+      const view = runInsertSoftBreak('hello');
+
+      assert.equal(view.state.doc.toString(), 'hello  \n');
+      assert.equal(view.state.selection.main.head, 'hello  \n'.length);
+    }
+  },
+  {
+    name: 'keeps Shift Enter plain inside fenced code',
+    run() {
+      const doc = '```ts\nconst ok = true;\n```';
+      const cursor = '```ts\nconst ok = true;'.length;
+      const view = runInsertSoftBreak(doc, cursor);
+
+      assert.equal(view.state.doc.toString(), '```ts\nconst ok = true;\n\n```');
+      assert.equal(view.state.selection.main.head, cursor + 1);
     }
   },
   {

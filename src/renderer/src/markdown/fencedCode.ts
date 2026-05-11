@@ -4,10 +4,7 @@ import {
   fencedCodeFirstLine,
   fencedCodeLastLine,
   fencedCodeLine,
-  fencedCodeSingleLine,
-  previewFencedCodeFirstLine,
-  previewFencedCodeLastLine,
-  previewFencedCodeSingleLine
+  fencedCodeSingleLine
 } from './decorations';
 import type { FencedCodeBlock } from './types';
 
@@ -68,8 +65,5 @@ export function getFencedCodeLineDecoration(block: FencedCodeBlock, lineNumber: 
 }
 
 export function getPreviewCodeLineDecoration(block: FencedCodeBlock, lineNumber: number): Decoration {
-  if (block.startLine === block.endLine) return previewFencedCodeSingleLine;
-  if (lineNumber === block.startLine) return previewFencedCodeFirstLine;
-  if (lineNumber === block.endLine) return previewFencedCodeLastLine;
-  return fencedCodeLine;
+  return getFencedCodeLineDecoration(block, lineNumber);
 }

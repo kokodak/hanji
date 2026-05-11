@@ -27,6 +27,7 @@ export const tests = [
       assert.match(createEditorSource, /event\.target instanceof HTMLElement && event\.target\.closest\('\.cm-live-table'\)/);
       assert.match(createEditorSource, /event\.shiftKey \? outdentSpaces\(view\) : indentWithSpaces\(view\)/);
       assert.match(createEditorSource, /Prec\.highest\(tabIndentationEvents\),/);
+      assert.match(createEditorSource, /Prec\.highest\(softBreakKeymap\),/);
       assert.match(createEditorSource, /Prec\.highest\(keymap\.of\(\[\{ key: 'Enter', run: continueListItem \}\]\)\)/);
       assert.match(createEditorSource, /Prec\.highest\(tabIndentation\),/);
       assert.match(createEditorSource, /drawSelection\(\),/);
@@ -69,11 +70,13 @@ export const tests = [
     name: 'keeps hard line breaks visually distinct from soft wraps',
     run() {
       const lineRule = getRuleBody('#editor .cm-line');
+      const softBreakLineRule = getRuleBody('#editor .cm-line.cm-soft-break-line');
       const codeblockLineRule = getRuleBody('#editor .cm-line.cm-live-codeblock');
       const hiddenTableLineRule = getRuleBody('#editor .cm-line.cm-live-table-source-hidden');
 
       assert.match(lineRule, /padding:\s*0 0 0\.48em;/);
       assert.doesNotMatch(lineRule, /margin-bottom:/);
+      assert.match(softBreakLineRule, /padding-bottom:\s*0\.06em;/);
       assert.match(codeblockLineRule, /padding-top:\s*0\.1em;/);
       assert.match(codeblockLineRule, /padding-bottom:\s*0\.1em;/);
       assert.match(hiddenTableLineRule, /padding:\s*0;/);

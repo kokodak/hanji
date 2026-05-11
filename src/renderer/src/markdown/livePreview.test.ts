@@ -155,7 +155,7 @@ export const tests = [
         summaries.some(
           (summary) =>
             summary.from === openingFence.from &&
-            summary.className === 'cm-live-codeblock cm-live-codeblock-first cm-live-codeblock-preview-fence'
+            summary.className === 'cm-live-codeblock cm-live-codeblock-first cm-live-codeblock-fence'
         ),
         true
       );
@@ -164,11 +164,24 @@ export const tests = [
         summaries.some(
           (summary) =>
             summary.from === closingFence.from &&
-            summary.className === 'cm-live-codeblock cm-live-codeblock-last cm-live-codeblock-preview-fence'
+            summary.className === 'cm-live-codeblock cm-live-codeblock-last cm-live-codeblock-fence'
         ),
         true
       );
       assert.equal(summaries.some((summary) => summary.from === openingFence.from && summary.widgetName === 'CodeLanguageWidget'), true);
+    }
+  },
+  {
+    name: 'marks Markdown soft break lines with compact spacing',
+    run() {
+      const doc = 'soft  \nwrap\n\nhard\nbreak';
+      const text = Text.of(doc.split('\n'));
+      const softLine = text.line(1);
+      const hardLine = text.line(4);
+      const summaries = collectDecorationSummaries(doc, { anchor: doc.length });
+
+      assert.equal(summaries.some((summary) => summary.from === softLine.from && summary.className === 'cm-soft-break-line'), true);
+      assert.equal(summaries.some((summary) => summary.from === hardLine.from && summary.className === 'cm-soft-break-line'), false);
     }
   },
   {

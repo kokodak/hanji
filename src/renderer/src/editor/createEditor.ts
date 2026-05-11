@@ -6,7 +6,7 @@ import { EditorState, Prec } from '@codemirror/state';
 import { drawSelection, EditorView, keymap } from '@codemirror/view';
 import { litheHighlightStyle } from './highlighting';
 import { handleBacktickInput, handlePairedSymbolInput, handlePlainTextPaste } from './inputHandlers';
-import { continueListItem, indentWithSpaces, outdentSpaces, stableVerticalMovement, tabIndentation } from './keymaps';
+import { continueListItem, indentWithSpaces, outdentSpaces, softBreakKeymap, stableVerticalMovement, tabIndentation } from './keymaps';
 import { liveMarkdownPreview } from '../markdown/livePreview';
 
 interface CreateEditorOptions {
@@ -50,6 +50,7 @@ export function createEditor(options: CreateEditorOptions): EditorView {
         stableVerticalMovement,
         Prec.highest(tabIndentationEvents),
         Prec.highest(tabIndentation),
+        Prec.highest(softBreakKeymap),
         Prec.highest(keymap.of([{ key: 'Enter', run: continueListItem }])),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         EditorView.updateListener.of((update) => {

@@ -1,4 +1,5 @@
 import { EditorView, keymap } from '@codemirror/view';
+import { collectFencedCodeBlocks, getFencedCodeBlockForLine } from '../markdown/fencedCode';
 
 const TAB_SPACES = '    ';
 const listLinePattern = /^(\s*)(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)/;
@@ -9,6 +10,33 @@ const emptyNumberedLinePattern = /^(\s*)(\d+)([.)])[\s\u200b\u200c\u200d\ufeff]*
 
 function reduceIndent(indent: string): string {
   return indent.slice(0, Math.max(0, indent.length - TAB_SPACES.length));
+}
+
+function selectionTouchesFencedCode(view: EditorView): boolean {
+  const blocks = collectFencedCodeBlocks(view.state.doc);
+
+  return view.state.selection.ranges.some((range) => {
+    const fromLine = view.state.doc.lineAt(Math.min(range.from, range.to)).number;
+    const toLine = view.state.doc.lineAt(Math.max(range.from, range.to)).number;
+
+    for (let lineNumber = fromLine; lineNumber <= toLine; lineNumber += 1) {
+      if (getFencedCodeBlockForLine(blocks, lineNumber) !== null) return true;
+    }
+
+    return false;
+  });
+}
+
+export function insertSoftBreak(view: EditorView): boolean {
+  const insert = selectionTouchesFencedCode(view) ? '\n' : '  \n';
+  const selection = view.state.selection.main;
+
+  view.dispatch({
+    changes: { from: selection.from, to: selection.to, insert },
+    selection: { anchor: selection.from + insert.length }
+  });
+
+  return true;
 }
 
 function isBlankListContent(text: string): boolean {
@@ -281,6 +309,8 @@ export const stableVerticalMovement = keymap.of([
   { key: 'ArrowUp', run: (view) => moveCursorByDocumentLine(view, -1) },
   { key: 'ArrowDown', run: (view) => moveCursorByDocumentLine(view, 1) }
 ]);
+
+export const softBreakKeymap = keymap.of([{ key: 'Shift-Enter', run: insertSoftBreak }]);
 
 export const tabIndentation = keymap.of([
   { key: 'Tab', run: indentWithSpaces },

@@ -18,6 +18,7 @@ import {
   liveCheckedTask,
   selectedHiddenTableSourceLine,
   selectedTablePreviewLine,
+  softBreakLine,
   tablePreviewLine
 } from './decorations';
 import { BulletWidget, CheckboxWidget, CodeLanguageWidget, HorizontalRuleWidget, NumberedListWidget, TableWidget } from './widgets';
@@ -145,6 +146,10 @@ function blockquoteLineDecoration(doc: Text, lineNumber: number): Decoration {
   return Decoration.line({ class: `cm-live-blockquote ${continuityClass}` });
 }
 
+function lineEndsSoftBreak(lineText: string): boolean {
+  return / {2,}$/.test(lineText);
+}
+
 export function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   const pending: PendingDecoration[] = [];
@@ -167,6 +172,10 @@ export function buildLivePreviewDecorations(view: EditorView, hoverLine: number 
       const numberedListMatch = /^(\s*)(\d+)([.)])\s+/.exec(lineText);
       const blockquoteMatch = getBlockquoteMarkerMatch(lineText);
       const horizontalRule = lineIsHorizontalRule(lineText);
+
+      if (lineEndsSoftBreak(lineText)) {
+        pending.push({ from: line.from, to: line.from, decoration: softBreakLine });
+      }
 
       if (codeBlock) {
         addCompactSelectionDecorations(view, pending, line.from, line.to);
