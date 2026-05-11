@@ -9,6 +9,7 @@ const emptyBulletLinePattern = /^(\s*)([-*+])[\s\u200b\u200c\u200d\ufeff]*$/;
 const emptyNumberedLinePattern = /^(\s*)(\d+)([.)])[\s\u200b\u200c\u200d\ufeff]*$/;
 const emptyBlockquoteLinePattern = /^(\s*)>\s+[\u200b\u200c\u200d\ufeff]*$/;
 const blockquoteLinePattern = /^(\s*)>\s+/;
+const bareBlockquoteLinePattern = /^\s*>(?:$|\S)/;
 
 function reduceIndent(indent: string): string {
   return indent.slice(0, Math.max(0, indent.length - TAB_SPACES.length));
@@ -231,6 +232,14 @@ export function continueListItem(view: EditorView): boolean {
     view.dispatch({
       changes: { from: selection.head, insert },
       selection: { anchor: selection.head + insert.length }
+    });
+    return true;
+  }
+
+  if (bareBlockquoteLinePattern.test(line.text)) {
+    view.dispatch({
+      changes: { from: selection.head, insert: '\n' },
+      selection: { anchor: selection.head + 1 }
     });
     return true;
   }

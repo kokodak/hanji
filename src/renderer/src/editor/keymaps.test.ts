@@ -219,6 +219,15 @@ export const tests = [
     }
   },
   {
+    name: 'keeps bare greater-than lines as plain text on Enter',
+    run() {
+      const view = runContinueListItem('>qwe > qwe');
+
+      assert.equal(view.state.doc.toString(), '>qwe > qwe\n');
+      assert.equal(view.state.selection.main.head, '>qwe > qwe\n'.length);
+    }
+  },
+  {
     name: 'exits blockquotes from an empty quote line',
     run() {
       const view = runContinueListItem('> hello\n> ');
