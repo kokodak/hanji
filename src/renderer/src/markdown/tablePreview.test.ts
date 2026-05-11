@@ -229,8 +229,12 @@ export const tests = [
       const previewHeaderRule = getRuleBody('#editor .cm-live-table .is-structure-preview-header-cell');
       const previewBodyRule = getRuleBody('#editor .cm-live-table .is-structure-preview-body-cell');
       const frameSelectionRule = getRuleBody('#editor .cm-live-table-frame.has-cell-selection::after');
+      const sourceHandleRule = getRuleBody('#editor .cm-live-table-handle.is-drag-source');
+      const draggingDropTargetRule = getRuleBody(
+        '#editor .cm-live-table-frame.is-structure-dragging .cm-live-table-handle.is-drop-target:not(.is-drag-source)'
+      );
       const visibleControlRule = getRuleBody(
-        '#editor .cm-live-table-handle.is-control-visible,\n#editor .cm-live-table-add.is-control-visible,\n#editor .cm-live-table-handle.is-drop-target,\n#editor .cm-live-table-handle.is-drag-source'
+        '#editor .cm-live-table-handle.is-control-visible,\n#editor .cm-live-table-add.is-control-visible,\n#editor .cm-live-table-handle.is-drop-target'
       );
 
       assert.match(widgetsSource, /cm-live-table-column-handle/);
@@ -275,6 +279,10 @@ export const tests = [
       assert.match(addRowRule, /height:\s*18px;/);
       assert.match(visibleControlRule, /opacity:\s*1;/);
       assert.match(styles, /transform 150ms ease/);
+      assert.match(sourceHandleRule, /opacity:\s*1;/);
+      assert.match(sourceHandleRule, /z-index:\s*3;/);
+      assert.match(sourceHandleRule, /pointer-events:\s*auto;/);
+      assert.match(draggingDropTargetRule, /opacity:\s*0\.55;/);
       assert.match(sourceCellRule, /box-shadow:\s*none;/);
       assert.match(sourceCellRule, /z-index:\s*2;/);
       assert.match(previewCellRule, /border-color:\s*transparent;/);

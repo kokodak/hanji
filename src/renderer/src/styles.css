@@ -580,8 +580,7 @@ input:focus {
 
 #editor .cm-live-table-handle.is-control-visible,
 #editor .cm-live-table-add.is-control-visible,
-#editor .cm-live-table-handle.is-drop-target,
-#editor .cm-live-table-handle.is-drag-source {
+#editor .cm-live-table-handle.is-drop-target {
   opacity: 1;
   pointer-events: auto;
 }
@@ -607,7 +606,16 @@ input:focus {
 }
 
 #editor .cm-live-table-handle.is-drag-source {
-  opacity: 0.45;
+  z-index: 3;
+  border-color: #d5cabc;
+  background: #fffefa;
+  color: #4f7776;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#editor .cm-live-table-frame.is-structure-dragging .cm-live-table-handle.is-drop-target:not(.is-drag-source) {
+  opacity: 0.55;
 }
 
 #editor .cm-live-table-frame.is-structure-dragging .cm-live-table-handle {
