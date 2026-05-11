@@ -67,6 +67,17 @@ export const tests = [
     }
   },
   {
+    name: 'adds hanging indent metadata to list preview lines',
+    run() {
+      assert.match(livePreviewSource, /function listWrapLine\(indentLength: number\): Decoration/);
+      assert.match(livePreviewSource, /--list-wrap-indent: \$\{indentLength\}ch;/);
+      assert.match(livePreviewSource, /class: 'cm-live-list-line'/);
+      assert.match(livePreviewSource, /listWrapLine\(taskMatch\[1\]\.length\)/);
+      assert.match(livePreviewSource, /listWrapLine\(listMatch\[1\]\.length\)/);
+      assert.match(livePreviewSource, /listWrapLine\(numberedListMatch\[1\]\.length\)/);
+    }
+  },
+  {
     name: 'ignores transient coordinate lookup failures',
     run() {
       const view = {

@@ -82,11 +82,14 @@ export const tests = [
   {
     name: 'keeps list marker widgets inside the editor line box',
     run() {
+      const listLineRule = getRuleBody('#editor .cm-live-list-line');
       const bulletRule = getRuleBody('#editor .cm-live-bullet');
       const checkboxRule = getRuleBody('#editor .cm-live-checkbox');
       const checkboxBoxRule = getRuleBody('#editor .cm-live-checkbox-box');
       const numberedRule = getRuleBody('#editor .cm-live-numbered-marker');
 
+      assert.match(listLineRule, /padding-left:\s*var\(--list-wrap-indent, 0\);/);
+      assert.match(listLineRule, /text-indent:\s*calc\(var\(--list-wrap-indent, 0\) \* -1\);/);
       assert.match(bulletRule, /height:\s*1lh;/);
       assert.match(bulletRule, /line-height:\s*inherit;/);
       assert.match(bulletRule, /vertical-align:\s*top;/);

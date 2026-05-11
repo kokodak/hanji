@@ -103,6 +103,15 @@ function addCompactSelectionDecorations(view: EditorView, pending: PendingDecora
   }
 }
 
+function listWrapLine(indentLength: number): Decoration {
+  return Decoration.line({
+    attributes: {
+      style: `--list-wrap-indent: ${indentLength}ch;`
+    },
+    class: 'cm-live-list-line'
+  });
+}
+
 function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   const pending: PendingDecoration[] = [];
@@ -218,6 +227,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
       }
 
       if (taskMatch) {
+        pending.push({ from: line.from, to: line.from, decoration: listWrapLine(taskMatch[1].length) });
         const markerStart = line.from + taskMatch[1].length;
         const taskEnd = line.from + taskMatch[0].length;
         const checkPosition = markerStart + taskMatch[2].length + 2;
@@ -236,6 +246,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
           pending.push({ from: taskEnd, to: line.to, decoration: liveCheckedTask });
         }
       } else if (listMatch) {
+        pending.push({ from: line.from, to: line.from, decoration: listWrapLine(listMatch[1].length) });
         const markerStart = line.from + listMatch[1].length;
         const markerEnd = line.from + listMatch[0].length;
 
@@ -243,6 +254,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
           pending.push({ from: markerStart, to: markerEnd, decoration: bulletMarker });
         }
       } else if (numberedListMatch) {
+        pending.push({ from: line.from, to: line.from, decoration: listWrapLine(numberedListMatch[1].length) });
         const markerStart = line.from + numberedListMatch[1].length;
         const markerEnd = line.from + numberedListMatch[0].length;
         const markerText = `${numberedListMatch[2]}${numberedListMatch[3]}`;

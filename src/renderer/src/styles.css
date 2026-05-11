@@ -298,6 +298,11 @@ input:focus {
   width: 100%;
 }
 
+#editor .cm-live-list-line {
+  padding-left: var(--list-wrap-indent, 0);
+  text-indent: calc(var(--list-wrap-indent, 0) * -1);
+}
+
 #editor .cm-focused {
   outline: 0;
 }
