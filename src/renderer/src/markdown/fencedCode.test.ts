@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { Text } from '@codemirror/state';
 import {
   collectFencedCodeBlocks,
@@ -6,6 +7,17 @@ import {
   getFencedCodeLineDecoration,
   getPreviewCodeLineDecoration
 } from './fencedCode';
+
+const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+
+function getRuleBody(selector: string): string {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`).exec(styles);
+
+  assert.ok(match, `Expected ${selector} rule to exist.`);
+
+  return match[1];
+}
 
 function text(lines: string[]): Text {
   return Text.of(lines);
@@ -83,6 +95,16 @@ export const tests = [
 
       assert.equal(getPreviewCodeLineDecoration(block, 2).spec.class, 'cm-live-codeblock cm-live-codeblock-first');
       assert.equal(getPreviewCodeLineDecoration(block, 3).spec.class, 'cm-live-codeblock cm-live-codeblock-last');
+    }
+  },
+  {
+    name: 'keeps fenced code preview lines full width',
+    run() {
+      const lineRule = getRuleBody('#editor .cm-line.cm-live-codeblock');
+      const blockRule = getRuleBody('#editor .cm-live-codeblock');
+
+      assert.match(lineRule, /width:\s*100%;/);
+      assert.match(blockRule, /width:\s*100%;/);
     }
   }
 ];

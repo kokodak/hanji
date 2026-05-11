@@ -17,11 +17,13 @@ export const tests = [
     name: 'keeps horizontal rule preview inside the source line box',
     run() {
       const rule = getRuleBody('#editor .cm-live-horizontal-rule');
+      const lineRule = getRuleBody('#editor .cm-line:has(.cm-live-horizontal-rule)');
 
       assert.match(rule, /display:\s*inline-block;/);
       assert.match(rule, /width:\s*100%;/);
       assert.match(rule, /vertical-align:\s*middle;/);
       assert.doesNotMatch(rule, /margin:/);
+      assert.match(lineRule, /width:\s*100%;/);
     }
   }
 ];

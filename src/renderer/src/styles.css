@@ -290,6 +290,14 @@ input:focus {
   padding: 0;
 }
 
+#editor .cm-line.cm-live-codeblock {
+  width: 100%;
+}
+
+#editor .cm-line:has(.cm-live-horizontal-rule) {
+  width: 100%;
+}
+
 #editor .cm-focused {
   outline: 0;
 }
@@ -603,6 +611,7 @@ input:focus {
 
 #editor .cm-live-codeblock {
   position: relative;
+  width: 100%;
   padding: 0 14px;
   background: #f2ece2;
   background-clip: padding-box;
