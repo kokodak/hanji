@@ -5,8 +5,17 @@ import { syntaxHighlighting } from '@codemirror/language';
 import { EditorState, Prec } from '@codemirror/state';
 import { drawSelection, EditorView, keymap } from '@codemirror/view';
 import { litheHighlightStyle } from './highlighting';
-import { handleBacktickInput, handlePairedSymbolInput, handlePlainTextPaste } from './inputHandlers';
-import { continueListItem, indentWithSpaces, outdentSpaces, softBreakKeymap, stableVerticalMovement, tabIndentation } from './keymaps';
+import { imeCompositionTracker } from './ime';
+import { handleBacktickInput, handleImeTextBoundaryInput, handlePairedSymbolInput, handlePlainTextPaste } from './inputHandlers';
+import {
+  continueListItem,
+  handleSmartEnterBeforeInput,
+  indentWithSpaces,
+  outdentSpaces,
+  softBreakKeymap,
+  stableVerticalMovement,
+  tabIndentation
+} from './keymaps';
 import { liveMarkdownPreview } from '../markdown/livePreview';
 
 interface CreateEditorOptions {
@@ -42,13 +51,16 @@ export function createEditor(options: CreateEditorOptions): EditorView {
         markdown({ codeLanguages: languages }),
         syntaxHighlighting(litheHighlightStyle, { fallback: true }),
         drawSelection(),
+        imeCompositionTracker,
         handlePlainTextPaste,
+        handleImeTextBoundaryInput,
         handleBacktickInput,
         handlePairedSymbolInput,
         liveMarkdownPreview,
         EditorView.lineWrapping,
         stableVerticalMovement,
         Prec.highest(tabIndentationEvents),
+        Prec.highest(handleSmartEnterBeforeInput),
         Prec.highest(tabIndentation),
         Prec.highest(softBreakKeymap),
         Prec.highest(keymap.of([{ key: 'Enter', run: continueListItem }])),

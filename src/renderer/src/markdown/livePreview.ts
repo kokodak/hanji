@@ -25,6 +25,7 @@ import { BulletWidget, CheckboxWidget, CodeLanguageWidget, HorizontalRuleWidget,
 import { lineContainsCursor, lineIntersectsSelection, rangeContainsSelection } from './selection';
 import { collectMarkdownTables, getMarkdownTableForLine, type MarkdownTable } from './table';
 import type { PendingDecoration } from './types';
+import { editorHasActiveImeComposition } from '../editor/ime';
 
 export { collectMarkdownTables } from './table';
 export type { MarkdownTable } from './table';
@@ -93,6 +94,8 @@ function tableIntersectsSelection(view: EditorView, table: MarkdownTable): boole
 }
 
 function addCompactSelectionDecorations(view: EditorView, pending: PendingDecoration[], from: number, to: number): void {
+  if (editorHasActiveImeComposition(view)) return;
+
   for (const range of view.state.selection.ranges) {
     if (range.empty) continue;
 

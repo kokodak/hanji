@@ -6,6 +6,7 @@ import { continueListItem, indentWithSpaces, insertSoftBreak, outdentSpaces } fr
 class TestEditorView {
   state: EditorState;
   dispatchCount = 0;
+  compositionStarted = false;
 
   constructor(doc: string, cursor: number = doc.length) {
     this.state = EditorState.create({
@@ -124,6 +125,34 @@ export const tests = [
 
       assert.equal(view.state.doc.toString(), '- [x] done\n- [ ] ');
       assert.equal(view.state.selection.main.head, '- [x] done\n- [ ] '.length);
+    }
+  },
+  {
+    name: 'continues bullet lists after active Hangul composition selection',
+    run() {
+      const view = new TestEditorView('- 한글');
+      view.compositionStarted = true;
+      view.dispatch({ selection: { anchor: '- 한'.length, head: '- 한글'.length } });
+
+      const handled = continueListItem(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), '- 한글\n- ');
+      assert.equal(view.state.selection.main.head, '- 한글\n- '.length);
+    }
+  },
+  {
+    name: 'continues task lists after active Hangul composition selection',
+    run() {
+      const view = new TestEditorView('- [ ] 한글');
+      view.compositionStarted = true;
+      view.dispatch({ selection: { anchor: '- [ ] 한'.length, head: '- [ ] 한글'.length } });
+
+      const handled = continueListItem(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), '- [ ] 한글\n- [ ] ');
+      assert.equal(view.state.selection.main.head, '- [ ] 한글\n- [ ] '.length);
     }
   },
   {

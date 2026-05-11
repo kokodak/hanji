@@ -21,11 +21,16 @@ interface DecorationSummary {
   widgetName: string | undefined;
 }
 
-function collectDecorationSummaries(docText: string, selection: { anchor: number; head?: number }): DecorationSummary[] {
+function collectDecorationSummaries(
+  docText: string,
+  selection: { anchor: number; head?: number },
+  options: { compositionStarted?: boolean } = {}
+): DecorationSummary[] {
   const state = EditorState.create({ doc: docText, selection });
   const view = {
     state,
-    visibleRanges: [{ from: 0, to: state.doc.length }]
+    visibleRanges: [{ from: 0, to: state.doc.length }],
+    compositionStarted: options.compositionStarted ?? false
   } as unknown as EditorView;
   const decorations = buildLivePreviewDecorations(view, null);
   const summaries: DecorationSummary[] = [];
@@ -104,6 +109,14 @@ export const tests = [
       assert.match(livePreviewSource, /cm-compact-empty-selection/);
       assert.match(livePreviewSource, /from === to/);
       assert.match(livePreviewSource, /Decoration\.widget\(\{ widget: new EmptyLineSelectionWidget\(\), side: 1 \}\)/);
+    }
+  },
+  {
+    name: 'does not paint Hangul IME composition as compact selection',
+    run() {
+      const summaries = collectDecorationSummaries('한', { anchor: 0, head: 1 }, { compositionStarted: true });
+
+      assert.equal(summaries.some((summary) => summary.className === 'cm-compact-selection'), false);
     }
   },
   {

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import {
+  getImeTextBoundaryInsertion,
   getPlainTextPasteReplacement,
   lineIsEmptyListMarker,
   normalizePastedText,
@@ -76,9 +77,49 @@ export const tests = [
     }
   },
   {
-    name: 'installs the plain text paste handler before editor input helpers',
+    name: 'inserts ASCII punctuation after active Hangul composition text',
     run() {
-      assert.match(createEditorSource, /handlePlainTextPaste,\n\s+handleBacktickInput,/);
+      const state = EditorState.create({
+        doc: '한',
+        selection: { anchor: 0, head: 1 }
+      });
+      const view = { state, compositionStarted: true } as unknown as EditorView;
+
+      assert.deepEqual(getImeTextBoundaryInsertion(view, 0, 1, '.'), {
+        from: 1,
+        to: 1,
+        insert: '.'
+      });
+    }
+  },
+  {
+    name: 'keeps Hangul composition updates on the default input path',
+    run() {
+      const state = EditorState.create({
+        doc: '하',
+        selection: { anchor: 0, head: 1 }
+      });
+      const view = { state, compositionStarted: true } as unknown as EditorView;
+
+      assert.equal(getImeTextBoundaryInsertion(view, 0, 1, '한'), null);
+    }
+  },
+  {
+    name: 'keeps normal selected Hangul replacement on the default input path',
+    run() {
+      const state = EditorState.create({
+        doc: '한',
+        selection: { anchor: 0, head: 1 }
+      });
+      const view = { state, compositionStarted: false } as unknown as EditorView;
+
+      assert.equal(getImeTextBoundaryInsertion(view, 0, 1, '.'), null);
+    }
+  },
+  {
+    name: 'installs the plain text paste and IME handlers before editor input helpers',
+    run() {
+      assert.match(createEditorSource, /handlePlainTextPaste,\n\s+handleImeTextBoundaryInput,\n\s+handleBacktickInput,/);
     }
   }
 ];

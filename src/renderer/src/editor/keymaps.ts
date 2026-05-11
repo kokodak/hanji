@@ -1,5 +1,6 @@
 import { EditorView, keymap } from '@codemirror/view';
 import { collectFencedCodeBlocks, getFencedCodeBlockForLine } from '../markdown/fencedCode';
+import { imeCompositionSelectionCursor } from './ime';
 
 const TAB_SPACES = '    ';
 const listLinePattern = /^(\s*)(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)/;
@@ -103,10 +104,12 @@ function previousNonEmptyLineStartsListItem(view: EditorView, lineNumber: number
 
 export function continueListItem(view: EditorView): boolean {
   const selection = view.state.selection.main;
-  const line = view.state.doc.lineAt(selection.head);
+  const compositionCursor = imeCompositionSelectionCursor(view);
+  const cursor = compositionCursor ?? selection.head;
+  const line = view.state.doc.lineAt(cursor);
   const emptyListLineReplacement = replacementForEmptyListLine(line.text);
 
-  if (!selection.empty) {
+  if (!selection.empty && compositionCursor === null) {
     const selectionStartLine = view.state.doc.lineAt(selection.from);
     const selectionEndLine = view.state.doc.lineAt(selection.to);
     const selectionStaysOnLine = selectionStartLine.number === selectionEndLine.number && selectionStartLine.number === line.number;
@@ -122,8 +125,8 @@ export function continueListItem(view: EditorView): boolean {
     return true;
   }
 
-  const textBeforeCursor = view.state.sliceDoc(line.from, selection.head);
-  const textAfterCursor = view.state.sliceDoc(selection.head, line.to);
+  const textBeforeCursor = view.state.sliceDoc(line.from, cursor);
+  const textAfterCursor = view.state.sliceDoc(cursor, line.to);
   const taskMatch = /^(\s*)([-*+])\s+\[([ xX])\]\s*(.*)$/.exec(textBeforeCursor);
   const bulletMatch = /^(\s*)([-*+])\s+(.*)$/.exec(textBeforeCursor);
   const numberedMatch = /^(\s*)(\d+)([.)])\s+(.*)$/.exec(textBeforeCursor);
@@ -156,7 +159,7 @@ export function continueListItem(view: EditorView): boolean {
 
       const nextIndent = reduceIndent(indent);
       view.dispatch({
-        changes: { from: line.from, to: selection.head, insert: nextIndent },
+        changes: { from: line.from, to: cursor, insert: nextIndent },
         selection: { anchor: line.from + nextIndent.length }
       });
       return true;
@@ -164,8 +167,8 @@ export function continueListItem(view: EditorView): boolean {
 
     const insert = `\n${indent}${marker} [ ] `;
     view.dispatch({
-      changes: { from: selection.head, insert },
-      selection: { anchor: selection.head + insert.length }
+      changes: { from: cursor, insert },
+      selection: { anchor: cursor + insert.length }
     });
     return true;
   }
@@ -178,7 +181,7 @@ export function continueListItem(view: EditorView): boolean {
 
       const nextIndent = reduceIndent(indent);
       view.dispatch({
-        changes: { from: line.from, to: selection.head, insert: nextIndent },
+        changes: { from: line.from, to: cursor, insert: nextIndent },
         selection: { anchor: line.from + nextIndent.length }
       });
       return true;
@@ -186,8 +189,8 @@ export function continueListItem(view: EditorView): boolean {
 
     const insert = `\n${indent}${marker} `;
     view.dispatch({
-      changes: { from: selection.head, insert },
-      selection: { anchor: selection.head + insert.length }
+      changes: { from: cursor, insert },
+      selection: { anchor: cursor + insert.length }
     });
     return true;
   }
@@ -200,7 +203,7 @@ export function continueListItem(view: EditorView): boolean {
 
       const nextIndent = reduceIndent(indent);
       view.dispatch({
-        changes: { from: line.from, to: selection.head, insert: nextIndent },
+        changes: { from: line.from, to: cursor, insert: nextIndent },
         selection: { anchor: line.from + nextIndent.length }
       });
       return true;
@@ -209,8 +212,8 @@ export function continueListItem(view: EditorView): boolean {
     const nextNumber = Number(numberText) + 1;
     const insert = `\n${indent}${nextNumber}${marker} `;
     view.dispatch({
-      changes: { from: selection.head, insert },
-      selection: { anchor: selection.head + insert.length }
+      changes: { from: cursor, insert },
+      selection: { anchor: cursor + insert.length }
     });
     return true;
   }
@@ -222,7 +225,7 @@ export function continueListItem(view: EditorView): boolean {
       if (!isBlankListContent(textAfterCursor)) return false;
 
       view.dispatch({
-        changes: { from: line.from, to: selection.head, insert: indent },
+        changes: { from: line.from, to: cursor, insert: indent },
         selection: { anchor: line.from + indent.length }
       });
       return true;
@@ -230,30 +233,39 @@ export function continueListItem(view: EditorView): boolean {
 
     const insert = `\n${indent}> `;
     view.dispatch({
-      changes: { from: selection.head, insert },
-      selection: { anchor: selection.head + insert.length }
+      changes: { from: cursor, insert },
+      selection: { anchor: cursor + insert.length }
     });
     return true;
   }
 
   if (bareBlockquoteLinePattern.test(line.text)) {
     view.dispatch({
-      changes: { from: selection.head, insert: '\n' },
-      selection: { anchor: selection.head + 1 }
+      changes: { from: cursor, insert: '\n' },
+      selection: { anchor: cursor + 1 }
     });
     return true;
   }
 
   if (line.text.trim() !== '' && previousNonEmptyLineStartsListItem(view, line.number)) {
     view.dispatch({
-      changes: { from: selection.head, insert: '\n' },
-      selection: { anchor: selection.head + 1 }
+      changes: { from: cursor, insert: '\n' },
+      selection: { anchor: cursor + 1 }
     });
     return true;
   }
 
   return false;
 }
+
+export const handleSmartEnterBeforeInput = EditorView.domEventHandlers({
+  beforeinput(event, view) {
+    if (!(event instanceof InputEvent)) return false;
+    if (event.inputType !== 'insertParagraph') return false;
+
+    return continueListItem(view);
+  }
+});
 
 function selectedLineNumbers(view: EditorView): number[] {
   const lines = new Set<number>();

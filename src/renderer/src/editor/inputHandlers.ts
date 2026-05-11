@@ -1,4 +1,5 @@
 import { EditorView } from '@codemirror/view';
+import { editorHasActiveOrRecentImeComposition, textContainsHangul } from './ime';
 
 interface PairRule {
   open: string;
@@ -32,6 +33,12 @@ export interface PasteReplacement {
   insert: string;
 }
 
+export interface TextReplacement {
+  from: number;
+  to: number;
+  insert: string;
+}
+
 export function pastedTextStartsWithListItem(text: string): boolean {
   return pastedListItemPattern.test(text);
 }
@@ -58,6 +65,21 @@ export function getPlainTextPasteReplacement(view: EditorView, from: number, to:
   }
 
   return { from, to, insert };
+}
+
+function textCanEndHangulComposition(text: string): boolean {
+  return text.length > 0 && !/[\r\n]/.test(text) && !textContainsHangul(text);
+}
+
+export function getImeTextBoundaryInsertion(view: EditorView, from: number, to: number, text: string): TextReplacement | null {
+  if (from === to) return null;
+  if (!editorHasActiveOrRecentImeComposition(view)) return null;
+  if (!textCanEndHangulComposition(text)) return null;
+
+  const replacedText = view.state.sliceDoc(from, to);
+  if (replacedText.includes('\n') || !textContainsHangul(replacedText)) return null;
+
+  return { from: to, to, insert: text };
 }
 
 function positionIsInsideFencedCodeBlock(view: EditorView, position: number): boolean {
@@ -125,6 +147,20 @@ export const handleBacktickInput = EditorView.inputHandler.of((view, from, to, t
   view.dispatch({
     changes: { from, to, insert: '``' },
     selection: { anchor: from + 1 }
+  });
+
+  return true;
+});
+
+export const handleImeTextBoundaryInput = EditorView.inputHandler.of((view, from, to, text) => {
+  const replacement = getImeTextBoundaryInsertion(view, from, to, text);
+  if (replacement === null) return false;
+
+  view.dispatch({
+    changes: replacement,
+    selection: { anchor: replacement.from + replacement.insert.length },
+    scrollIntoView: true,
+    userEvent: 'input.type'
   });
 
   return true;
