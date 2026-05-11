@@ -34,7 +34,7 @@ export function createEditor(options: CreateEditorOptions): EditorView {
         liveMarkdownPreview,
         EditorView.lineWrapping,
         stableVerticalMovement,
-        tabIndentation,
+        Prec.highest(tabIndentation),
         Prec.highest(keymap.of([{ key: 'Enter', run: continueListItem }])),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         EditorView.updateListener.of((update) => {

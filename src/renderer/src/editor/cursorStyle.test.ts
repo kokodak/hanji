@@ -22,6 +22,7 @@ export const tests = [
 
       assert.match(createEditorSource, /import \{ drawSelection, EditorView, keymap \} from '@codemirror\/view';/);
       assert.match(createEditorSource, /Prec\.highest\(keymap\.of\(\[\{ key: 'Enter', run: continueListItem \}\]\)\)/);
+      assert.match(createEditorSource, /Prec\.highest\(tabIndentation\),/);
       assert.match(createEditorSource, /drawSelection\(\),/);
       assert.match(contentRule, /caret-color:\s*transparent;/);
       assert.match(cursorRule, /border-left-color:\s*#2f5f62;/);
