@@ -319,6 +319,16 @@ input:focus {
   border-left-color: #2f5f62;
 }
 
+#editor .cm-editor.has-live-table-cursor-hidden .cm-cursor {
+  border-left-color: transparent;
+}
+
+#editor .cm-editor:has(.cm-live-table:hover) .cm-cursor,
+#editor .cm-editor:has(.cm-live-table:focus-within) .cm-cursor,
+#editor .cm-editor:has(.cm-live-table.has-cell-selection) .cm-cursor {
+  border-left-color: transparent;
+}
+
 #editor .cm-activeLine {
   background: transparent;
 }

@@ -159,6 +159,9 @@ export class TableWidget extends WidgetType {
     let externalDragStart: { x: number; y: number } | null = null;
     let draggingCells = false;
 
+    const setEditorTableCursorHidden = (hidden: boolean): void => {
+      view.dom.classList.toggle('has-live-table-cursor-hidden', hidden);
+    };
     const getCellPosition = (cell: HTMLTableCellElement): { row: number; column: number } => ({
       row: Number(cell.dataset.row ?? 0),
       column: Number(cell.dataset.column ?? 0)
@@ -419,6 +422,15 @@ export class TableWidget extends WidgetType {
     table.addEventListener('click', (event) => {
       event.stopPropagation();
     });
+    table.addEventListener('mouseenter', () => {
+      setEditorTableCursorHidden(true);
+    });
+    table.addEventListener('mouseleave', () => {
+      setEditorTableCursorHidden(table.contains(document.activeElement));
+    });
+    table.addEventListener('focusin', () => {
+      setEditorTableCursorHidden(true);
+    });
     table.addEventListener('pointermove', extendCellDrag);
     table.addEventListener('mousemove', extendCellDrag);
     table.addEventListener('mouseup', (event) => {
@@ -438,6 +450,7 @@ export class TableWidget extends WidgetType {
     table.addEventListener('focusout', (event) => {
       if (table.contains(event.relatedTarget as Node | null)) return;
 
+      setEditorTableCursorHidden(false);
       clearCellSelection();
     });
     table.addEventListener('keydown', handleKeydown);
@@ -533,6 +546,7 @@ export class TableWidget extends WidgetType {
 
   destroy(dom: HTMLElement): void {
     dom.dispatchEvent(new CustomEvent('lithe-table-destroy'));
+    dom.closest('.cm-editor')?.classList.remove('has-live-table-cursor-hidden');
   }
 
   ignoreEvent(): boolean {

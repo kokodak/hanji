@@ -69,6 +69,12 @@ export const tests = [
       assert.match(widgetsSource, /classList\.add\('is-selected'\)/);
       assert.match(widgetsSource, /updateSelectionOutline/);
       assert.match(widgetsSource, /selectedByEditorSelection/);
+      assert.match(widgetsSource, /setEditorTableCursorHidden/);
+      assert.match(widgetsSource, /has-live-table-cursor-hidden/);
+      assert.match(widgetsSource, /table\.addEventListener\('mouseenter'/);
+      assert.match(widgetsSource, /table\.addEventListener\('mouseleave'/);
+      assert.match(widgetsSource, /table\.addEventListener\('focusin'/);
+      assert.match(widgetsSource, /closest\('\.cm-editor'\)\?\.classList\.remove\('has-live-table-cursor-hidden'\)/);
       assert.match(widgetsSource, /--selection-outline-left/);
       assert.match(widgetsSource, /--selection-outline-height/);
       assert.match(widgetsSource, /deleteDocumentTable/);
@@ -117,6 +123,18 @@ export const tests = [
       assert.match(selectionOutlineRule, /pointer-events:\s*none;/);
       assert.match(selectionOutlineRule, /top:\s*var\(--selection-outline-top\);/);
       assert.match(selectionOutlineRule, /left:\s*var\(--selection-outline-left\);/);
+    }
+  },
+  {
+    name: 'hides the editor cursor around rendered tables',
+    run() {
+      const cursorRule = getRuleBody('#editor .cm-editor.has-live-table-cursor-hidden .cm-cursor');
+      const hoverCursorRule = getRuleBody(
+        '#editor .cm-editor:has(.cm-live-table:hover) .cm-cursor,\n#editor .cm-editor:has(.cm-live-table:focus-within) .cm-cursor,\n#editor .cm-editor:has(.cm-live-table.has-cell-selection) .cm-cursor'
+      );
+
+      assert.match(cursorRule, /border-left-color:\s*transparent;/);
+      assert.match(hoverCursorRule, /border-left-color:\s*transparent;/);
     }
   },
   {
