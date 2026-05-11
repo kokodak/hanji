@@ -21,7 +21,7 @@ import {
   tablePreviewLine
 } from './decorations';
 import { CheckboxWidget, CodeLanguageWidget, HorizontalRuleWidget, NumberedListWidget, TableWidget } from './widgets';
-import { lineContainsSelection, lineIntersectsSelection, rangeContainsSelection } from './selection';
+import { lineContainsCursor, rangeContainsCursor } from './selection';
 import { collectMarkdownTables, getMarkdownTableForLine, type MarkdownTable } from './table';
 import type { PendingDecoration } from './types';
 
@@ -125,7 +125,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
       const lineText = line.text;
       const inFrontmatter =
         frontmatterBlock !== null && line.number >= frontmatterBlock.startLine && line.number <= frontmatterBlock.endLine;
-      const isInteractive = line.number === hoverLine || lineIntersectsSelection(view, line.from, line.to);
+      const isInteractive = line.number === hoverLine || lineContainsCursor(view, line.from, line.to);
       const codeBlock = getFencedCodeBlockForLine(codeBlocks, line.number);
       const table = getMarkdownTableForLine(tables, line.number);
       const headingMatch = /^(#{1,6})\s+/.exec(lineText);
@@ -232,7 +232,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
         const taskEnd = line.from + taskMatch[0].length;
         const checkPosition = markerStart + taskMatch[2].length + 2;
         const isChecked = taskMatch[3].toLowerCase() === 'x';
-        const editingTaskMarker = rangeContainsSelection(view, markerStart, taskEnd);
+        const editingTaskMarker = rangeContainsCursor(view, markerStart, taskEnd);
 
         if (!editingTaskMarker) {
           pending.push({
@@ -250,7 +250,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
         const markerStart = line.from + listMatch[1].length;
         const markerEnd = line.from + listMatch[0].length;
 
-        if (!rangeContainsSelection(view, markerStart, markerEnd)) {
+        if (!rangeContainsCursor(view, markerStart, markerEnd)) {
           pending.push({ from: markerStart, to: markerEnd, decoration: bulletMarker });
         }
       } else if (numberedListMatch) {
@@ -259,7 +259,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
         const markerEnd = line.from + numberedListMatch[0].length;
         const markerText = `${numberedListMatch[2]}${numberedListMatch[3]}`;
 
-        if (!rangeContainsSelection(view, markerStart, markerEnd)) {
+        if (!rangeContainsCursor(view, markerStart, markerEnd)) {
           pending.push({
             from: markerStart,
             to: markerEnd,
@@ -278,7 +278,7 @@ function buildLivePreviewDecorations(view: EditorView, hoverLine: number | null)
           decoration: Decoration.line({ class: 'cm-live-blockquote' })
         });
 
-        if (!lineContainsSelection(view, line.from, line.to)) {
+        if (!lineContainsCursor(view, line.from, line.to)) {
           pending.push({ from: markerStart, to: markerEnd, decoration: hiddenSyntax });
         }
       }

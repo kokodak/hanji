@@ -26,6 +26,14 @@ export function rangeContainsSelection(view: EditorView, from: number, to: numbe
   });
 }
 
+export function lineContainsCursor(view: EditorView, lineFrom: number, lineTo: number): boolean {
+  return view.state.selection.ranges.some((range) => range.empty && range.head >= lineFrom && range.head <= lineTo);
+}
+
+export function rangeContainsCursor(view: EditorView, from: number, to: number): boolean {
+  return view.state.selection.ranges.some((range) => range.empty && range.head >= from && range.head < to);
+}
+
 export function syntaxRangeIsActive(view: EditorView, from: number, to: number): boolean {
   return rangeContainsSelection(view, from, to);
 }

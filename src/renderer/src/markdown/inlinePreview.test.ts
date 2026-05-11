@@ -4,12 +4,15 @@ import type { EditorView } from '@codemirror/view';
 import { addInlinePreviewDecorations, lineIsOnlyInlineCode } from './inlinePreview';
 import type { PendingDecoration } from './types';
 
-function decorationClassesFor(lineText: string): Array<string | undefined> {
+function decorationClassesFor(
+  lineText: string,
+  selection: { anchor: number; head?: number } = { anchor: lineText.length + 1 }
+): Array<string | undefined> {
   const pending: PendingDecoration[] = [];
   const view = {
     state: EditorState.create({
       doc: `${lineText}\n`,
-      selection: { anchor: lineText.length + 1 }
+      selection
     })
   } as unknown as EditorView;
 
@@ -66,6 +69,15 @@ export const tests = [
       assert.equal(classes.includes('cm-live-emphasis'), false);
       assert.equal(classes.includes('cm-live-strong'), false);
       assert.equal(classes.includes('cm-markdown-syntax-hidden'), false);
+    }
+  },
+  {
+    name: 'keeps inline previews active during range selection',
+    run() {
+      const classes = decorationClassesFor('*emphasis*', { anchor: 0, head: '*emphasis*'.length });
+
+      assert.equal(classes.includes('cm-live-emphasis'), true);
+      assert.equal(classes.includes('cm-markdown-syntax-hidden'), true);
     }
   }
 ];

@@ -17,14 +17,7 @@ interface InlineSyntaxMarker {
 
 function rangeTouchesSelection(view: EditorView, from: number, to: number): boolean {
   return view.state.selection.ranges.some((range) => {
-    const selectionFrom = Math.min(range.from, range.to);
-    const selectionTo = Math.max(range.from, range.to);
-
-    if (range.empty) {
-      return range.head >= from && range.head <= to;
-    }
-
-    return selectionFrom < to && selectionTo > from;
+    return range.empty && range.head >= from && range.head <= to;
   });
 }
 

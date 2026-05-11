@@ -50,10 +50,11 @@ export function getFencedCodeBlockForLine(blocks: FencedCodeBlock[], lineNumber:
 
 export function isActiveFencedCodeBlock(view: EditorView, block: FencedCodeBlock): boolean {
   return view.state.selection.ranges.some((range) => {
-    const fromLine = view.state.doc.lineAt(range.from).number;
-    const toLine = view.state.doc.lineAt(range.to).number;
+    if (!range.empty) return false;
 
-    return fromLine <= block.endLine && toLine >= block.startLine;
+    const line = view.state.doc.lineAt(range.head).number;
+
+    return line >= block.startLine && line <= block.endLine;
   });
 }
 

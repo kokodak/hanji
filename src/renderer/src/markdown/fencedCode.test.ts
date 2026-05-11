@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { Text } from '@codemirror/state';
+import { EditorState, Text } from '@codemirror/state';
+import type { EditorView } from '@codemirror/view';
 import {
   collectFencedCodeBlocks,
   getFencedCodeBlockForLine,
   getFencedCodeLineDecoration,
-  getPreviewCodeLineDecoration
+  getPreviewCodeLineDecoration,
+  isActiveFencedCodeBlock
 } from './fencedCode';
 
 const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
@@ -76,6 +78,37 @@ export const tests = [
 
       assert.deepEqual(getFencedCodeBlockForLine(blocks, 2), blocks[0]);
       assert.equal(getFencedCodeBlockForLine(blocks, 4), null);
+    }
+  },
+  {
+    name: 'does not enter fenced code edit mode for range selections',
+    run() {
+      const doc = text(['before', '```ts', 'const ok = true;', '```', 'after']);
+      const block = collectFencedCodeBlocks(doc)[0];
+      const view = {
+        state: EditorState.create({
+          doc,
+          selection: { anchor: 0, head: doc.length }
+        })
+      } as unknown as EditorView;
+
+      assert.equal(isActiveFencedCodeBlock(view, block), false);
+    }
+  },
+  {
+    name: 'enters fenced code edit mode when the cursor is inside the block',
+    run() {
+      const doc = text(['before', '```ts', 'const ok = true;', '```', 'after']);
+      const block = collectFencedCodeBlocks(doc)[0];
+      const cursor = doc.line(3).from;
+      const view = {
+        state: EditorState.create({
+          doc,
+          selection: { anchor: cursor }
+        })
+      } as unknown as EditorView;
+
+      assert.equal(isActiveFencedCodeBlock(view, block), true);
     }
   },
   {
