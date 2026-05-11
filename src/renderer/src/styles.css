@@ -709,6 +709,11 @@ input:focus {
   border: 2px solid #6fa09f;
   content: "";
   pointer-events: none;
+  transition:
+    top 150ms ease,
+    left 150ms ease,
+    width 150ms ease,
+    height 150ms ease;
 }
 
 #editor .cm-live-table.is-cell-dragging ::selection {

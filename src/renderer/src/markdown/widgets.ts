@@ -32,9 +32,17 @@ interface TableStructureDragTarget {
   start: number;
 }
 
+interface TableSelectionRect {
+  bottom: number;
+  left: number;
+  right: number;
+  top: number;
+}
+
 interface ActiveTableStructureDrag {
   bounds: Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'>;
   from: number;
+  sourceRects: TableSelectionRect[];
   target: HTMLElement | null;
   targets: TableStructureDragTarget[];
   to: number;
@@ -475,8 +483,25 @@ export class TableWidget extends WidgetType {
       frame.style.removeProperty('--selection-outline-width');
       frame.style.removeProperty('--selection-outline-height');
     };
-    const setSelectionOutlineForCells = (cells: HTMLTableCellElement[]): void => {
-      if (cells.length === 0) {
+    const getSelectionRects = (cells: HTMLTableCellElement[]): TableSelectionRect[] =>
+      cells.map((cell) => {
+        const rect = cell.getBoundingClientRect();
+        return {
+          bottom: rect.bottom,
+          left: rect.left,
+          right: rect.right,
+          top: rect.top
+        };
+      });
+    const shiftedSelectionRects = (rects: TableSelectionRect[], x: number, y: number): TableSelectionRect[] =>
+      rects.map((rect) => ({
+        bottom: rect.bottom + y,
+        left: rect.left + x,
+        right: rect.right + x,
+        top: rect.top + y
+      }));
+    const setSelectionOutlineForRects = (rects: TableSelectionRect[]): void => {
+      if (rects.length === 0) {
         frame.style.removeProperty('--selection-outline-left');
         frame.style.removeProperty('--selection-outline-top');
         frame.style.removeProperty('--selection-outline-width');
@@ -485,17 +510,19 @@ export class TableWidget extends WidgetType {
       }
 
       const frameRect = frame.getBoundingClientRect();
-      const selectedRects = cells.map((cell) => cell.getBoundingClientRect());
       const outlineOutset = 1.5;
-      const left = Math.min(...selectedRects.map((rect) => rect.left)) - frameRect.left - outlineOutset;
-      const top = Math.min(...selectedRects.map((rect) => rect.top)) - frameRect.top - outlineOutset;
-      const right = Math.max(...selectedRects.map((rect) => rect.right)) - frameRect.left + outlineOutset;
-      const bottom = Math.max(...selectedRects.map((rect) => rect.bottom)) - frameRect.top + outlineOutset;
+      const left = Math.min(...rects.map((rect) => rect.left)) - frameRect.left - outlineOutset;
+      const top = Math.min(...rects.map((rect) => rect.top)) - frameRect.top - outlineOutset;
+      const right = Math.max(...rects.map((rect) => rect.right)) - frameRect.left + outlineOutset;
+      const bottom = Math.max(...rects.map((rect) => rect.bottom)) - frameRect.top + outlineOutset;
 
       frame.style.setProperty('--selection-outline-left', `${left}px`);
       frame.style.setProperty('--selection-outline-top', `${top}px`);
       frame.style.setProperty('--selection-outline-width', `${right - left}px`);
       frame.style.setProperty('--selection-outline-height', `${bottom - top}px`);
+    };
+    const setSelectionOutlineForCells = (cells: HTMLTableCellElement[]): void => {
+      setSelectionOutlineForRects(getSelectionRects(cells));
     };
     const clearFocusedCellOutline = (): void => {
       frame.classList.remove('has-focused-cell');
@@ -677,7 +704,7 @@ export class TableWidget extends WidgetType {
           });
         }
       }
-      setSelectionOutlineForCells(getSelectedCells());
+      setSelectionOutlineForRects(shiftedSelectionRects(drag.sourceRects, 0, offsets[from] ?? 0));
     };
     const applyColumnDragPreview = (drag: ActiveTableStructureDrag, to: number): void => {
       const { from, targets } = drag;
@@ -698,7 +725,7 @@ export class TableWidget extends WidgetType {
           });
         }
       }
-      setSelectionOutlineForCells(getSelectedCells());
+      setSelectionOutlineForRects(shiftedSelectionRects(drag.sourceRects, offsets[from] ?? 0, 0));
     };
     const applyStructureDragPreview = (drag: ActiveTableStructureDrag, to: number): void => {
       if (drag.type === 'column') {
@@ -771,6 +798,7 @@ export class TableWidget extends WidgetType {
       const drag = {
         bounds: getStructureDragBounds(type),
         from,
+        sourceRects: getSelectionRects(getSelectedCells()),
         target,
         targets: getStructureDragTargets(type),
         to: from,

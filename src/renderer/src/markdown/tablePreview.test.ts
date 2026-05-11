@@ -227,6 +227,9 @@ export const tests = [
       const previewCellRule = getRuleBody('#editor .cm-live-table .is-structure-preview-cell');
       const previewHeaderRule = getRuleBody('#editor .cm-live-table .is-structure-preview-header-cell');
       const previewBodyRule = getRuleBody('#editor .cm-live-table .is-structure-preview-body-cell');
+      const frameSelectionRule = getRuleBody(
+        '#editor .cm-live-table-frame.has-cell-selection::after,\n#editor .cm-live-table-frame.has-focused-cell::after'
+      );
       const visibleControlRule = getRuleBody(
         '#editor .cm-live-table-handle.is-control-visible,\n#editor .cm-live-table-add.is-control-visible,\n#editor .cm-live-table-handle.is-drop-target,\n#editor .cm-live-table-handle.is-drag-source'
       );
@@ -250,7 +253,9 @@ export const tests = [
       assert.match(widgetsSource, /setStructurePreviewCellState/);
       assert.match(widgetsSource, /structureDragOffsets/);
       assert.match(widgetsSource, /target\.start/);
-      assert.match(widgetsSource, /setSelectionOutlineForCells\(getSelectedCells\(\)\)/);
+      assert.match(widgetsSource, /sourceRects: getSelectionRects\(getSelectedCells\(\)\)/);
+      assert.match(widgetsSource, /shiftedSelectionRects/);
+      assert.match(widgetsSource, /setSelectionOutlineForRects/);
       assert.match(widgetsSource, /to:\s*from/);
       assert.match(widgetsSource, /if \(nextTarget === null\) return;/);
       assert.match(widgetsSource, /activeStructureDrag\.to/);
@@ -269,6 +274,7 @@ export const tests = [
       assert.match(visibleControlRule, /opacity:\s*1;/);
       assert.match(sourceCellRule, /box-shadow:\s*none;/);
       assert.match(previewCellRule, /transition:\s*transform 150ms ease;/);
+      assert.match(frameSelectionRule, /top 150ms ease/);
       assert.match(previewHeaderRule, /font-weight:\s*700;/);
       assert.match(previewBodyRule, /font-weight:\s*400;/);
       assert.match(styles, /height:\s*18px;/);
