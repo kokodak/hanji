@@ -681,11 +681,13 @@ input:focus {
 }
 
 #editor .cm-live-table.has-cell-selection th[contenteditable]:focus {
-  outline: 0;
+  outline: 0 !important;
+  box-shadow: none;
 }
 
 #editor .cm-live-table.has-cell-selection td[contenteditable]:focus {
-  outline: 0;
+  outline: 0 !important;
+  box-shadow: none;
 }
 
 #editor .cm-live-table.has-cell-selection {

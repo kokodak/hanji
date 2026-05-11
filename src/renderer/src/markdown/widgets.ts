@@ -477,11 +477,11 @@ export class TableWidget extends WidgetType {
 
       const frameRect = frame.getBoundingClientRect();
       const selectedRects = selectedCells.map((cell) => cell.getBoundingClientRect());
-      const outlineInset = 1;
-      const left = Math.min(...selectedRects.map((rect) => rect.left)) - frameRect.left - outlineInset;
-      const top = Math.min(...selectedRects.map((rect) => rect.top)) - frameRect.top - outlineInset;
-      const right = Math.max(...selectedRects.map((rect) => rect.right)) - frameRect.left + outlineInset;
-      const bottom = Math.max(...selectedRects.map((rect) => rect.bottom)) - frameRect.top + outlineInset;
+      const outlineOutset = 1.5;
+      const left = Math.min(...selectedRects.map((rect) => rect.left)) - frameRect.left - outlineOutset;
+      const top = Math.min(...selectedRects.map((rect) => rect.top)) - frameRect.top - outlineOutset;
+      const right = Math.max(...selectedRects.map((rect) => rect.right)) - frameRect.left + outlineOutset;
+      const bottom = Math.max(...selectedRects.map((rect) => rect.bottom)) - frameRect.top + outlineOutset;
 
       frame.style.setProperty('--selection-outline-left', `${left}px`);
       frame.style.setProperty('--selection-outline-top', `${top}px`);

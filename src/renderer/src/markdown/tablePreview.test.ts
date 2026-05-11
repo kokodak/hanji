@@ -129,8 +129,10 @@ export const tests = [
 
       assert.match(tableRule, /position:\s*relative;/);
       assert.match(tableSelectionRule, /outline:\s*0;/);
-      assert.match(focusedHeaderRule, /outline:\s*0;/);
-      assert.match(focusedCellRule, /outline:\s*0;/);
+      assert.match(focusedHeaderRule, /outline:\s*0 !important;/);
+      assert.match(focusedHeaderRule, /box-shadow:\s*none;/);
+      assert.match(focusedCellRule, /outline:\s*0 !important;/);
+      assert.match(focusedCellRule, /box-shadow:\s*none;/);
       assert.doesNotMatch(styles, /#editor \.cm-live-table \.is-selected\s*\{/);
       assert.match(frameSelectionRule, /border:\s*2px solid #6fa09f;/);
       assert.match(frameSelectionRule, /pointer-events:\s*none;/);
@@ -138,7 +140,7 @@ export const tests = [
       assert.match(frameSelectionRule, /left:\s*var\(--selection-outline-left\);/);
       assert.match(tableCellRule, /min-width:\s*32px;/);
       assert.match(tableCellRule, /height:\s*30px;/);
-      assert.match(widgetsSource, /const outlineInset = 1;/);
+      assert.match(widgetsSource, /const outlineOutset = 1\.5;/);
       assert.match(widgetsSource, /frame\.classList\.toggle\('has-cell-selection'/);
       assert.match(widgetsSource, /--selection-outline-width/);
       assert.match(widgetsSource, /right - left/);
