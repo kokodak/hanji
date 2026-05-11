@@ -6,7 +6,7 @@ import { EditorState, Prec } from '@codemirror/state';
 import { drawSelection, EditorView, keymap } from '@codemirror/view';
 import { litheHighlightStyle } from './highlighting';
 import { handleBacktickInput, handlePairedSymbolInput, handlePlainTextPaste } from './inputHandlers';
-import { continueListItem, stableVerticalMovement, tabIndentation } from './keymaps';
+import { continueListItem, indentWithSpaces, outdentSpaces, stableVerticalMovement, tabIndentation } from './keymaps';
 import { liveMarkdownPreview } from '../markdown/livePreview';
 
 interface CreateEditorOptions {
@@ -16,6 +16,20 @@ interface CreateEditorOptions {
   onChange: (text: string) => void;
   onCursorChange: (view: EditorView) => void;
 }
+
+const tabIndentationEvents = EditorView.domEventHandlers({
+  keydown(event, view) {
+    if (event.key !== 'Tab') return false;
+    if (event.target instanceof HTMLElement && event.target.closest('.cm-live-table')) return false;
+
+    const handled = event.shiftKey ? outdentSpaces(view) : indentWithSpaces(view);
+    if (!handled) return false;
+
+    event.preventDefault();
+    event.stopPropagation();
+    return true;
+  }
+});
 
 export function createEditor(options: CreateEditorOptions): EditorView {
   return new EditorView({
@@ -34,6 +48,7 @@ export function createEditor(options: CreateEditorOptions): EditorView {
         liveMarkdownPreview,
         EditorView.lineWrapping,
         stableVerticalMovement,
+        Prec.highest(tabIndentationEvents),
         Prec.highest(tabIndentation),
         Prec.highest(keymap.of([{ key: 'Enter', run: continueListItem }])),
         keymap.of([...defaultKeymap, ...historyKeymap]),

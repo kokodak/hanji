@@ -21,6 +21,11 @@ export const tests = [
       const cursorRule = getRuleBody('#editor .cm-cursor');
 
       assert.match(createEditorSource, /import \{ drawSelection, EditorView, keymap \} from '@codemirror\/view';/);
+      assert.match(createEditorSource, /const tabIndentationEvents = EditorView\.domEventHandlers/);
+      assert.match(createEditorSource, /event\.key !== 'Tab'/);
+      assert.match(createEditorSource, /event\.target instanceof HTMLElement && event\.target\.closest\('\.cm-live-table'\)/);
+      assert.match(createEditorSource, /event\.shiftKey \? outdentSpaces\(view\) : indentWithSpaces\(view\)/);
+      assert.match(createEditorSource, /Prec\.highest\(tabIndentationEvents\),/);
       assert.match(createEditorSource, /Prec\.highest\(keymap\.of\(\[\{ key: 'Enter', run: continueListItem \}\]\)\)/);
       assert.match(createEditorSource, /Prec\.highest\(tabIndentation\),/);
       assert.match(createEditorSource, /drawSelection\(\),/);
