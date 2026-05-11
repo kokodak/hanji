@@ -29,6 +29,7 @@ interface TableStructureDragTarget {
   element: HTMLElement;
   index: number;
   size: number;
+  start: number;
 }
 
 interface ActiveTableStructureDrag {
@@ -460,7 +461,8 @@ export class TableWidget extends WidgetType {
             center: type === 'column' ? rect.left + rect.width / 2 : rect.top + rect.height / 2,
             element,
             index,
-            size: type === 'column' ? rect.width : rect.height
+            size: type === 'column' ? rect.width : rect.height,
+            start: type === 'column' ? rect.left : rect.top
           }
         ];
       });
@@ -640,27 +642,31 @@ export class TableWidget extends WidgetType {
       if (from > to && index >= to && index < from) return index + 1;
       return index;
     };
+    const structureDragOffsets = (targets: TableStructureDragTarget[], from: number, to: number): number[] => {
+      const order = targets.map((_, index) => index);
+      const [source] = order.splice(from, 1);
+      order.splice(to, 0, source);
+
+      const finalStarts = Array.from({ length: targets.length }, () => 0);
+      let cursor = targets[0]?.start ?? 0;
+      for (const index of order) {
+        finalStarts[index] = cursor;
+        cursor += targets[index]?.size ?? 0;
+      }
+
+      return targets.map((target, index) => finalStarts[index] - target.start);
+    };
     const applyRowDragPreview = (drag: ActiveTableStructureDrag, to: number): void => {
       const { from, targets } = drag;
       const rows = getVisualRows();
       const sourceRow = rows[from];
       const targetRow = rows[to];
-      const sourceTarget = targets[from];
-      const targetTarget = targets[to];
-      if (!sourceRow || !targetRow || !sourceTarget || !targetTarget) return;
-
-      const sourceDelta = targetTarget.center - sourceTarget.center;
-      const sourceSize = sourceTarget.size;
+      const offsets = structureDragOffsets(targets, from, to);
+      if (!sourceRow || !targetRow) return;
 
       for (const [rowIndex, row] of rows.entries()) {
-        let transform = '';
-        if (rowIndex === from) {
-          transform = `translateY(${sourceDelta}px)`;
-        } else if (from < to && rowIndex > from && rowIndex <= to) {
-          transform = `translateY(${-sourceSize}px)`;
-        } else if (from > to && rowIndex >= to && rowIndex < from) {
-          transform = `translateY(${sourceSize}px)`;
-        }
+        const offset = offsets[rowIndex] ?? 0;
+        const transform = offset === 0 ? '' : `translateY(${offset}px)`;
 
         const previewIndex = rowIndexAfterMove(rowIndex, from, to);
         for (const cell of Array.from(row.children) as HTMLTableCellElement[]) {
@@ -671,28 +677,19 @@ export class TableWidget extends WidgetType {
           });
         }
       }
+      setSelectionOutlineForCells(getSelectedCells());
     };
     const applyColumnDragPreview = (drag: ActiveTableStructureDrag, to: number): void => {
       const { from, targets } = drag;
       const columns = headerCells();
       const sourceColumn = columns[from];
       const targetColumn = columns[to];
-      const sourceTarget = targets[from];
-      const targetTarget = targets[to];
-      if (!sourceColumn || !targetColumn || !sourceTarget || !targetTarget) return;
-
-      const sourceDelta = targetTarget.center - sourceTarget.center;
-      const sourceSize = sourceTarget.size;
+      const offsets = structureDragOffsets(targets, from, to);
+      if (!sourceColumn || !targetColumn) return;
 
       for (let column = 0; column < columns.length; column += 1) {
-        let transform = '';
-        if (column === from) {
-          transform = `translateX(${sourceDelta}px)`;
-        } else if (from < to && column > from && column <= to) {
-          transform = `translateX(${-sourceSize}px)`;
-        } else if (from > to && column >= to && column < from) {
-          transform = `translateX(${sourceSize}px)`;
-        }
+        const offset = offsets[column] ?? 0;
+        const transform = offset === 0 ? '' : `translateX(${offset}px)`;
 
         for (const cell of getColumnCells(column)) {
           setStructurePreviewCellState(cell, {
@@ -701,6 +698,7 @@ export class TableWidget extends WidgetType {
           });
         }
       }
+      setSelectionOutlineForCells(getSelectedCells());
     };
     const applyStructureDragPreview = (drag: ActiveTableStructureDrag, to: number): void => {
       if (drag.type === 'column') {
