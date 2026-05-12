@@ -394,11 +394,21 @@ export function continueListItem(view: EditorView): boolean {
 export const handleSmartEnterBeforeInput = EditorView.domEventHandlers({
   beforeinput(event, view) {
     if (!(event instanceof InputEvent)) return false;
-    if (event.inputType !== 'insertParagraph') return false;
+    if (!isSmartEnterInputType(event.inputType)) return false;
 
-    return continueListItem(view);
+    const handled = continueListItem(view);
+    if (handled) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    return handled;
   }
 });
+
+export function isSmartEnterInputType(inputType: string): boolean {
+  return inputType === 'insertParagraph' || inputType === 'insertLineBreak';
+}
 
 function selectedLineNumbers(view: EditorView): number[] {
   const lines = new Set<number>();

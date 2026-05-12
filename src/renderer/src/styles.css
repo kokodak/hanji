@@ -603,15 +603,6 @@ html.is-desktop-app #editor {
   vertical-align: top;
 }
 
-html.is-desktop-app #editor .cm-selectionBackground,
-html.is-desktop-app #editor .cm-focused .cm-selectionBackground {
-  background: rgb(47 95 98 / 22%);
-}
-
-html.is-desktop-app #editor .cm-content ::selection {
-  background: rgb(47 95 98 / 24%);
-}
-
 html.is-desktop-app #editor .cm-compact-selection,
 html.is-desktop-app #editor .cm-compact-empty-selection {
   background: rgb(47 95 98 / 26%);
@@ -1047,11 +1038,6 @@ html.is-desktop-app #editor .cm-compact-empty-selection {
 }
 
 #editor .cm-line.cm-live-table-selection-hidden ::selection {
-  background: transparent;
-}
-
-html.is-desktop-app #editor .cm-line.cm-live-table-selection-hidden .cm-selectionBackground,
-html.is-desktop-app #editor .cm-line.cm-live-table-selection-hidden ::selection {
   background: transparent;
 }
 

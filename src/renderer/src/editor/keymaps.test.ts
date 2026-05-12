@@ -7,6 +7,7 @@ import {
   deleteListMarkerBackward,
   indentWithSpaces,
   insertSoftBreak,
+  isSmartEnterInputType,
   listContentStartOffset,
   moveCursorToListContentStart,
   outdentSpaces,
@@ -73,6 +74,14 @@ function runRemoveListMarkerBeforeContent(doc: string, cursor: number): TestEdit
 }
 
 export const tests = [
+  {
+    name: 'handles both paragraph and WebKit line break Enter input events',
+    run() {
+      assert.equal(isSmartEnterInputType('insertParagraph'), true);
+      assert.equal(isSmartEnterInputType('insertLineBreak'), true);
+      assert.equal(isSmartEnterInputType('insertText'), false);
+    }
+  },
   {
     name: 'continues unordered bullet lists',
     run() {
