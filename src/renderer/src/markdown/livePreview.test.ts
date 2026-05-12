@@ -120,6 +120,15 @@ export const tests = [
     }
   },
   {
+    name: 'keeps multi-line selections visible while Hangul IME is active',
+    run() {
+      const doc = '- 안녕\n- 안녕';
+      const summaries = collectDecorationSummaries(doc, { anchor: 0, head: doc.length }, { compositionStarted: true });
+
+      assert.equal(summaries.some((summary) => summary.className === 'cm-compact-selection'), true);
+    }
+  },
+  {
     name: 'adds hanging indent metadata to list preview lines',
     run() {
       assert.match(livePreviewSource, /function listWrapLine\(indentLength: number\): Decoration/);

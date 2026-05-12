@@ -25,7 +25,7 @@ import { BulletWidget, CheckboxWidget, CodeLanguageWidget, HorizontalRuleWidget,
 import { lineContainsCursor, lineIntersectsSelection, rangeContainsSelection } from './selection';
 import { collectMarkdownTables, getMarkdownTableForLine, type MarkdownTable } from './table';
 import type { PendingDecoration } from './types';
-import { editorHasActiveImeComposition } from '../editor/ime';
+import { editorHasActiveImeComposition, textContainsHangul } from '../editor/ime';
 
 export { collectMarkdownTables } from './table';
 export type { MarkdownTable } from './table';
@@ -94,13 +94,14 @@ function tableIntersectsSelection(view: EditorView, table: MarkdownTable): boole
 }
 
 function addCompactSelectionDecorations(view: EditorView, pending: PendingDecoration[], from: number, to: number): void {
-  if (editorHasActiveImeComposition(view)) return;
+  const hasActiveImeComposition = editorHasActiveImeComposition(view);
 
   for (const range of view.state.selection.ranges) {
     if (range.empty) continue;
 
     const selectionFrom = Math.min(range.from, range.to);
     const selectionTo = Math.max(range.from, range.to);
+    if (hasActiveImeComposition && selectionLooksLikeImeComposition(view, selectionFrom, selectionTo)) continue;
 
     if (from === to) {
       if (selectionFrom <= from && selectionTo >= from) {
@@ -120,6 +121,12 @@ function addCompactSelectionDecorations(view: EditorView, pending: PendingDecora
       pending.push({ from: selectedFrom, to: selectedTo, decoration: compactSelection });
     }
   }
+}
+
+function selectionLooksLikeImeComposition(view: EditorView, from: number, to: number): boolean {
+  const selectedText = view.state.sliceDoc(from, to);
+
+  return selectedText.length > 0 && !selectedText.includes('\n') && textContainsHangul(selectedText);
 }
 
 function listWrapLine(indentLength: number): Decoration {
