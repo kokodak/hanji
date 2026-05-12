@@ -1,3 +1,4 @@
+import { EditorSelection } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { collectFencedCodeBlocks, getFencedCodeBlockForLine } from '../markdown/fencedCode';
 import { imeCompositionSelectionCursor } from './ime';
@@ -11,6 +12,9 @@ const emptyNumberedLinePattern = /^(\s*)(\d+)([.)])[\s\u200b\u200c\u200d\ufeff]*
 const emptyBlockquoteLinePattern = /^(\s*)>\s+[\u200b\u200c\u200d\ufeff]*$/;
 const blockquoteLinePattern = /^(\s*)>\s+/;
 const bareBlockquoteLinePattern = /^\s*>(?:$|\S)/;
+const taskContentStartPattern = /^(\s*[-*+]\s+\[[ xX]\]\s+)/;
+const bulletContentStartPattern = /^(\s*[-*+]\s+)/;
+const numberedContentStartPattern = /^(\s*\d+[.)]\s+)/;
 
 function reduceIndent(indent: string): string {
   return indent.slice(0, Math.max(0, indent.length - TAB_SPACES.length));
@@ -89,6 +93,119 @@ function replacementForEmptyListLine(text: string): string | null {
 
 function lineStartsListItem(text: string): boolean {
   return listLinePattern.test(text);
+}
+
+function listMarkerContentStartMatch(text: string): RegExpExecArray | null {
+  return taskContentStartPattern.exec(text) ?? bulletContentStartPattern.exec(text) ?? numberedContentStartPattern.exec(text);
+}
+
+export function listContentStartOffset(text: string): number | null {
+  const match = listMarkerContentStartMatch(text);
+  return match ? match[1].length : null;
+}
+
+function listContentStartAt(view: EditorView, position: number): number | null {
+  const line = view.state.doc.lineAt(position);
+  const offset = listContentStartOffset(line.text);
+
+  return offset === null ? null : line.from + offset;
+}
+
+export function deleteEmptyListMarker(view: EditorView): boolean {
+  const selection = view.state.selection.main;
+  if (!selection.empty) return false;
+
+  const line = view.state.doc.lineAt(selection.head);
+  const replacement = replacementForEmptyListLine(line.text);
+  if (replacement === null) return false;
+
+  view.dispatch({
+    changes: { from: line.from, to: line.to, insert: replacement },
+    selection: { anchor: line.from + replacement.length },
+    scrollIntoView: true,
+    userEvent: 'delete.backward'
+  });
+  return true;
+}
+
+export function removeListMarkerBeforeContent(view: EditorView): boolean {
+  const selection = view.state.selection.main;
+  if (!selection.empty) return false;
+
+  const line = view.state.doc.lineAt(selection.head);
+  const match = listMarkerContentStartMatch(line.text);
+  if (!match) return false;
+
+  const markerText = match[1];
+  if (selection.head !== line.from + markerText.length) return false;
+
+  const indentLength = /^\s*/.exec(markerText)?.[0].length ?? 0;
+  const markerFrom = line.from + indentLength;
+  const markerTo = line.from + markerText.length;
+
+  view.dispatch({
+    changes: { from: markerFrom, to: markerTo, insert: '' },
+    selection: { anchor: markerFrom },
+    scrollIntoView: true,
+    userEvent: 'delete.backward'
+  });
+  return true;
+}
+
+export function deleteListMarkerBackward(view: EditorView): boolean {
+  return removeListMarkerBeforeContent(view) || deleteEmptyListMarker(view);
+}
+
+export function moveCursorToListContentStart(view: EditorView): boolean {
+  let handled = false;
+  let changed = false;
+  const ranges = view.state.selection.ranges.map((range) => {
+    const target = listContentStartAt(view, range.head);
+    if (target === null || range.head < target) return range;
+
+    handled = true;
+    if (range.empty && range.head === target) return range;
+
+    changed = true;
+    return EditorSelection.cursor(target);
+  });
+
+  if (!handled) return false;
+
+  if (changed) {
+    view.dispatch({
+      selection: EditorSelection.create(ranges, view.state.selection.mainIndex),
+      scrollIntoView: true
+    });
+  }
+
+  return true;
+}
+
+export function selectToListContentStart(view: EditorView): boolean {
+  let handled = false;
+  let changed = false;
+  const ranges = view.state.selection.ranges.map((range) => {
+    const target = listContentStartAt(view, range.head);
+    if (target === null || range.head < target) return range;
+
+    handled = true;
+    if (range.head === target) return range;
+
+    changed = true;
+    return EditorSelection.range(range.anchor, target);
+  });
+
+  if (!handled) return false;
+
+  if (changed) {
+    view.dispatch({
+      selection: EditorSelection.create(ranges, view.state.selection.mainIndex),
+      scrollIntoView: true
+    });
+  }
+
+  return true;
 }
 
 function previousNonEmptyLineStartsListItem(view: EditorView, lineNumber: number): boolean {
@@ -365,6 +482,12 @@ function moveCursorByDocumentLine(view: EditorView, direction: -1 | 1): boolean 
 export const stableVerticalMovement = keymap.of([
   { key: 'ArrowUp', run: (view) => moveCursorByDocumentLine(view, -1) },
   { key: 'ArrowDown', run: (view) => moveCursorByDocumentLine(view, 1) }
+]);
+
+export const listEditingKeymap = keymap.of([
+  { key: 'Backspace', run: deleteListMarkerBackward },
+  { key: 'Delete', run: deleteEmptyListMarker },
+  { mac: 'Cmd-ArrowLeft', run: moveCursorToListContentStart, shift: selectToListContentStart, preventDefault: true }
 ]);
 
 export const softBreakKeymap = keymap.of([{ key: 'Shift-Enter', run: insertSoftBreak }]);

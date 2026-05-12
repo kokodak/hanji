@@ -1,7 +1,18 @@
 import assert from 'node:assert/strict';
 import { EditorState, type TransactionSpec } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import { continueListItem, indentWithSpaces, insertSoftBreak, outdentSpaces } from './keymaps';
+import {
+  continueListItem,
+  deleteEmptyListMarker,
+  deleteListMarkerBackward,
+  indentWithSpaces,
+  insertSoftBreak,
+  listContentStartOffset,
+  moveCursorToListContentStart,
+  outdentSpaces,
+  removeListMarkerBeforeContent,
+  selectToListContentStart
+} from './keymaps';
 
 class TestEditorView {
   state: EditorState;
@@ -34,6 +45,26 @@ function runContinueListItem(doc: string, cursor: number = doc.length): TestEdit
 function runInsertSoftBreak(doc: string, cursor: number = doc.length): TestEditorView {
   const view = new TestEditorView(doc, cursor);
   const handled = insertSoftBreak(view as unknown as EditorView);
+
+  assert.equal(handled, true);
+  assert.equal(view.dispatchCount, 1);
+
+  return view;
+}
+
+function runDeleteEmptyListMarker(doc: string, cursor: number = doc.length): TestEditorView {
+  const view = new TestEditorView(doc, cursor);
+  const handled = deleteEmptyListMarker(view as unknown as EditorView);
+
+  assert.equal(handled, true);
+  assert.equal(view.dispatchCount, 1);
+
+  return view;
+}
+
+function runRemoveListMarkerBeforeContent(doc: string, cursor: number): TestEditorView {
+  const view = new TestEditorView(doc, cursor);
+  const handled = removeListMarkerBeforeContent(view as unknown as EditorView);
 
   assert.equal(handled, true);
   assert.equal(view.dispatchCount, 1);
@@ -207,6 +238,187 @@ export const tests = [
       assert.equal(handled, false);
       assert.equal(view.dispatchCount, 0);
       assert.equal(view.state.doc.toString(), 'plain text');
+    }
+  },
+  {
+    name: 'removes empty bullet markers on Backspace from inside the marker',
+    run() {
+      const view = runDeleteEmptyListMarker('- ', 1);
+
+      assert.equal(view.state.doc.toString(), '');
+      assert.equal(view.state.selection.main.head, 0);
+    }
+  },
+  {
+    name: 'removes empty task markers on Backspace from inside the marker',
+    run() {
+      const view = runDeleteEmptyListMarker('- [ ] ', 4);
+
+      assert.equal(view.state.doc.toString(), '');
+      assert.equal(view.state.selection.main.head, 0);
+    }
+  },
+  {
+    name: 'outdents empty nested task markers on Backspace',
+    run() {
+      const view = runDeleteEmptyListMarker('    - [ ] ');
+
+      assert.equal(view.state.doc.toString(), '- [ ] ');
+      assert.equal(view.state.selection.main.head, '- [ ] '.length);
+    }
+  },
+  {
+    name: 'keeps non-empty list markers on the default delete path',
+    run() {
+      const view = new TestEditorView('- item');
+      const handled = deleteEmptyListMarker(view as unknown as EditorView);
+
+      assert.equal(handled, false);
+      assert.equal(view.dispatchCount, 0);
+      assert.equal(view.state.doc.toString(), '- item');
+    }
+  },
+  {
+    name: 'removes a bullet marker with Backspace at the visual content start',
+    run() {
+      const view = runRemoveListMarkerBeforeContent('- Future plugin hooks', '- '.length);
+
+      assert.equal(view.state.doc.toString(), 'Future plugin hooks');
+      assert.equal(view.state.selection.main.head, 0);
+    }
+  },
+  {
+    name: 'removes a task marker with Backspace at the visual content start',
+    run() {
+      const view = runRemoveListMarkerBeforeContent('- [ ] Future plugin hooks', '- [ ] '.length);
+
+      assert.equal(view.state.doc.toString(), 'Future plugin hooks');
+      assert.equal(view.state.selection.main.head, 0);
+    }
+  },
+  {
+    name: 'removes a numbered marker with Backspace at the visual content start',
+    run() {
+      const view = runRemoveListMarkerBeforeContent('12. Future plugin hooks', '12. '.length);
+
+      assert.equal(view.state.doc.toString(), 'Future plugin hooks');
+      assert.equal(view.state.selection.main.head, 0);
+    }
+  },
+  {
+    name: 'keeps nested text indented when removing a list marker',
+    run() {
+      const view = runRemoveListMarkerBeforeContent('    - Future plugin hooks', '    - '.length);
+
+      assert.equal(view.state.doc.toString(), '    Future plugin hooks');
+      assert.equal(view.state.selection.main.head, 4);
+    }
+  },
+  {
+    name: 'does not remove a non-empty marker when the cursor is inside text',
+    run() {
+      const view = new TestEditorView('- Future plugin hooks', '- Future'.length);
+      const handled = removeListMarkerBeforeContent(view as unknown as EditorView);
+
+      assert.equal(handled, false);
+      assert.equal(view.dispatchCount, 0);
+      assert.equal(view.state.doc.toString(), '- Future plugin hooks');
+    }
+  },
+  {
+    name: 'removes empty root markers with Backspace at the marker edge',
+    run() {
+      const view = new TestEditorView('- ', '- '.length);
+      const handled = deleteListMarkerBackward(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), '');
+      assert.equal(view.state.selection.main.head, 0);
+    }
+  },
+  {
+    name: 'removes empty indented markers with Backspace at the marker edge',
+    run() {
+      const view = new TestEditorView('    - ', '    - '.length);
+      const handled = deleteListMarkerBackward(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), '    ');
+      assert.equal(view.state.selection.main.head, 4);
+    }
+  },
+  {
+    name: 'removes empty indented task markers with Backspace at the marker edge',
+    run() {
+      const view = new TestEditorView('    - [ ] ', '    - [ ] '.length);
+      const handled = deleteListMarkerBackward(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), '    ');
+      assert.equal(view.state.selection.main.head, 4);
+    }
+  },
+  {
+    name: 'finds the visual content start after list markers',
+    run() {
+      assert.equal(listContentStartOffset('- item'), 2);
+      assert.equal(listContentStartOffset('- [ ] task'), 6);
+      assert.equal(listContentStartOffset('    - [x] task'), 10);
+      assert.equal(listContentStartOffset('12. item'), 4);
+      assert.equal(listContentStartOffset('plain'), null);
+    }
+  },
+  {
+    name: 'moves Cmd Left to the bullet item text start',
+    run() {
+      const view = new TestEditorView('- item');
+      const handled = moveCursorToListContentStart(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.selection.main.head, 2);
+    }
+  },
+  {
+    name: 'moves Cmd Left to the task item text start',
+    run() {
+      const view = new TestEditorView('- [ ] item');
+      const handled = moveCursorToListContentStart(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.selection.main.head, 6);
+    }
+  },
+  {
+    name: 'keeps Cmd Left at the visual list content start',
+    run() {
+      const view = new TestEditorView('- item', 2);
+      const handled = moveCursorToListContentStart(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.dispatchCount, 0);
+      assert.equal(view.state.selection.main.head, 2);
+    }
+  },
+  {
+    name: 'selects to the visual list content start with Shift Cmd Left',
+    run() {
+      const view = new TestEditorView('- [ ] item');
+      const handled = selectToListContentStart(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.selection.main.anchor, '- [ ] item'.length);
+      assert.equal(view.state.selection.main.head, 6);
+    }
+  },
+  {
+    name: 'uses the default Cmd Left path on plain text',
+    run() {
+      const view = new TestEditorView('plain text');
+      const handled = moveCursorToListContentStart(view as unknown as EditorView);
+
+      assert.equal(handled, false);
+      assert.equal(view.dispatchCount, 0);
+      assert.equal(view.state.selection.main.head, 'plain text'.length);
     }
   },
   {
