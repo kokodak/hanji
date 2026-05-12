@@ -187,6 +187,32 @@ export const tests = [
     }
   },
   {
+    name: 'continues bullet lists when Hangul composition leaves an end selection',
+    run() {
+      const view = new TestEditorView('- 안녕');
+      view.dispatch({ selection: { anchor: '- 안'.length, head: '- 안녕'.length } });
+
+      const handled = continueListItem(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), '- 안녕\n- ');
+      assert.equal(view.state.selection.main.head, '- 안녕\n- '.length);
+    }
+  },
+  {
+    name: 'continues task lists when Hangul composition leaves an end selection',
+    run() {
+      const view = new TestEditorView('- [ ] 안녕');
+      view.dispatch({ selection: { anchor: '- [ ] 안'.length, head: '- [ ] 안녕'.length } });
+
+      const handled = continueListItem(view as unknown as EditorView);
+
+      assert.equal(handled, true);
+      assert.equal(view.state.doc.toString(), '- [ ] 안녕\n- [ ] ');
+      assert.equal(view.state.selection.main.head, '- [ ] 안녕\n- [ ] '.length);
+    }
+  },
+  {
     name: 'does not remove task text when Enter starts after the marker',
     run() {
       const view = new TestEditorView('- [ ] abc', '- [ ] '.length);

@@ -1,7 +1,7 @@
 import { EditorSelection } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { collectFencedCodeBlocks, getFencedCodeBlockForLine } from '../markdown/fencedCode';
-import { imeCompositionSelectionCursor } from './ime';
+import { imeCompositionSelectionCursor, textContainsHangul } from './ime';
 
 const TAB_SPACES = '    ';
 const listLinePattern = /^(\s*)(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)/;
@@ -219,9 +219,25 @@ function previousNonEmptyLineStartsListItem(view: EditorView, lineNumber: number
   return false;
 }
 
+function hangulSelectionCursor(view: EditorView): number | null {
+  const selection = view.state.selection.main;
+  if (selection.empty) return null;
+
+  const from = Math.min(selection.from, selection.to);
+  const to = Math.max(selection.from, selection.to);
+  const line = view.state.doc.lineAt(to);
+  if (from < line.from || to !== line.to) return null;
+  if (!lineStartsListItem(line.text)) return null;
+
+  const selectedText = view.state.sliceDoc(from, to);
+  if (selectedText.includes('\n') || !textContainsHangul(selectedText)) return null;
+
+  return to;
+}
+
 export function continueListItem(view: EditorView): boolean {
   const selection = view.state.selection.main;
-  const compositionCursor = imeCompositionSelectionCursor(view);
+  const compositionCursor = imeCompositionSelectionCursor(view) ?? hangulSelectionCursor(view);
   const cursor = compositionCursor ?? selection.head;
   const line = view.state.doc.lineAt(cursor);
   const emptyListLineReplacement = replacementForEmptyListLine(line.text);

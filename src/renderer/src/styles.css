@@ -1,13 +1,14 @@
 :root {
   color: #202626;
-  background: #f7f4ef;
+  background: #f4f6f3;
   --app-ink: #202626;
   --app-muted: #66706c;
   --app-hairline: rgb(74 90 86 / 16%);
   --app-hairline-strong: rgb(74 90 86 / 24%);
-  --app-glass: #f7f4ef;
-  --app-glass-strong: #fffefa;
-  --app-glass-soft: #f7f4ef;
+  --app-glass: rgb(248 250 247 / 44%);
+  --app-glass-strong: rgb(255 255 252 / 88%);
+  --app-glass-soft: rgb(248 250 247 / 34%);
+  --app-paper: #fffefd;
   --app-hover: rgb(43 91 95 / 10%);
   --app-active: rgb(43 91 95 / 16%);
   --app-accent: #2f5f62;
@@ -36,7 +37,9 @@ body {
   min-width: 360px;
   min-height: 560px;
   overflow: hidden;
-  background: #f7f4ef;
+  background:
+    linear-gradient(135deg, rgb(244 246 243 / 96%), rgb(238 243 240 / 96%)),
+    repeating-linear-gradient(0deg, rgb(31 38 36 / 2%) 0 1px, transparent 1px 7px);
 }
 
 button {
@@ -57,10 +60,15 @@ input:focus {
 
 .shell {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: 0 minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
-  background: #f7f4ef;
+  background: var(--app-glass);
+  transition: grid-template-columns 180ms ease;
+}
+
+.shell.is-sidebar-open {
+  grid-template-columns: 260px minmax(0, 1fr);
 }
 
 .space-panel {
@@ -68,13 +76,28 @@ input:focus {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   min-width: 0;
+  width: 260px;
   height: 100vh;
   overflow: hidden;
-  border-right: 1px solid var(--app-hairline);
+  border-right: 1px solid transparent;
   background: var(--app-glass-soft);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-18px);
+  transition:
+    border-color 180ms ease,
+    opacity 160ms ease,
+    transform 180ms ease;
   user-select: none;
   -webkit-user-select: none;
   -webkit-user-drag: none;
+}
+
+.shell.is-sidebar-open .space-panel {
+  border-right-color: var(--app-hairline);
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
 }
 
 .space-panel-header {
@@ -83,7 +106,7 @@ input:focus {
   gap: 10px;
   padding: 14px 12px 12px;
   border-bottom: 1px solid var(--app-hairline);
-  background: rgb(255 255 255 / 12%);
+  background: rgb(255 255 255 / 18%);
   -webkit-user-drag: none;
 }
 
@@ -125,7 +148,7 @@ input:focus {
   padding: 0 9px;
   border: 1px solid var(--app-hairline);
   border-radius: 6px;
-  background: #fffefa;
+  background: rgb(255 255 252 / 54%);
   font-size: 12px;
   user-select: text;
 }
@@ -137,7 +160,7 @@ input:focus {
   place-items: center;
   border: 1px solid var(--app-hairline);
   border-radius: 6px;
-  background: #fffefa;
+  background: rgb(255 255 252 / 54%);
   color: #394644;
   font-size: 12px;
   cursor: pointer;
@@ -319,6 +342,7 @@ input:focus {
   height: 100vh;
   min-height: 0;
   overflow: hidden;
+  background: transparent;
 }
 
 .toolbar {
@@ -331,8 +355,10 @@ input:focus {
   gap: 16px;
   padding: 0 18px;
   border-bottom: 1px solid var(--app-hairline);
-  background: #fbfaf7;
+  background: rgb(255 255 255 / 32%);
+  backdrop-filter: blur(18px) saturate(1.25);
   user-select: none;
+  -webkit-backdrop-filter: blur(18px) saturate(1.25);
   -webkit-user-select: none;
   -webkit-user-drag: none;
 }
@@ -364,8 +390,15 @@ input:focus {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  background: var(--app-glass-strong);
-  box-shadow: inset 1px 0 0 rgb(255 255 255 / 42%);
+  background-color: var(--app-paper);
+  background-image:
+    radial-gradient(circle at 20% 30%, rgb(31 38 36 / 0.9%) 0 0.45px, transparent 0.7px),
+    radial-gradient(circle at 70% 65%, rgb(180 95 77 / 0.7%) 0 0.4px, transparent 0.65px);
+  background-blend-mode: multiply;
+  background-size: 17px 17px, 23px 23px;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 72%),
+    inset 1px 0 0 rgb(255 255 255 / 42%);
 }
 
 html.is-desktop-app {
@@ -374,9 +407,10 @@ html.is-desktop-app {
   --app-muted: rgb(255 255 255 / 76%);
   --app-hairline: rgb(255 255 255 / 24%);
   --app-hairline-strong: rgb(255 255 255 / 38%);
-  --app-glass: rgb(255 255 255 / 3%);
+  --app-glass: rgb(255 255 255 / 2%);
   --app-glass-strong: rgb(255 255 252 / 86%);
-  --app-glass-soft: rgb(255 255 255 / 12%);
+  --app-glass-soft: rgb(255 255 255 / 7%);
+  --app-paper: rgb(255 255 252 / 94%);
   --app-hover: rgb(255 255 255 / 12%);
   --app-active: rgb(255 255 255 / 20%);
 }
@@ -405,12 +439,12 @@ html.is-desktop-app .space-panel {
 
 html.is-desktop-app .space-panel-header {
   padding: 48px 12px 12px;
-  background: rgb(255 255 255 / 8%);
+  background: rgb(255 255 255 / 5%);
 }
 
 html.is-desktop-app .new-note-row input,
 html.is-desktop-app .icon-button {
-  background: rgb(16 19 20 / 18%);
+  background: rgb(16 19 20 / 14%);
   color: var(--app-ink);
 }
 
@@ -461,7 +495,7 @@ html.is-desktop-app .capture-save:hover {
 }
 
 html.is-desktop-app .toolbar {
-  background: rgb(255 255 255 / 10%);
+  background: rgb(255 255 255 / 7%);
   backdrop-filter: blur(34px) saturate(1.75) brightness(1.08);
   -webkit-backdrop-filter: blur(34px) saturate(1.75) brightness(1.08);
 }
@@ -479,10 +513,10 @@ html.is-desktop-app .cursor-position {
 
 html.is-desktop-app #editor {
   box-shadow:
-    inset 1px 0 0 rgb(16 19 20 / 12%),
+    inset 1px 0 0 rgb(16 19 20 / 8%),
     0 0 0 1px rgb(16 19 20 / 10%);
-  backdrop-filter: blur(10px) saturate(1.08) brightness(1.05);
-  -webkit-backdrop-filter: blur(10px) saturate(1.08) brightness(1.05);
+  backdrop-filter: blur(6px) saturate(1.04) brightness(1.03);
+  -webkit-backdrop-filter: blur(6px) saturate(1.04) brightness(1.03);
 }
 
 #editor .cm-editor {
@@ -567,6 +601,20 @@ html.is-desktop-app #editor {
   height: 1lh;
   background: #c9dcda;
   vertical-align: top;
+}
+
+html.is-desktop-app #editor .cm-selectionBackground,
+html.is-desktop-app #editor .cm-focused .cm-selectionBackground {
+  background: rgb(47 95 98 / 22%);
+}
+
+html.is-desktop-app #editor .cm-content ::selection {
+  background: rgb(47 95 98 / 24%);
+}
+
+html.is-desktop-app #editor .cm-compact-selection,
+html.is-desktop-app #editor .cm-compact-empty-selection {
+  background: rgb(47 95 98 / 26%);
 }
 
 #editor .cm-cursor {
@@ -1002,6 +1050,11 @@ html.is-desktop-app #editor {
   background: transparent;
 }
 
+html.is-desktop-app #editor .cm-line.cm-live-table-selection-hidden .cm-selectionBackground,
+html.is-desktop-app #editor .cm-line.cm-live-table-selection-hidden ::selection {
+  background: transparent;
+}
+
 #editor .cm-line.cm-live-table-source-hidden {
   height: 0;
   min-height: 0;
@@ -1129,10 +1182,13 @@ html.is-desktop-app #editor {
   }
 
   html.is-desktop-app .toolbar,
-  html.is-desktop-app #editor,
   html.is-desktop-app .context-menu,
   html.is-desktop-app .capture-composer {
     background: #fffffc;
+  }
+
+  html.is-desktop-app #editor {
+    background-color: #fffffc;
   }
 
   html.is-desktop-app .capture-composer textarea,
@@ -1147,7 +1203,15 @@ html.is-desktop-app #editor {
   }
 
   .shell {
+    grid-template-columns: 0 minmax(0, 1fr);
+  }
+
+  .shell.is-sidebar-open {
     grid-template-columns: 210px minmax(0, 1fr);
+  }
+
+  .space-panel {
+    width: 210px;
   }
 
   .space-panel-header {

@@ -40,17 +40,19 @@ export const tests = [
       assert.equal(mainWindow.titleBarStyle, 'Overlay');
       assert.equal(mainWindow.hiddenTitle, true);
       assert.deepEqual(mainWindow.windowEffects.effects, ['popover']);
-      assert.match(rootRule, /background:\s*#f7f4ef;/);
-      assert.match(bodyRule, /background:\s*#f7f4ef;/);
+      assert.match(rootRule, /background:\s*#f4f6f3;/);
+      assert.match(bodyRule, /linear-gradient\(135deg, rgb\(244 246 243 \/ 96%\), rgb\(238 243 240 \/ 96%\)\)/);
       assert.match(desktopRootRule, /--app-ink:\s*#ffffff;/);
       assert.match(desktopRootRule, /--app-hairline:\s*rgb\(255 255 255 \/ 24%\);/);
       assert.match(desktopRootRule, /--app-glass-strong:\s*rgb\(255 255 252 \/ 86%\);/);
       assert.match(desktopHostRule, /background:\s*transparent;/);
       assert.match(desktopShellRule, /background:\s*var\(--app-glass\);/);
       assert.match(desktopShellRule, /backdrop-filter:\s*blur\(42px\) saturate\(1\.95\) brightness\(1\.08\);/);
-      assert.match(editorRule, /background:\s*var\(--app-glass-strong\);/);
+      assert.match(editorRule, /background-color:\s*var\(--app-paper\);/);
+      assert.match(editorRule, /radial-gradient\(circle at 20% 30%, rgb\(31 38 36 \/ 0\.9%\)/);
+      assert.match(editorRule, /background-size:\s*17px 17px, 23px 23px;/);
       assert.match(desktopEditorRule, /0 0 0 1px rgb\(16 19 20 \/ 10%\);/);
-      assert.match(desktopEditorRule, /backdrop-filter:\s*blur\(10px\) saturate\(1\.08\) brightness\(1\.05\);/);
+      assert.match(desktopEditorRule, /backdrop-filter:\s*blur\(6px\) saturate\(1\.04\) brightness\(1\.03\);/);
       assert.match(desktopTextRule, /color:\s*var\(--app-ink\);/);
     }
   },
@@ -66,6 +68,26 @@ export const tests = [
       assert.match(shellSource, /class="space-panel-title" data-tauri-drag-region/);
       assert.match(shellSource, /class="toolbar" draggable="false" data-tauri-drag-region/);
       assert.match(mainSource, /closest\('\[data-tauri-drag-region\]'\)/);
+    }
+  },
+  {
+    name: 'starts the file explorer sidebar collapsed and toggles it with Cmd B',
+    run() {
+      const shellRule = getRuleBody('.shell');
+      const openShellRule = getRuleBody('.shell.is-sidebar-open');
+      const spacePanelRule = getRuleBody('.space-panel');
+      const openSpacePanelRule = getRuleBody('.shell.is-sidebar-open .space-panel');
+
+      assert.match(shellRule, /grid-template-columns:\s*0 minmax\(0, 1fr\);/);
+      assert.match(openShellRule, /grid-template-columns:\s*260px minmax\(0, 1fr\);/);
+      assert.match(spacePanelRule, /opacity:\s*0;/);
+      assert.match(spacePanelRule, /pointer-events:\s*none;/);
+      assert.match(openSpacePanelRule, /opacity:\s*1;/);
+      assert.match(mainSource, /function isSidebarShortcut\(event: KeyboardEvent\): boolean/);
+      assert.match(mainSource, /event\.key\.toLowerCase\(\) === 'b'/);
+      assert.match(mainSource, /setSidebarOpen\(false\);/);
+      assert.match(mainSource, /shell\.spacePanel\.inert = !open;/);
+      assert.match(mainSource, /setSidebarOpen\(!isSidebarOpen\);/);
     }
   },
   {

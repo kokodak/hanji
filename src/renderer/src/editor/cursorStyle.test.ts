@@ -57,6 +57,13 @@ export const tests = [
       const nativeSelectionRule = getRuleBody('#editor .cm-content ::selection');
       const compactSelectionRule = getRuleBody('#editor .cm-compact-selection');
       const emptySelectionRule = getRuleBody('#editor .cm-compact-empty-selection');
+      const desktopSelectionLayerRule = getRuleBody(
+        'html.is-desktop-app #editor .cm-selectionBackground,\nhtml.is-desktop-app #editor .cm-focused .cm-selectionBackground'
+      );
+      const desktopNativeSelectionRule = getRuleBody('html.is-desktop-app #editor .cm-content ::selection');
+      const desktopCompactSelectionRule = getRuleBody(
+        'html.is-desktop-app #editor .cm-compact-selection,\nhtml.is-desktop-app #editor .cm-compact-empty-selection'
+      );
 
       assert.match(selectionLayerRule, /background:\s*transparent;/);
       assert.match(nativeSelectionRule, /background:\s*transparent;/);
@@ -64,6 +71,9 @@ export const tests = [
       assert.match(emptySelectionRule, /width:\s*1ch;/);
       assert.match(emptySelectionRule, /height:\s*1lh;/);
       assert.match(emptySelectionRule, /background:\s*#c9dcda;/);
+      assert.match(desktopSelectionLayerRule, /background:\s*rgb\(47 95 98 \/ 22%\);/);
+      assert.match(desktopNativeSelectionRule, /background:\s*rgb\(47 95 98 \/ 24%\);/);
+      assert.match(desktopCompactSelectionRule, /background:\s*rgb\(47 95 98 \/ 26%\);/);
     }
   },
   {

@@ -44,6 +44,7 @@ let contextMenuNote: NoteEntry | undefined;
 let snapshotRequestId = 0;
 let saveChain = Promise.resolve();
 let savingCapture = false;
+let isSidebarOpen = false;
 
 function saveNoteContent(notePath: string, text: string): Promise<void> {
   const write = saveChain.then(() => writeNote(notePath, text));
@@ -159,6 +160,21 @@ function isCaptureShortcut(event: KeyboardEvent): boolean {
   return (event.metaKey || event.ctrlKey) && event.shiftKey && event.key === ' ';
 }
 
+function isSidebarShortcut(event: KeyboardEvent): boolean {
+  return (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'b';
+}
+
+function setSidebarOpen(open: boolean): void {
+  isSidebarOpen = open;
+  shell.shellRoot.classList.toggle('is-sidebar-open', open);
+  shell.spacePanel.setAttribute('aria-hidden', String(!open));
+  shell.spacePanel.inert = !open;
+
+  if (!open) {
+    hideNoteMenu();
+  }
+}
+
 async function saveCapture(): Promise<void> {
   const text = shell.captureComposer.value.trim();
 
@@ -209,7 +225,6 @@ function focusEditorAt(view: EditorView, position: number): void {
 }
 
 function setEditorText(view: EditorView, text: string, cursorPosition = initialCursorPosition(text)): void {
-
   loadingDocument = true;
   view.dispatch({
     changes: { from: 0, to: view.state.doc.length, insert: text },
@@ -298,6 +313,7 @@ async function selectNote(notePath: string): Promise<void> {
 async function startApp(): Promise<void> {
   const snapshot = await loadSpace();
 
+  setSidebarOpen(false);
   activeNote = snapshot.active_note;
   activeRenderedNotes = snapshot.notes;
   shell.spaceName.textContent = snapshot.space.name;
@@ -369,6 +385,12 @@ async function startApp(): Promise<void> {
     if (isCaptureShortcut(event)) {
       event.preventDefault();
       openCaptureComposer();
+      return;
+    }
+
+    if (isSidebarShortcut(event)) {
+      event.preventDefault();
+      setSidebarOpen(!isSidebarOpen);
       return;
     }
 

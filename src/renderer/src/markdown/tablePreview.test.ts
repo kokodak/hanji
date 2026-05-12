@@ -106,6 +106,9 @@ export const tests = [
     run() {
       const hiddenSelectionRule = getRuleBody('#editor .cm-line.cm-live-table-selection-hidden .cm-selectionBackground');
       const nativeSelectionRule = getRuleBody('#editor .cm-line.cm-live-table-selection-hidden ::selection');
+      const desktopHiddenSelectionRule = getRuleBody(
+        'html.is-desktop-app #editor .cm-line.cm-live-table-selection-hidden .cm-selectionBackground,\nhtml.is-desktop-app #editor .cm-line.cm-live-table-selection-hidden ::selection'
+      );
       const tableSelectionRule = getRuleBody('#editor .cm-live-table.has-cell-selection');
 
       assert.match(decorationsSource, /selectedTablePreviewLine/);
@@ -116,6 +119,7 @@ export const tests = [
       assert.match(livePreviewSource, /selectedTable \? selectedHiddenTableSourceLine : hiddenTableSourceLine/);
       assert.match(hiddenSelectionRule, /background:\s*transparent;/);
       assert.match(nativeSelectionRule, /background:\s*transparent;/);
+      assert.match(desktopHiddenSelectionRule, /background:\s*transparent;/);
       assert.match(tableSelectionRule, /user-select:\s*none;/);
     }
   },

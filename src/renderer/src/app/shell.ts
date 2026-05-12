@@ -9,6 +9,8 @@ export interface AppShell {
   newNoteName: HTMLInputElement;
   noteMenu: HTMLDivElement;
   deleteNoteButton: HTMLButtonElement;
+  shellRoot: HTMLElement;
+  spacePanel: HTMLElement;
   spacePath: HTMLElement;
   openSpaceButton: HTMLButtonElement;
   spaceName: HTMLElement;
@@ -72,6 +74,8 @@ export function createAppShell(root: HTMLDivElement): AppShell {
   const newNoteName = document.querySelector<HTMLInputElement>('#new-note-name');
   const noteMenu = document.querySelector<HTMLDivElement>('#note-menu');
   const deleteNoteButton = document.querySelector<HTMLButtonElement>('#delete-note');
+  const shellRoot = document.querySelector<HTMLElement>('.shell');
+  const spacePanel = document.querySelector<HTMLElement>('.space-panel');
   const spacePath = document.querySelector<HTMLElement>('#space-path');
   const openSpaceButton = document.querySelector<HTMLButtonElement>('#open-space');
   const spaceName = document.querySelector<HTMLElement>('#space-name');
@@ -89,6 +93,8 @@ export function createAppShell(root: HTMLDivElement): AppShell {
     !newNoteName ||
     !noteMenu ||
     !deleteNoteButton ||
+    !shellRoot ||
+    !spacePanel ||
     !spacePath ||
     !openSpaceButton ||
     !spaceName ||
@@ -109,6 +115,8 @@ export function createAppShell(root: HTMLDivElement): AppShell {
     newNoteName,
     noteMenu,
     deleteNoteButton,
+    shellRoot,
+    spacePanel,
     spacePath,
     openSpaceButton,
     spaceName,
