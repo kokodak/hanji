@@ -1,6 +1,6 @@
 # Architecture
 
-Lithe starts as a Tauri application using Vite, TypeScript, and a thin Rust app shell.
+Hanji starts as a Tauri application using Vite, TypeScript, and a thin Rust app shell.
 
 ## Runtime Shape
 
@@ -35,7 +35,7 @@ Plugins should run through explicit capabilities rather than direct access to ap
 
 The core app should remain useful with every plugin disabled.
 
-Editor-facing plugin APIs should wrap CodeMirror behavior instead of exposing every CodeMirror primitive at once. This keeps the public Lithe API stable while still allowing deeper editor extensions later.
+Editor-facing plugin APIs should wrap CodeMirror behavior instead of exposing every CodeMirror primitive at once. This keeps the public Hanji API stable while still allowing deeper editor extensions later.
 
 ## Language Boundary
 

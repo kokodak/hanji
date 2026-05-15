@@ -1,28 +1,28 @@
 # Storage
 
-Lithe is local-first. Documents should live as Markdown files on the local file system and remain easy to inspect, sync, back up, and edit with other tools.
+Hanji is local-first. Documents should live as Markdown files on the local file system and remain easy to inspect, sync, back up, and edit with other tools.
 
 ## Terminology
 
-A **Space** is a local folder where Lithe keeps user-visible Markdown documents.
+A **Space** is a local folder where Hanji keeps user-visible Markdown documents.
 
 ## Current Implementation
 
 The first desktop storage path is a user-visible folder in Documents:
 
 ```text
-~/Documents/Lithe/
+~/Documents/Hanji/
   default.md
-  .lithe/
+  .hanji/
 ```
 
 The note file is visible as normal Markdown:
 
 ```text
-~/Documents/Lithe/default.md
+~/Documents/Hanji/default.md
 ```
 
-The hidden `.lithe` folder is reserved for Lithe-specific metadata, such as future settings, plugin data, indexes, and workspace state.
+The hidden `.hanji` folder is reserved for Hanji-specific metadata, such as future settings, plugin data, indexes, and workspace state.
 
 ## Native File Access
 
@@ -39,23 +39,23 @@ This keeps the desktop app's document model tied to the file system instead of a
 
 ## Direction
 
-The current `~/Documents/Lithe/default.md` file is the first step toward a folder-based Space.
+The current `~/Documents/Hanji/default.md` file is the first step toward a folder-based Space.
 
 The likely long-term structure is:
 
 ```text
-Selected Lithe Space/
+Selected Hanji Space/
   Notes/
     Example.md
   Attachments/
     image.png
-  .lithe/
+  .hanji/
     settings.json
     plugins/
     workspace.json
 ```
 
-Markdown documents should stay visible. Lithe-specific state should stay inside `.lithe`.
+Markdown documents should stay visible. Hanji-specific state should stay inside `.hanji`.
 
 ## Git Policy
 

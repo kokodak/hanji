@@ -1,6 +1,6 @@
 # QA Harness
 
-This document tracks hands-on editing issues that should become repeatable checks for Lithe. Each item should be fixed with a small reproduction note, an expected behavior, and a manual verification step until automated editor tests exist.
+This document tracks hands-on editing issues that should become repeatable checks for Hanji. Each item should be fixed with a small reproduction note, an expected behavior, and a manual verification step until automated editor tests exist.
 
 ## Current Focus
 

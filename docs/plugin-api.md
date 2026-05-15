@@ -1,6 +1,6 @@
 # Plugin API Draft
 
-This is a draft contract for Lithe plugins. It is intentionally small.
+This is a draft contract for Hanji plugins. It is intentionally small.
 
 ## Design Constraints
 
@@ -12,22 +12,22 @@ This is a draft contract for Lithe plugins. It is intentionally small.
 ## Example Shape
 
 ```ts
-export interface LithePlugin {
+export interface HanjiPlugin {
   id: string;
   name: string;
   version: string;
-  activate(context: LithePluginContext): void | Promise<void>;
+  activate(context: HanjiPluginContext): void | Promise<void>;
   deactivate?(): void | Promise<void>;
 }
 
-export interface LithePluginContext {
+export interface HanjiPluginContext {
   editor: {
     getText(): string;
     setText(nextText: string): void;
     insertText(text: string): void;
   };
   commands: {
-    register(command: LitheCommand): Disposable;
+    register(command: HanjiCommand): Disposable;
   };
   storage: {
     get<T>(key: string): Promise<T | undefined>;
@@ -35,7 +35,7 @@ export interface LithePluginContext {
   };
 }
 
-export interface LitheCommand {
+export interface HanjiCommand {
   id: string;
   title: string;
   run(): void | Promise<void>;

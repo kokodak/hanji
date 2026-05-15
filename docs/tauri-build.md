@@ -1,6 +1,6 @@
 # Tauri Build
 
-Lithe uses Tauri as its desktop app framework. The renderer is built with Vite, then Tauri packages the static renderer output into a native macOS app bundle.
+Hanji uses Tauri as its desktop app framework. The renderer is built with Vite, then Tauri packages the static renderer output into a native macOS app bundle.
 
 ## Prerequisites
 
@@ -57,13 +57,13 @@ npx tauri build --bundles app
 The app is written to:
 
 ```text
-src-tauri/target/release/bundle/macos/Lithe.app
+src-tauri/target/release/bundle/macos/Hanji.app
 ```
 
 Open it directly:
 
 ```sh
-open src-tauri/target/release/bundle/macos/Lithe.app
+open src-tauri/target/release/bundle/macos/Hanji.app
 ```
 
 ## Full Bundle Build
@@ -76,7 +76,7 @@ npm run build
 
 This runs TypeScript checks and then `tauri build`. With the current Tauri configuration, this may try to create every enabled bundle target, including a DMG on macOS.
 
-If DMG packaging fails but `Lithe.app` is created successfully, use the `.app` bundle for local testing and investigate DMG packaging separately.
+If DMG packaging fails but `Hanji.app` is created successfully, use the `.app` bundle for local testing and investigate DMG packaging separately.
 
 ## Git Policy
 

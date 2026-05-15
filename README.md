@@ -1,8 +1,8 @@
-# Lithe
+# Hanji
 
 Capture the thought.
 
-Lithe is a light, local-first Markdown text editor.
+Hanji is a light, local-first Markdown text editor.
 
 ## Principles
 

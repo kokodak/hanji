@@ -1,6 +1,6 @@
 # Table Block Editor
 
-Lithe should treat Markdown tables as editable block widgets instead of switching between raw source lines and a rendered preview table.
+Hanji should treat Markdown tables as editable block widgets instead of switching between raw source lines and a rendered preview table.
 
 ## Problem
 

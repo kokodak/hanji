@@ -4,7 +4,7 @@ This repository is built in English only. Keep code, comments, docs, commit mess
 
 ## Product North Star
 
-Lithe is a light, local-first Markdown editor. It should feel simple enough for notes, durable enough for plain text writing, and open enough for user plugins.
+Hanji is a light, local-first Markdown editor. It should feel simple enough for notes, durable enough for plain text writing, and open enough for user plugins.
 
 ## Engineering Guidelines
 
