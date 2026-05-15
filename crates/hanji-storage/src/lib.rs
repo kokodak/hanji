@@ -3,6 +3,96 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use hanji_core::{CommandError, Document, DocumentChange, EditorCommand, Transaction};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentSession {
+    path: PathBuf,
+    document: Document,
+    saved_revision: u64,
+    revision: u64,
+}
+
+impl DocumentSession {
+    pub fn open(path: impl Into<PathBuf>) -> io::Result<Self> {
+        let path = path.into();
+        let text = read_markdown(&path)?;
+
+        Ok(Self::new(path, text))
+    }
+
+    pub fn new(path: impl Into<PathBuf>, text: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            document: Document::new(text),
+            saved_revision: 0,
+            revision: 0,
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn document(&self) -> &Document {
+        &self.document
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.revision != self.saved_revision
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn execute(&mut self, command: EditorCommand) -> Result<bool, CommandError> {
+        let changed = self.document.execute(command)?;
+        self.mark_changed_if(changed);
+        Ok(changed)
+    }
+
+    pub fn apply(
+        &mut self,
+        transaction: Transaction,
+    ) -> Result<DocumentChange, hanji_core::EditError> {
+        let before_text = self.document.text().to_owned();
+        let change = self.document.apply(transaction)?;
+        self.mark_changed_if(self.document.text() != before_text);
+        Ok(change)
+    }
+
+    pub fn undo(&mut self) -> Option<DocumentChange> {
+        let before_text = self.document.text().to_owned();
+        let change = self.document.undo()?;
+        self.mark_changed_if(self.document.text() != before_text);
+        Some(change)
+    }
+
+    pub fn redo(&mut self) -> Option<DocumentChange> {
+        let before_text = self.document.text().to_owned();
+        let change = self.document.redo()?;
+        self.mark_changed_if(self.document.text() != before_text);
+        Some(change)
+    }
+
+    pub fn save(&mut self) -> io::Result<()> {
+        write_markdown(&self.path, self.document.text())?;
+        self.saved_revision = self.revision;
+        Ok(())
+    }
+
+    fn mark_changed_if(&mut self, changed: bool) {
+        if changed {
+            self.mark_changed();
+        }
+    }
+
+    fn mark_changed(&mut self) {
+        self.revision = self.revision.saturating_add(1);
+    }
+}
+
 pub fn read_markdown(path: impl AsRef<Path>) -> io::Result<String> {
     fs::read_to_string(path)
 }
@@ -115,6 +205,84 @@ mod tests {
 
         assert_eq!(error.kind(), io::ErrorKind::IsADirectory);
         assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn opens_document_session_from_disk() {
+        let directory = TestDirectory::new("session-open");
+        let path = directory.path().join("note.md");
+        fs::write(&path, "# Hanji\n").unwrap();
+
+        let session = DocumentSession::open(&path).unwrap();
+
+        assert_eq!(session.path(), path.as_path());
+        assert_eq!(session.document().text(), "# Hanji\n");
+        assert!(!session.is_dirty());
+    }
+
+    #[test]
+    fn session_tracks_dirty_state_after_command() {
+        let directory = TestDirectory::new("session-dirty");
+        let path = directory.path().join("note.md");
+        let mut session = DocumentSession::new(&path, "Hanji");
+
+        let changed = session
+            .execute(EditorCommand::insert_text(" notes"))
+            .unwrap();
+
+        assert!(changed);
+        assert!(session.is_dirty());
+        assert_eq!(session.revision(), 1);
+        assert_eq!(session.document().text(), " notesHanji");
+    }
+
+    #[test]
+    fn session_does_not_mark_noop_command_dirty() {
+        let directory = TestDirectory::new("session-noop");
+        let path = directory.path().join("note.md");
+        let mut session = DocumentSession::new(&path, "Hanji");
+
+        let changed = session.execute(EditorCommand::DeleteBackward).unwrap();
+
+        assert!(!changed);
+        assert!(!session.is_dirty());
+        assert_eq!(session.revision(), 0);
+    }
+
+    #[test]
+    fn session_save_clears_dirty_state_and_writes_file() {
+        let directory = TestDirectory::new("session-save");
+        let path = directory.path().join("note.md");
+        let mut session = DocumentSession::new(&path, "Hanji");
+
+        session
+            .execute(EditorCommand::insert_text(" notes"))
+            .unwrap();
+        session.save().unwrap();
+
+        assert!(!session.is_dirty());
+        assert_eq!(read_markdown(&path).unwrap(), " notesHanji");
+    }
+
+    #[test]
+    fn session_does_not_mark_selection_only_transaction_dirty() {
+        let directory = TestDirectory::new("session-selection");
+        let path = directory.path().join("note.md");
+        let mut session = DocumentSession::new(&path, "Hanji");
+
+        session
+            .apply(Transaction::new(
+                Vec::new(),
+                Some(hanji_core::Selection::caret(5)),
+            ))
+            .unwrap();
+
+        assert!(!session.is_dirty());
+        assert_eq!(session.revision(), 0);
+        assert_eq!(
+            session.document().selection().primary(),
+            hanji_core::TextRange::caret(5)
+        );
     }
 
     struct TestDirectory {

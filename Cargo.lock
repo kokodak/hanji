@@ -2314,6 +2314,9 @@ dependencies = [
 [[package]]
 name = "hanji-storage"
 version = "0.1.0"
+dependencies = [
+ "hanji-core",
+]
 
 [[package]]
 name = "hashbrown"

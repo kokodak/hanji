@@ -37,3 +37,9 @@ Raw Markdown is not a debug mode. It is a first-class editing mode and a trust m
 Editing happens in memory. Saving writes the current Markdown text to disk.
 
 User-visible Markdown files should be saved atomically: write the new contents to a temporary file in the same directory, sync it, rename it over the destination, then best-effort sync the parent directory.
+
+## Document Session
+
+A document session connects an in-memory document to a file path.
+
+It owns the current `Document`, tracks whether the persisted text is dirty, and saves the current Markdown text through the storage layer. Selection-only changes should not mark the session dirty because they do not change the saved Markdown source.
