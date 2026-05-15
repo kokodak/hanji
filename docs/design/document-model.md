@@ -31,3 +31,9 @@ Hanji-specific metadata should live beside the documents in a clearly reserved f
 ## Raw Markdown
 
 Raw Markdown is not a debug mode. It is a first-class editing mode and a trust mechanism.
+
+## Saving
+
+Editing happens in memory. Saving writes the current Markdown text to disk.
+
+User-visible Markdown files should be saved atomically: write the new contents to a temporary file in the same directory, sync it, rename it over the destination, then best-effort sync the parent directory.
