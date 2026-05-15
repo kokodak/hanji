@@ -1,0 +1,23 @@
+[workspace]
+members = [
+  "apps/hanji-rust",
+  "crates/hanji-core",
+  "crates/hanji-markdown",
+  "crates/hanji-plugin-api",
+  "crates/hanji-storage",
+]
+exclude = ["src-tauri"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Seungyong Lee"]
+
+[workspace.dependencies]
+gpui = "0.2.2"
+hanji-core = { path = "crates/hanji-core" }
+hanji-markdown = { path = "crates/hanji-markdown" }
+hanji-plugin-api = { path = "crates/hanji-plugin-api" }
+hanji-storage = { path = "crates/hanji-storage" }

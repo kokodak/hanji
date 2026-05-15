@@ -17,6 +17,8 @@ Hanji is a light, local-first Markdown editor. It should feel simple enough for 
 ## Repository Conventions
 
 - Put design documents under `docs/`.
+- Put core editor concepts under `docs/design/`.
+- Keep the Rust and GPUI architecture direction in `docs/architecture.md` until a dedicated ADR structure exists.
 - Keep renderer UI code in `src/renderer/`.
 - Keep Tauri app shell and native commands in `src-tauri/`.
 - Add tests alongside the feature once test infrastructure is introduced.
@@ -29,4 +31,5 @@ npm install
 npm run dev
 npm run typecheck
 npm run build
+cargo test --workspace --exclude hanji-rust
 ```

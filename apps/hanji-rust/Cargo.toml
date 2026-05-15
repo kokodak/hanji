@@ -1,0 +1,10 @@
+[package]
+name = "hanji-rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+gpui.workspace = true
+hanji-core.workspace = true

@@ -14,19 +14,34 @@ Hanji is a light, local-first Markdown text editor.
 
 ## Getting Started
 
+Rust core checks:
+
+```sh
+cargo test --workspace --exclude hanji-rust
+```
+
+GPUI desktop app:
+
+```sh
+cargo run -p hanji-rust
+```
+
+Current TypeScript desktop app:
+
 ```sh
 npm install
 npm run dev
 ```
 
-For local desktop builds, see [Tauri Build](docs/tauri-build.md).
-
-For local file storage notes, see [Storage](docs/storage.md).
+For product philosophy and editor design notes, see [Hanji Docs](docs/README.md).
 
 ## Project Layout
 
 ```text
 docs/                 Product and engineering design notes
+docs/design/          Core editor concepts and design vocabulary
+crates/               Rust editor crates
+apps/                 Rust desktop applications
 src/renderer/         TypeScript editor UI
 src-tauri/            Tauri app shell and native capabilities
 AGENTS.md            Guidance for coding agents working in this repo
