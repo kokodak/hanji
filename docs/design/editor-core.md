@@ -51,6 +51,8 @@ A command is a named editing operation such as insert text, toggle emphasis, cre
 
 Commands should operate on core state and return an outcome the UI can render.
 
+The current command layer covers plain text insertion plus backward and forward deletion. Markdown-aware commands should build on the same layer instead of bypassing document transactions.
+
 ### Projection
 
 A projection is a visual interpretation of the Markdown source. WYSIWYG editing changes the projection, not the source of truth.
