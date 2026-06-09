@@ -2298,6 +2298,9 @@ version = "0.1.0"
 [[package]]
 name = "hanji-markdown"
 version = "0.1.0"
+dependencies = [
+ "hanji-core",
+]
 
 [[package]]
 name = "hanji-plugin-api"
@@ -2309,6 +2312,7 @@ version = "0.1.0"
 dependencies = [
  "gpui",
  "hanji-core",
+ "hanji-storage",
 ]
 
 [[package]]
