@@ -1,11 +1,15 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextBuffer {
     text: String,
+    line_index: LineIndex,
 }
 
 impl TextBuffer {
     pub fn new(text: impl Into<String>) -> Self {
-        Self { text: text.into() }
+        let text = text.into();
+        let line_index = LineIndex::new(&text);
+
+        Self { text, line_index }
     }
 
     pub fn as_str(&self) -> &str {
@@ -21,25 +25,52 @@ impl TextBuffer {
     }
 
     pub fn line_count(&self) -> usize {
-        self.text.bytes().filter(|byte| *byte == b'\n').count() + 1
+        self.line_index.line_count()
     }
 
     pub fn line_range(&self, line_index: usize) -> Option<TextRange> {
-        let mut current_line = 0;
-        let mut line_start = 0;
+        self.line_index.line_range(self.text.len(), line_index)
+    }
 
-        for (offset, character) in self.text.char_indices() {
-            if character == '\n' {
-                if current_line == line_index {
-                    return Some(TextRange::new(line_start, offset));
-                }
+    pub fn line_index_at_offset(&self, offset: usize) -> Result<usize, EditError> {
+        self.validate_range(TextRange::caret(offset))?;
+        Ok(self.line_index.line_index_at_offset(offset))
+    }
 
-                current_line += 1;
-                line_start = offset + character.len_utf8();
+    pub fn position_at_offset(&self, offset: usize) -> Result<TextPosition, EditError> {
+        self.validate_range(TextRange::caret(offset))?;
+
+        let line = self.line_index.line_index_at_offset(offset);
+        let line_start = self
+            .line_index
+            .line_start(line)
+            .ok_or(EditError::InvalidRange)?;
+        let column = self.text[line_start..offset].chars().count();
+
+        Ok(TextPosition::new(line, column))
+    }
+
+    pub fn offset_at_position(&self, position: TextPosition) -> Result<usize, EditError> {
+        let line_range = self
+            .line_range(position.line)
+            .ok_or(EditError::InvalidRange)?;
+        let line = &self.text[line_range.start..line_range.end];
+
+        if position.column == 0 {
+            return Ok(line_range.start);
+        }
+
+        for (column, (offset, _)) in line.char_indices().enumerate() {
+            if column == position.column {
+                return Ok(line_range.start + offset);
             }
         }
 
-        (current_line == line_index).then_some(TextRange::new(line_start, self.text.len()))
+        if position.column == line.chars().count() {
+            return Ok(line_range.end);
+        }
+
+        Err(EditError::InvalidRange)
     }
 
     pub fn slice(&self, range: TextRange) -> Result<&str, EditError> {
@@ -58,6 +89,8 @@ impl TextBuffer {
                 .replace_range(edit.range.start..edit.range.end, &edit.text);
         }
 
+        self.rebuild_line_index();
+
         Ok(())
     }
 
@@ -67,6 +100,11 @@ impl TextBuffer {
 
     pub fn replace_all(&mut self, text: impl Into<String>) {
         self.text = text.into();
+        self.rebuild_line_index();
+    }
+
+    fn rebuild_line_index(&mut self) {
+        self.line_index = LineIndex::new(&self.text);
     }
 }
 
@@ -94,6 +132,18 @@ impl TextRange {
 
     pub fn is_empty(self) -> bool {
         self.start == self.end
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextPosition {
+    pub line: usize,
+    pub column: usize,
+}
+
+impl TextPosition {
+    pub fn new(line: usize, column: usize) -> Self {
+        Self { line, column }
     }
 }
 
@@ -125,6 +175,48 @@ pub enum EditError {
     InvalidBoundary,
     InvalidRange,
     OverlappingEdits,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LineIndex {
+    line_starts: Vec<usize>,
+}
+
+impl LineIndex {
+    fn new(text: &str) -> Self {
+        let mut line_starts = vec![0];
+
+        for (offset, byte) in text.bytes().enumerate() {
+            if byte == b'\n' {
+                line_starts.push(offset + 1);
+            }
+        }
+
+        Self { line_starts }
+    }
+
+    fn line_count(&self) -> usize {
+        self.line_starts.len()
+    }
+
+    fn line_range(&self, text_len: usize, line_index: usize) -> Option<TextRange> {
+        let start = *self.line_starts.get(line_index)?;
+        let end = self
+            .line_starts
+            .get(line_index + 1)
+            .map(|next_start| next_start - 1)
+            .unwrap_or(text_len);
+
+        Some(TextRange::new(start, end))
+    }
+
+    fn line_index_at_offset(&self, offset: usize) -> usize {
+        self.line_starts.partition_point(|start| *start <= offset) - 1
+    }
+
+    fn line_start(&self, line_index: usize) -> Option<usize> {
+        self.line_starts.get(line_index).copied()
+    }
 }
 
 fn validate_edits(text: &str, edits: &[TextEdit]) -> Result<(), EditError> {
@@ -170,6 +262,117 @@ mod tests {
         assert_eq!(buffer.line_range(1), Some(TextRange::new(4, 7)));
         assert_eq!(buffer.line_range(2), Some(TextRange::new(8, 13)));
         assert_eq!(buffer.line_range(3), None);
+    }
+
+    #[test]
+    fn reports_empty_trailing_line() {
+        let buffer = TextBuffer::new("one\n");
+
+        assert_eq!(buffer.line_count(), 2);
+        assert_eq!(buffer.line_range(0), Some(TextRange::new(0, 3)));
+        assert_eq!(buffer.line_range(1), Some(TextRange::new(4, 4)));
+        assert_eq!(buffer.line_index_at_offset(4), Ok(1));
+    }
+
+    #[test]
+    fn finds_line_index_for_mixed_utf8_offsets() {
+        let buffer = TextBuffer::new("안녕 abc\n\ndfg");
+
+        assert_eq!(buffer.line_index_at_offset(0), Ok(0));
+        assert_eq!(buffer.line_index_at_offset("안녕 abc".len()), Ok(0));
+        assert_eq!(buffer.line_index_at_offset("안녕 abc\n".len()), Ok(1));
+        assert_eq!(buffer.line_index_at_offset("안녕 abc\n\n".len()), Ok(2));
+        assert_eq!(buffer.line_index_at_offset("안녕 abc\n\ndfg".len()), Ok(2));
+    }
+
+    #[test]
+    fn rejects_line_index_lookup_inside_utf8_character() {
+        let buffer = TextBuffer::new("한지");
+
+        assert_eq!(
+            buffer.line_index_at_offset(1),
+            Err(EditError::InvalidBoundary)
+        );
+    }
+
+    #[test]
+    fn rebuilds_line_index_after_edits() {
+        let mut buffer = TextBuffer::new("one");
+
+        buffer.apply_edits(&[TextEdit::insert(3, "\ntwo")]).unwrap();
+
+        assert_eq!(buffer.line_count(), 2);
+        assert_eq!(buffer.line_range(1), Some(TextRange::new(4, 7)));
+    }
+
+    #[test]
+    fn converts_offsets_to_char_positions() {
+        let buffer = TextBuffer::new("안녕 abc\n\ndfg");
+
+        assert_eq!(buffer.position_at_offset(0), Ok(TextPosition::new(0, 0)));
+        assert_eq!(
+            buffer.position_at_offset("안".len()),
+            Ok(TextPosition::new(0, 1))
+        );
+        assert_eq!(
+            buffer.position_at_offset("안녕 abc".len()),
+            Ok(TextPosition::new(0, 6))
+        );
+        assert_eq!(
+            buffer.position_at_offset("안녕 abc\n".len()),
+            Ok(TextPosition::new(1, 0))
+        );
+        assert_eq!(
+            buffer.position_at_offset("안녕 abc\n\nd".len()),
+            Ok(TextPosition::new(2, 1))
+        );
+    }
+
+    #[test]
+    fn converts_char_positions_to_offsets() {
+        let buffer = TextBuffer::new("안녕 abc\n\ndfg");
+
+        assert_eq!(buffer.offset_at_position(TextPosition::new(0, 0)), Ok(0));
+        assert_eq!(
+            buffer.offset_at_position(TextPosition::new(0, 1)),
+            Ok("안".len())
+        );
+        assert_eq!(
+            buffer.offset_at_position(TextPosition::new(0, 6)),
+            Ok("안녕 abc".len())
+        );
+        assert_eq!(
+            buffer.offset_at_position(TextPosition::new(1, 0)),
+            Ok("안녕 abc\n".len())
+        );
+        assert_eq!(
+            buffer.offset_at_position(TextPosition::new(2, 3)),
+            Ok("안녕 abc\n\ndfg".len())
+        );
+    }
+
+    #[test]
+    fn rejects_positions_outside_existing_lines() {
+        let buffer = TextBuffer::new("Hanji");
+
+        assert_eq!(
+            buffer.offset_at_position(TextPosition::new(1, 0)),
+            Err(EditError::InvalidRange)
+        );
+        assert_eq!(
+            buffer.offset_at_position(TextPosition::new(0, 6)),
+            Err(EditError::InvalidRange)
+        );
+    }
+
+    #[test]
+    fn rejects_position_lookup_inside_utf8_character() {
+        let buffer = TextBuffer::new("한지");
+
+        assert_eq!(
+            buffer.position_at_offset(1),
+            Err(EditError::InvalidBoundary)
+        );
     }
 
     #[test]

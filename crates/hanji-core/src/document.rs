@@ -1,4 +1,4 @@
-use crate::{EditError, Selection, TextBuffer, Transaction};
+use crate::{EditError, Selection, TextBuffer, TextPosition, TextRange, Transaction};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Document {
@@ -28,6 +28,26 @@ impl Document {
 
     pub fn is_empty(&self) -> bool {
         self.buffer.is_empty()
+    }
+
+    pub fn line_count(&self) -> usize {
+        self.buffer.line_count()
+    }
+
+    pub fn line_range(&self, line_index: usize) -> Option<TextRange> {
+        self.buffer.line_range(line_index)
+    }
+
+    pub fn line_index_at_offset(&self, offset: usize) -> Result<usize, EditError> {
+        self.buffer.line_index_at_offset(offset)
+    }
+
+    pub fn position_at_offset(&self, offset: usize) -> Result<TextPosition, EditError> {
+        self.buffer.position_at_offset(offset)
+    }
+
+    pub fn offset_at_position(&self, position: TextPosition) -> Result<usize, EditError> {
+        self.buffer.offset_at_position(position)
     }
 
     pub fn selection(&self) -> &Selection {
@@ -185,5 +205,28 @@ mod tests {
 
         assert_eq!(document.text(), "Hanji draft");
         assert!(!document.can_redo());
+    }
+
+    #[test]
+    fn exposes_line_lookup() {
+        let document = Document::new("Hanji\nnotes");
+
+        assert_eq!(document.line_count(), 2);
+        assert_eq!(document.line_range(1), Some(TextRange::new(6, 11)));
+        assert_eq!(document.line_index_at_offset(6), Ok(1));
+    }
+
+    #[test]
+    fn exposes_position_conversion() {
+        let document = Document::new("한지\nnotes");
+
+        assert_eq!(
+            document.position_at_offset("한지\nno".len()),
+            Ok(TextPosition::new(1, 2))
+        );
+        assert_eq!(
+            document.offset_at_position(TextPosition::new(0, 2)),
+            Ok("한지".len())
+        );
     }
 }

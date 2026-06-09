@@ -29,6 +29,10 @@ The text buffer stores Markdown source. It should support efficient insertions, 
 
 Hanji currently uses byte ranges that must fall on UTF-8 character boundaries. This keeps source mapping direct while still rejecting invalid edits inside multi-byte characters.
 
+The buffer also keeps a line index of byte offsets where each line starts. This gives the UI a cheap way to ask which line contains an offset or which source range belongs to a line, without threading GPUI layout types into the core.
+
+`TextPosition` represents a source position as a line plus a character column. The core can convert between `TextPosition` and byte offsets so UI code can talk in line-oriented terms while transactions still edit precise UTF-8 ranges.
+
 ### Transaction
 
 A transaction is one intentional edit. It can include text changes, selection changes, and metadata needed for undo.
@@ -51,7 +55,7 @@ A command is a named editing operation such as insert text, toggle emphasis, cre
 
 Commands should operate on core state and return an outcome the UI can render.
 
-The current command layer covers plain text insertion plus backward and forward deletion. Markdown-aware commands should build on the same layer instead of bypassing document transactions.
+The current core command layer covers plain text insertion plus backward and forward deletion. Markdown-specific commands belong in `hanji-markdown`, where they can build core transactions without making the core depend on Markdown syntax.
 
 ### Projection
 

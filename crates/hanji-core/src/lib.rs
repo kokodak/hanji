@@ -7,5 +7,5 @@ mod transaction;
 pub use command::{CommandError, EditorCommand};
 pub use document::{Document, DocumentChange};
 pub use selection::{Selection, SelectionError};
-pub use text::{EditError, TextBuffer, TextEdit, TextRange};
+pub use text::{EditError, TextBuffer, TextEdit, TextPosition, TextRange};
 pub use transaction::Transaction;
