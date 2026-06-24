@@ -17,6 +17,10 @@ use hanji_storage::DocumentSession;
 
 const LINE_HEIGHT: f32 = 24.0;
 const FONT_SIZE: f32 = 16.0;
+const BLOCKQUOTE_BAR_LEFT_INSET: f32 = 4.0;
+const BLOCKQUOTE_BAR_WIDTH: f32 = 3.0;
+const BLOCKQUOTE_BAR_TOP_INSET: f32 = 2.0;
+const BLOCKQUOTE_BAR_BOTTOM_INSET: f32 = 0.0;
 const DRAG_SELECTION_THRESHOLD: f64 = 2.0;
 const SAMPLE_DOCUMENT: &str = "# Hanji\n\nCapture the **thought** with `code`.";
 
@@ -1512,12 +1516,22 @@ fn code_background_ranges(segments: &[ProjectedVisibleSegment<'_>]) -> Vec<TextR
 }
 
 fn blockquote_bar_quad(bounds: Bounds<Pixels>) -> PaintQuad {
-    fill(
-        Bounds::new(
-            point(bounds.left() + px(4.0), bounds.top() + px(4.0)),
-            size(px(3.0), bounds.bottom() - bounds.top() - px(8.0)),
+    fill(blockquote_bar_bounds(bounds), rgb(0xaeb6bf))
+}
+
+fn blockquote_bar_bounds(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+    Bounds::new(
+        point(
+            bounds.left() + px(BLOCKQUOTE_BAR_LEFT_INSET),
+            bounds.top() + px(BLOCKQUOTE_BAR_TOP_INSET),
         ),
-        rgb(0xaeb6bf),
+        size(
+            px(BLOCKQUOTE_BAR_WIDTH),
+            bounds.bottom()
+                - bounds.top()
+                - px(BLOCKQUOTE_BAR_TOP_INSET)
+                - px(BLOCKQUOTE_BAR_BOTTOM_INSET),
+        ),
     )
 }
 
@@ -1850,6 +1864,17 @@ mod tests {
         assert_eq!(runs[0].bottom(), px(48.0));
         assert_eq!(runs[1].top(), px(72.0));
         assert_eq!(runs[1].bottom(), px(96.0));
+    }
+
+    #[test]
+    fn blockquote_bar_extends_to_run_bottom() {
+        let bounds = Bounds::new(point(px(10.0), px(20.0)), size(px(100.0), px(48.0)));
+        let bar = blockquote_bar_bounds(bounds);
+
+        assert_eq!(bar.left(), px(14.0));
+        assert_eq!(bar.top(), px(22.0));
+        assert_eq!(bar.right(), px(17.0));
+        assert_eq!(bar.bottom(), px(68.0));
     }
 
     #[test]
