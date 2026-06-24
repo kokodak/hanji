@@ -1,17 +1,18 @@
 use std::{env, io, ops::Range, path::PathBuf, process};
 
 use gpui::{
-    App, Application, Bounds, Context, CursorStyle, Element, ElementId, ElementInputHandler,
-    Entity, EntityInputHandler, FocusHandle, Focusable, FontWeight, GlobalElementId,
-    InspectorElementId, IntoElement, KeyBinding, LayoutId, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Render, ShapedLine, SharedString, Style,
-    TextRun, TextStyle, UTF16Selection, UnderlineStyle, Window, WindowBounds, WindowOptions,
-    actions, div, fill, point, prelude::*, px, relative, rgb, rgba, size,
+    App, Application, BorderStyle, Bounds, Context, CursorStyle, Element, ElementId,
+    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, FontWeight,
+    GlobalElementId, InspectorElementId, IntoElement, KeyBinding, LayoutId, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Render, ShapedLine,
+    SharedString, Style, TextRun, TextStyle, UTF16Selection, UnderlineStyle, Window, WindowBounds,
+    WindowOptions, actions, div, fill, point, prelude::*, px, quad, relative, rgb, rgba, size,
 };
 use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
 use hanji_markdown::{
-    MarkdownCommand, MarkdownCommandError, MarkdownLine, ProjectedSegmentKind,
-    ProjectedVisibleSegment, blockquote_content_start, execute_markdown_command, project_document,
+    MarkdownCommand, MarkdownCommandError, MarkdownLine, MarkdownListMarker, MarkdownTaskState,
+    OrderedListDelimiter, ProjectedSegmentKind, ProjectedVisibleSegment, blockquote_content_start,
+    execute_markdown_command, list_item, project_document,
 };
 use hanji_storage::DocumentSession;
 
@@ -21,6 +22,11 @@ const BLOCKQUOTE_BAR_LEFT_INSET: f32 = 4.0;
 const BLOCKQUOTE_BAR_WIDTH: f32 = 3.0;
 const BLOCKQUOTE_BAR_TOP_INSET: f32 = 2.0;
 const BLOCKQUOTE_BAR_BOTTOM_INSET: f32 = 0.0;
+const LIST_BULLET_FONT_SIZE: f32 = 11.0;
+const CHECKBOX_MARKER_FONT_SIZE: f32 = 22.0;
+const CHECKBOX_BOX_SIZE: f32 = 16.0;
+const CHECKBOX_CHECK_FONT_SIZE: f32 = 17.0;
+const CHECKBOX_CONTENT_GAP: f32 = 5.0;
 const DRAG_SELECTION_THRESHOLD: f64 = 2.0;
 const SAMPLE_DOCUMENT: &str = "# Hanji\n\nCapture the **thought** with `code`.";
 
@@ -65,6 +71,7 @@ struct Hanji {
     session: DocumentSession,
     marked_range: Option<Range<usize>>,
     last_lines: Vec<LineSnapshot>,
+    last_task_markers: Vec<TaskMarkerHitbox>,
     preferred_column: Option<usize>,
     selection_anchor: Option<usize>,
     selection_head: Option<usize>,
@@ -280,6 +287,11 @@ impl Hanji {
             return;
         }
 
+        if let Some((range, replacement, selection_after)) = self.list_newline_edit(&range) {
+            self.replace_range(range, &replacement, selection_after, window, cx);
+            return;
+        }
+
         let caret = range.start + "\n".len();
         self.replace_range(range, "\n", caret..caret, window, cx);
     }
@@ -382,6 +394,13 @@ impl Hanji {
     ) {
         window.focus(&self.focus_handle);
         self.marked_range = None;
+        if !event.modifiers.shift
+            && let Some(task_marker) = self.task_marker_at_position(event.position)
+            && self.toggle_task_marker(task_marker, window, cx)
+        {
+            return;
+        }
+
         let offset = self.index_for_mouse_position(event.position);
 
         self.is_selecting = false;
@@ -416,7 +435,10 @@ impl Hanji {
             .unwrap_or_else(|| self.session.document().selection().primary().start);
         self.select_from_anchor_to(
             anchor,
-            self.index_for_mouse_position(event.position),
+            self.index_for_mouse_position_with_marker_mode(
+                event.position,
+                MarkerHitMode::MarkerStart,
+            ),
             None,
             cx,
         );
@@ -655,6 +677,21 @@ impl Hanji {
         blockquote_newline_edit_for_line(line_source, line_range, range)
     }
 
+    fn list_newline_edit(
+        &self,
+        range: &Range<usize>,
+    ) -> Option<(Range<usize>, String, Range<usize>)> {
+        if range.start != range.end {
+            return None;
+        }
+
+        let document = self.session.document();
+        let line_range = self.line_range_for_offset(range.start)?;
+        let line_source = &document.text()[line_range.start..line_range.end];
+
+        list_newline_edit_for_line(line_source, line_range, range)
+    }
+
     fn line_range_for_offset(&self, offset: usize) -> Option<TextRange> {
         let document = self.session.document();
         let line_index = document.line_index_at_offset(offset).ok()?;
@@ -674,6 +711,14 @@ impl Hanji {
     }
 
     fn index_for_mouse_position(&self, position: gpui::Point<Pixels>) -> usize {
+        self.index_for_mouse_position_with_marker_mode(position, MarkerHitMode::ContentStart)
+    }
+
+    fn index_for_mouse_position_with_marker_mode(
+        &self,
+        position: gpui::Point<Pixels>,
+        marker_mode: MarkerHitMode,
+    ) -> usize {
         let Some(first_line) = self.last_lines.first() else {
             return 0;
         };
@@ -695,6 +740,15 @@ impl Hanji {
             .iter()
             .find(|line| position.y >= line.bounds.top() && position.y <= line.bounds.bottom())
             .unwrap_or(last_line);
+        if let Some(offset) = line_marker_hit_offset(
+            line.bounds.left(),
+            line.marker_range,
+            position.x,
+            marker_mode,
+        ) {
+            return offset;
+        }
+
         let local_x = position.x - line.bounds.left();
         let visible_offset = line
             .layout
@@ -706,6 +760,39 @@ impl Hanji {
             .document()
             .nearest_grapheme_offset(offset)
             .unwrap_or(offset)
+    }
+
+    fn task_marker_at_position(&self, position: gpui::Point<Pixels>) -> Option<TaskMarkerHitbox> {
+        self.last_task_markers
+            .iter()
+            .copied()
+            .find(|marker| bounds_contains_point(marker.bounds, position))
+    }
+
+    fn toggle_task_marker(
+        &mut self,
+        task_marker: TaskMarkerHitbox,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let document = self.session.document();
+        let Some(range) = task_marker_state_char_range(document.text(), task_marker.marker_range)
+        else {
+            return false;
+        };
+        let replacement = match task_marker.state {
+            MarkdownTaskState::Unchecked => "x",
+            MarkdownTaskState::Checked => " ",
+        };
+        let selection = document.selection().primary();
+
+        self.replace_range(
+            range,
+            replacement,
+            selection.start..selection.end,
+            window,
+            cx,
+        )
     }
 
     fn byte_range_to_utf16(&self, range: &Range<usize>) -> Range<usize> {
@@ -988,6 +1075,7 @@ impl Render for Hanji {
 #[derive(Clone)]
 struct LineSnapshot {
     range: TextRange,
+    marker_range: Option<TextRange>,
     visible_len: usize,
     segments: Vec<LineSegmentSnapshot>,
     layout: ShapedLine,
@@ -1094,11 +1182,116 @@ fn blockquote_newline_edit_for_line(
     Some((range.clone(), replacement, caret..caret))
 }
 
+fn list_newline_edit_for_line(
+    line_source: &str,
+    line_range: TextRange,
+    range: &Range<usize>,
+) -> Option<(Range<usize>, String, Range<usize>)> {
+    if range.start != range.end {
+        return None;
+    }
+
+    let list_item = list_item(line_source)?;
+    let content = &line_source[list_item.content_start..];
+
+    if content.trim().is_empty() {
+        let caret = line_range.start;
+        return Some((
+            line_range.start..line_range.end,
+            String::new(),
+            caret..caret,
+        ));
+    }
+
+    let indent_len = line_source
+        .bytes()
+        .take_while(|byte| *byte == b' ')
+        .take(4)
+        .count();
+    let marker = next_list_item_marker_text(list_item.marker, list_item.task);
+    let replacement = format!("\n{}{marker} ", &line_source[..indent_len]);
+    let caret = range.start + replacement.len();
+
+    Some((range.clone(), replacement, caret..caret))
+}
+
+fn next_list_item_marker_text(
+    marker: MarkdownListMarker,
+    task: Option<MarkdownTaskState>,
+) -> String {
+    let marker = next_list_marker_text(marker);
+    if task.is_some() {
+        format!("{marker} [ ]")
+    } else {
+        marker
+    }
+}
+
+fn next_list_marker_text(marker: MarkdownListMarker) -> String {
+    match marker {
+        MarkdownListMarker::Unordered { marker } => marker.to_string(),
+        MarkdownListMarker::Ordered { number, delimiter } => {
+            format!(
+                "{}{}",
+                number.saturating_add(1),
+                ordered_list_delimiter(delimiter)
+            )
+        }
+    }
+}
+
+fn ordered_list_delimiter(delimiter: OrderedListDelimiter) -> &'static str {
+    match delimiter {
+        OrderedListDelimiter::Dot => ".",
+        OrderedListDelimiter::Paren => ")",
+    }
+}
+
 fn drag_distance_exceeds_threshold(
     origin: gpui::Point<Pixels>,
     position: gpui::Point<Pixels>,
 ) -> bool {
     (position - origin).magnitude() > DRAG_SELECTION_THRESHOLD
+}
+
+#[derive(Clone, Copy)]
+enum MarkerHitMode {
+    ContentStart,
+    MarkerStart,
+}
+
+fn line_marker_hit_offset(
+    line_left: Pixels,
+    marker_range: Option<TextRange>,
+    position_x: Pixels,
+    mode: MarkerHitMode,
+) -> Option<usize> {
+    if position_x < line_left {
+        marker_range.map(|range| match mode {
+            MarkerHitMode::ContentStart => range.end,
+            MarkerHitMode::MarkerStart => range.start,
+        })
+    } else {
+        None
+    }
+}
+
+fn bounds_contains_point(bounds: Bounds<Pixels>, position: gpui::Point<Pixels>) -> bool {
+    position.x >= bounds.left()
+        && position.x <= bounds.right()
+        && position.y >= bounds.top()
+        && position.y <= bounds.bottom()
+}
+
+fn task_marker_state_char_range(text: &str, marker_range: TextRange) -> Option<Range<usize>> {
+    let marker_source = text.get(marker_range.start..marker_range.end)?;
+    let marker_offset = marker_source
+        .find("[ ]")
+        .or_else(|| marker_source.find("[x]"))
+        .or_else(|| marker_source.find("[X]"))?;
+    let state_offset = marker_range.start + marker_offset + 1;
+
+    Some(state_offset..state_offset + 1)
 }
 
 fn source_to_visible_offset_in_segments(
@@ -1194,9 +1387,72 @@ struct EditorElement {
 struct EditorPrepaintState {
     lines: Vec<LineSnapshot>,
     blockquote_bars: Vec<PaintQuad>,
+    list_markers: Vec<ListMarkerSnapshot>,
+    task_marker_hitboxes: Vec<TaskMarkerHitbox>,
     code_backgrounds: Vec<PaintQuad>,
     cursor: Option<PaintQuad>,
     selections: Vec<PaintQuad>,
+}
+
+enum ListMarkerSnapshot {
+    Text(TextListMarkerSnapshot),
+    Checkbox(CheckboxMarkerSnapshot),
+}
+
+struct TextListMarkerSnapshot {
+    layout: ShapedLine,
+    origin: gpui::Point<Pixels>,
+    height: Pixels,
+    bounds: Bounds<Pixels>,
+}
+
+struct CheckboxMarkerSnapshot {
+    box_quad: PaintQuad,
+    check_layout: Option<ShapedLine>,
+    check_origin: gpui::Point<Pixels>,
+    check_height: Pixels,
+    bounds: Bounds<Pixels>,
+}
+
+impl ListMarkerSnapshot {
+    fn bounds(&self) -> Bounds<Pixels> {
+        match self {
+            Self::Text(marker) => marker.bounds,
+            Self::Checkbox(marker) => marker.bounds,
+        }
+    }
+
+    fn paint(&self, window: &mut Window, cx: &mut App) {
+        match self {
+            Self::Text(marker) => {
+                marker
+                    .layout
+                    .paint(marker.origin, marker.height, window, cx)
+                    .ok();
+            }
+            Self::Checkbox(marker) => {
+                window.paint_quad(marker.box_quad.clone());
+                if let Some(check_layout) = &marker.check_layout {
+                    check_layout
+                        .paint(marker.check_origin, marker.check_height, window, cx)
+                        .ok();
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct HiddenListMarkerGeometry {
+    content_offset_width: Pixels,
+    marker_bounds: Bounds<Pixels>,
+}
+
+#[derive(Clone, Copy)]
+struct TaskMarkerHitbox {
+    bounds: Bounds<Pixels>,
+    marker_range: TextRange,
+    state: MarkdownTaskState,
 }
 
 #[derive(Clone, Copy)]
@@ -1205,6 +1461,7 @@ struct LinePresentation {
     line_height: f32,
     is_heading: bool,
     is_blockquote: bool,
+    is_checked_task: bool,
     text_indent: f32,
 }
 
@@ -1265,6 +1522,8 @@ impl Element for EditorElement {
         let mut lines = Vec::new();
         let mut blockquote_bar_runs = Vec::new();
         let mut blockquote_bar_run = None;
+        let mut list_markers = Vec::new();
+        let mut task_marker_hitboxes = Vec::new();
         let mut code_backgrounds = Vec::new();
         let mut top = 0.0;
 
@@ -1276,6 +1535,20 @@ impl Element for EditorElement {
         for line in projection.lines() {
             let presentation = line_presentation(line.kind);
             let visible_segments = line.visible_segments_revealing_source_in(Some(selection));
+            let list_marker_geometry = hidden_list_marker_geometry(
+                line.kind,
+                line.source,
+                line.range,
+                line.marker_range,
+                &visible_segments,
+                Bounds::new(
+                    point(bounds.left(), bounds.top() + px(top)),
+                    size(bounds.size.width, px(presentation.line_height)),
+                ),
+                presentation,
+                &text_style,
+                window,
+            );
             let line_text: SharedString = visible_text_from_segments(&visible_segments).into();
             let runs = line_text_runs(&visible_segments, presentation, &text_style);
             let layout =
@@ -1288,7 +1561,10 @@ impl Element for EditorElement {
             );
             let line_bounds = Bounds::new(
                 point(
-                    bounds.left() + px(presentation.text_indent),
+                    bounds.left()
+                        + px(presentation.text_indent)
+                        + list_marker_geometry
+                            .map_or(px(0.0), |geometry| geometry.content_offset_width),
                     bounds.top() + px(top),
                 ),
                 size(bounds.size.width, px(presentation.line_height)),
@@ -1299,6 +1575,29 @@ impl Element for EditorElement {
                 container_bounds,
                 presentation.is_blockquote,
             );
+            if let MarkdownLine::ListItem { marker, task } = line.kind
+                && !line_marker_is_revealed(&visible_segments)
+            {
+                let marker_snapshot = list_marker_snapshot(
+                    marker,
+                    task,
+                    list_marker_geometry
+                        .map_or(container_bounds, |geometry| geometry.marker_bounds),
+                    presentation,
+                    &text_style,
+                    window,
+                );
+                if let Some(state) = task
+                    && let Some(marker_range) = line.marker_range
+                {
+                    task_marker_hitboxes.push(TaskMarkerHitbox {
+                        bounds: marker_snapshot.bounds(),
+                        marker_range,
+                        state,
+                    });
+                }
+                list_markers.push(marker_snapshot);
+            }
             code_backgrounds.extend(code_background_quads(
                 &visible_segments,
                 &layout,
@@ -1311,6 +1610,7 @@ impl Element for EditorElement {
 
             lines.push(LineSnapshot {
                 range: line.range,
+                marker_range: line.marker_range,
                 visible_len,
                 segments: visible_segments.into_iter().map(Into::into).collect(),
                 layout,
@@ -1333,6 +1633,8 @@ impl Element for EditorElement {
         EditorPrepaintState {
             lines,
             blockquote_bars,
+            list_markers,
+            task_marker_hitboxes,
             code_backgrounds,
             cursor,
             selections,
@@ -1358,6 +1660,10 @@ impl Element for EditorElement {
 
         for bar in prepaint.blockquote_bars.drain(..) {
             window.paint_quad(bar);
+        }
+
+        for marker in prepaint.list_markers.drain(..) {
+            marker.paint(window, cx);
         }
 
         for background in prepaint.code_backgrounds.drain(..) {
@@ -1386,8 +1692,10 @@ impl Element for EditorElement {
         }
 
         let lines = prepaint.lines.clone();
+        let task_markers = prepaint.task_marker_hitboxes.clone();
         self.editor.update(cx, |editor, _cx| {
             editor.last_lines = lines;
+            editor.last_task_markers = task_markers;
         });
     }
 }
@@ -1402,6 +1710,269 @@ fn visible_text_from_segments(segments: &[ProjectedVisibleSegment<'_>]) -> Strin
     text
 }
 
+fn line_marker_is_revealed(segments: &[ProjectedVisibleSegment<'_>]) -> bool {
+    segments
+        .iter()
+        .any(|segment| matches!(segment.kind, ProjectedSegmentKind::ListMarker))
+}
+
+fn list_marker_snapshot(
+    marker: MarkdownListMarker,
+    task: Option<MarkdownTaskState>,
+    bounds: Bounds<Pixels>,
+    presentation: LinePresentation,
+    text_style: &TextStyle,
+    window: &mut Window,
+) -> ListMarkerSnapshot {
+    if let Some(task) = task {
+        return checkbox_marker_snapshot(task, bounds, text_style, window);
+    }
+
+    let marker_text: SharedString = list_marker_preview_text(marker, task).into();
+    let mut font = text_style.font();
+    font.weight = FontWeight::BOLD;
+    let runs = vec![TextRun {
+        len: marker_text.len(),
+        font,
+        color: rgb(0x5f6267).into(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    }];
+    let layout = window.text_system().shape_line(
+        marker_text,
+        px(list_marker_font_size(marker, task, presentation)),
+        &runs,
+        None,
+    );
+    let marker_left = if matches!(marker, MarkdownListMarker::Unordered { .. }) {
+        bounds.left() + ((bounds.right() - bounds.left() - layout.width) / 2.0).max(px(0.0))
+    } else {
+        bounds.left()
+    };
+    let origin = point(marker_left, bounds.top());
+
+    ListMarkerSnapshot::Text(TextListMarkerSnapshot {
+        layout,
+        origin,
+        height: px(presentation.line_height),
+        bounds,
+    })
+}
+
+fn checkbox_marker_snapshot(
+    task: MarkdownTaskState,
+    bounds: Bounds<Pixels>,
+    text_style: &TextStyle,
+    window: &mut Window,
+) -> ListMarkerSnapshot {
+    let box_size = px(CHECKBOX_BOX_SIZE);
+    let line_height = bounds.bottom() - bounds.top();
+    let bounds_width = bounds.right() - bounds.left();
+    let box_left = bounds.left() + ((bounds_width - box_size) / 2.0).max(px(0.0));
+    let box_top = bounds.top() + (line_height - box_size) / 2.0;
+    let box_bounds = Bounds::new(point(box_left, box_top), size(box_size, box_size));
+    let checked = matches!(task, MarkdownTaskState::Checked);
+    let box_quad = quad(
+        box_bounds,
+        px(3.0),
+        if checked {
+            rgb(0x25231f)
+        } else {
+            rgb(0xfffefb)
+        },
+        px(1.4),
+        rgb(0x25231f),
+        BorderStyle::Solid,
+    );
+    let (check_layout, check_origin) = if checked {
+        let check_text: SharedString = "\u{2713}".into();
+        let mut font = text_style.font();
+        font.weight = FontWeight::BOLD;
+        let runs = vec![TextRun {
+            len: check_text.len(),
+            font,
+            color: rgb(0xfffefb).into(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        }];
+        let layout =
+            window
+                .text_system()
+                .shape_line(check_text, px(CHECKBOX_CHECK_FONT_SIZE), &runs, None);
+        let origin = point(
+            box_bounds.left() + (box_size - layout.width) / 2.0,
+            box_bounds.top(),
+        );
+
+        (Some(layout), origin)
+    } else {
+        (None, box_bounds.origin)
+    };
+
+    ListMarkerSnapshot::Checkbox(CheckboxMarkerSnapshot {
+        box_quad,
+        check_layout,
+        check_origin,
+        check_height: box_size,
+        bounds,
+    })
+}
+
+fn hidden_list_marker_geometry(
+    line_kind: MarkdownLine,
+    line_source: &str,
+    line_range: TextRange,
+    marker_range: Option<TextRange>,
+    visible_segments: &[ProjectedVisibleSegment<'_>],
+    container_bounds: Bounds<Pixels>,
+    presentation: LinePresentation,
+    text_style: &TextStyle,
+    window: &mut Window,
+) -> Option<HiddenListMarkerGeometry> {
+    if !matches!(line_kind, MarkdownLine::ListItem { .. })
+        || line_marker_is_revealed(visible_segments)
+    {
+        return None;
+    }
+
+    let line_kind = match line_kind {
+        MarkdownLine::ListItem { marker, task } => MarkdownLine::ListItem { marker, task },
+        _ => return None,
+    };
+    let marker_range = marker_range?;
+    let marker_source = line_source
+        .get(marker_range.start - line_range.start..marker_range.end - line_range.start)?;
+    let indent_len = list_marker_indent_len(marker_source);
+    let content_marker_source = hidden_list_content_marker_source(marker_source, line_kind);
+    let marker_cell_width = text_width(
+        content_marker_source,
+        presentation.font_size,
+        text_style,
+        window,
+    );
+    let content_offset_width = marker_cell_width + px(hidden_list_content_extra_gap(line_kind));
+    let indent_width = text_width(
+        &marker_source[..indent_len],
+        presentation.font_size,
+        text_style,
+        window,
+    );
+    let marker_bounds = Bounds::new(
+        point(
+            container_bounds.left() + px(presentation.text_indent) + indent_width,
+            container_bounds.top(),
+        ),
+        size(
+            marker_cell_width - indent_width,
+            px(presentation.line_height),
+        ),
+    );
+
+    Some(HiddenListMarkerGeometry {
+        content_offset_width,
+        marker_bounds,
+    })
+}
+
+fn list_marker_indent_len(source: &str) -> usize {
+    source.bytes().take_while(|byte| *byte == b' ').count()
+}
+
+fn hidden_list_content_marker_source(source: &str, line_kind: MarkdownLine) -> &str {
+    if !matches!(line_kind, MarkdownLine::ListItem { task: Some(_), .. }) {
+        return source;
+    }
+
+    &source[..task_list_base_marker_end(source)]
+}
+
+fn hidden_list_content_extra_gap(line_kind: MarkdownLine) -> f32 {
+    if matches!(line_kind, MarkdownLine::ListItem { task: Some(_), .. }) {
+        CHECKBOX_CONTENT_GAP
+    } else {
+        0.0
+    }
+}
+
+fn task_list_base_marker_end(source: &str) -> usize {
+    let bytes = source.as_bytes();
+    let indent_len = list_marker_indent_len(source);
+    let marker_end = match bytes.get(indent_len) {
+        Some(b'-' | b'*' | b'+') => indent_len + 1,
+        Some(byte) if byte.is_ascii_digit() => {
+            let digit_len = bytes[indent_len..]
+                .iter()
+                .take_while(|byte| byte.is_ascii_digit())
+                .count();
+            indent_len + digit_len + 1
+        }
+        _ => return indent_len,
+    };
+    let padding = bytes[marker_end..]
+        .iter()
+        .take_while(|byte| matches!(byte, b' ' | b'\t'))
+        .count();
+
+    marker_end + padding
+}
+
+fn text_width(source: &str, font_size: f32, text_style: &TextStyle, window: &mut Window) -> Pixels {
+    if source.is_empty() {
+        return px(0.0);
+    }
+
+    let text: SharedString = source.to_string().into();
+    let runs = vec![TextRun {
+        len: text.len(),
+        font: text_style.font(),
+        color: rgb(0x25231f).into(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    }];
+
+    window
+        .text_system()
+        .shape_line(text, px(font_size), &runs, None)
+        .width
+}
+
+fn list_marker_font_size(
+    marker: MarkdownListMarker,
+    task: Option<MarkdownTaskState>,
+    presentation: LinePresentation,
+) -> f32 {
+    if task.is_some() {
+        CHECKBOX_MARKER_FONT_SIZE
+    } else if matches!(marker, MarkdownListMarker::Unordered { .. }) {
+        LIST_BULLET_FONT_SIZE
+    } else {
+        presentation.font_size
+    }
+}
+
+fn list_marker_preview_text(marker: MarkdownListMarker, task: Option<MarkdownTaskState>) -> String {
+    if let Some(task) = task {
+        return task_marker_preview_text(task).to_string();
+    }
+
+    match marker {
+        MarkdownListMarker::Unordered { .. } => "\u{2022}".to_string(),
+        MarkdownListMarker::Ordered { number, delimiter } => {
+            format!("{number}{}", ordered_list_delimiter(delimiter))
+        }
+    }
+}
+
+fn task_marker_preview_text(task: MarkdownTaskState) -> &'static str {
+    match task {
+        MarkdownTaskState::Unchecked => "\u{2610}",
+        MarkdownTaskState::Checked => "\u{2611}",
+    }
+}
+
 fn line_text_runs(
     segments: &[ProjectedVisibleSegment<'_>],
     presentation: LinePresentation,
@@ -1413,13 +1984,13 @@ fn line_text_runs(
         let style = match segment.kind {
             ProjectedSegmentKind::StrongContent => InlineRunStyle::Strong,
             ProjectedSegmentKind::EmphasisContent => InlineRunStyle::Emphasis,
-            ProjectedSegmentKind::CodeMarker | ProjectedSegmentKind::CodeContent => {
-                InlineRunStyle::Code
-            }
-            ProjectedSegmentKind::Text
-            | ProjectedSegmentKind::BlockquoteMarker
+            ProjectedSegmentKind::CodeContent => InlineRunStyle::Code,
+            ProjectedSegmentKind::BlockquoteMarker
+            | ProjectedSegmentKind::ListMarker
             | ProjectedSegmentKind::StrongMarker
-            | ProjectedSegmentKind::EmphasisMarker => InlineRunStyle::Plain,
+            | ProjectedSegmentKind::EmphasisMarker
+            | ProjectedSegmentKind::CodeMarker => InlineRunStyle::Marker,
+            ProjectedSegmentKind::Text => InlineRunStyle::Plain,
         };
 
         push_text_run(
@@ -1437,6 +2008,7 @@ fn line_text_runs(
 #[derive(Clone, Copy)]
 enum InlineRunStyle {
     Plain,
+    Marker,
     Strong,
     Emphasis,
     Code,
@@ -1468,6 +2040,8 @@ fn push_text_run(
         rgb(0x1f3f5b).into()
     } else if presentation.is_blockquote {
         rgb(0x5f6267).into()
+    } else if presentation.is_checked_task && !matches!(style, InlineRunStyle::Marker) {
+        rgb(0x8f8a82).into()
     } else {
         text_style.color
     };
@@ -1507,6 +2081,7 @@ fn code_background_ranges(segments: &[ProjectedVisibleSegment<'_>]) -> Vec<TextR
             }
             ProjectedSegmentKind::Text
             | ProjectedSegmentKind::BlockquoteMarker
+            | ProjectedSegmentKind::ListMarker
             | ProjectedSegmentKind::StrongMarker
             | ProjectedSegmentKind::StrongContent
             | ProjectedSegmentKind::EmphasisMarker
@@ -1628,6 +2203,7 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
                 line_height: font_size + 12.0,
                 is_heading: true,
                 is_blockquote: false,
+                is_checked_task: false,
                 text_indent: 0.0,
             }
         }
@@ -1636,13 +2212,23 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
             line_height: LINE_HEIGHT,
             is_heading: false,
             is_blockquote: true,
+            is_checked_task: false,
             text_indent: 18.0,
+        },
+        MarkdownLine::ListItem { task, .. } => LinePresentation {
+            font_size: FONT_SIZE,
+            line_height: LINE_HEIGHT,
+            is_heading: false,
+            is_blockquote: false,
+            is_checked_task: matches!(task, Some(MarkdownTaskState::Checked)),
+            text_indent: 0.0,
         },
         MarkdownLine::Blank | MarkdownLine::Paragraph => LinePresentation {
             font_size: FONT_SIZE,
             line_height: LINE_HEIGHT,
             is_heading: false,
             is_blockquote: false,
+            is_checked_task: false,
             text_indent: 0.0,
         },
     }
@@ -1833,7 +2419,189 @@ mod tests {
         assert!(presentation.is_blockquote);
         assert_eq!(presentation.font_size, FONT_SIZE);
         assert_eq!(presentation.line_height, LINE_HEIGHT);
+        assert!(!presentation.is_checked_task);
         assert!(presentation.text_indent > 0.0);
+    }
+
+    #[test]
+    fn list_lines_align_content_with_plain_text() {
+        let presentation = line_presentation(MarkdownLine::ListItem {
+            marker: MarkdownListMarker::Unordered { marker: '-' },
+            task: None,
+        });
+
+        assert!(!presentation.is_heading);
+        assert!(!presentation.is_blockquote);
+        assert_eq!(presentation.font_size, FONT_SIZE);
+        assert_eq!(presentation.line_height, LINE_HEIGHT);
+        assert!(!presentation.is_checked_task);
+        assert_eq!(presentation.text_indent, 0.0);
+    }
+
+    #[test]
+    fn checked_task_content_uses_dim_text_color() {
+        let document = Document::new("- [x] Done");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let presentation = line_presentation(line.kind);
+        let runs = line_text_runs(
+            &line.visible_segments(),
+            presentation,
+            &TextStyle::default(),
+        );
+
+        assert!(presentation.is_checked_task);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].color, rgb(0x8f8a82).into());
+    }
+
+    #[test]
+    fn list_marker_preview_text_uses_visual_markers() {
+        assert_eq!(
+            list_marker_preview_text(MarkdownListMarker::Unordered { marker: '-' }, None),
+            "\u{2022}"
+        );
+        assert_eq!(
+            list_marker_preview_text(
+                MarkdownListMarker::Ordered {
+                    number: 3,
+                    delimiter: OrderedListDelimiter::Dot,
+                },
+                None
+            ),
+            "3."
+        );
+        assert_eq!(
+            list_marker_preview_text(
+                MarkdownListMarker::Ordered {
+                    number: 3,
+                    delimiter: OrderedListDelimiter::Paren,
+                },
+                None
+            ),
+            "3)"
+        );
+    }
+
+    #[test]
+    fn unordered_bullet_marker_uses_smaller_preview_font() {
+        let presentation = line_presentation(MarkdownLine::ListItem {
+            marker: MarkdownListMarker::Unordered { marker: '-' },
+            task: None,
+        });
+
+        assert_eq!(
+            list_marker_font_size(
+                MarkdownListMarker::Unordered { marker: '-' },
+                None,
+                presentation
+            ),
+            LIST_BULLET_FONT_SIZE
+        );
+        assert_eq!(
+            list_marker_font_size(
+                MarkdownListMarker::Ordered {
+                    number: 1,
+                    delimiter: OrderedListDelimiter::Dot,
+                },
+                None,
+                presentation
+            ),
+            FONT_SIZE
+        );
+        assert_eq!(
+            list_marker_font_size(
+                MarkdownListMarker::Unordered { marker: '-' },
+                Some(MarkdownTaskState::Unchecked),
+                presentation
+            ),
+            CHECKBOX_MARKER_FONT_SIZE
+        );
+    }
+
+    #[test]
+    fn task_list_marker_preview_text_uses_checkbox_markers() {
+        assert_eq!(
+            list_marker_preview_text(
+                MarkdownListMarker::Unordered { marker: '-' },
+                Some(MarkdownTaskState::Unchecked)
+            ),
+            "\u{2610}"
+        );
+        assert_eq!(
+            list_marker_preview_text(
+                MarkdownListMarker::Unordered { marker: '-' },
+                Some(MarkdownTaskState::Checked)
+            ),
+            "\u{2611}"
+        );
+    }
+
+    #[test]
+    fn hidden_task_list_content_uses_base_marker_width() {
+        assert_eq!(
+            hidden_list_content_marker_source(
+                "- [ ] ",
+                MarkdownLine::ListItem {
+                    marker: MarkdownListMarker::Unordered { marker: '-' },
+                    task: Some(MarkdownTaskState::Unchecked),
+                },
+            ),
+            "- "
+        );
+        assert_eq!(
+            hidden_list_content_marker_source(
+                "  -   [x] ",
+                MarkdownLine::ListItem {
+                    marker: MarkdownListMarker::Unordered { marker: '-' },
+                    task: Some(MarkdownTaskState::Checked),
+                },
+            ),
+            "  -   "
+        );
+        assert_eq!(
+            hidden_list_content_marker_source(
+                "12. [ ] ",
+                MarkdownLine::ListItem {
+                    marker: MarkdownListMarker::Ordered {
+                        number: 12,
+                        delimiter: OrderedListDelimiter::Dot,
+                    },
+                    task: Some(MarkdownTaskState::Unchecked),
+                },
+            ),
+            "12. "
+        );
+    }
+
+    #[test]
+    fn hidden_task_list_content_adds_checkbox_gap() {
+        assert_eq!(
+            hidden_list_content_extra_gap(MarkdownLine::ListItem {
+                marker: MarkdownListMarker::Unordered { marker: '-' },
+                task: Some(MarkdownTaskState::Unchecked),
+            }),
+            CHECKBOX_CONTENT_GAP
+        );
+        assert_eq!(
+            hidden_list_content_extra_gap(MarkdownLine::ListItem {
+                marker: MarkdownListMarker::Unordered { marker: '-' },
+                task: None,
+            }),
+            0.0
+        );
+    }
+
+    #[test]
+    fn revealed_list_source_counts_as_line_marker() {
+        let document = Document::new("- Item");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert!(!line_marker_is_revealed(&line.visible_segments()));
+        assert!(line_marker_is_revealed(
+            &line.visible_segments_revealing_source_in(Some(TextRange::caret(1)))
+        ));
     }
 
     #[test]
@@ -2107,6 +2875,74 @@ mod tests {
     }
 
     #[test]
+    fn unordered_list_newline_continues_marker() {
+        assert_eq!(
+            list_newline_edit_for_line("- Item", TextRange::new(0, 6), &(6..6)),
+            Some((6..6, "\n- ".to_string(), 9..9))
+        );
+        assert_eq!(
+            list_newline_edit_for_line("  + Item", TextRange::new(0, 8), &(8..8)),
+            Some((8..8, "\n  + ".to_string(), 13..13))
+        );
+    }
+
+    #[test]
+    fn ordered_list_newline_increments_marker() {
+        assert_eq!(
+            list_newline_edit_for_line("1. Item", TextRange::new(0, 7), &(7..7)),
+            Some((7..7, "\n2. ".to_string(), 11..11))
+        );
+        assert_eq!(
+            list_newline_edit_for_line("9) Item", TextRange::new(0, 7), &(7..7)),
+            Some((7..7, "\n10) ".to_string(), 12..12))
+        );
+    }
+
+    #[test]
+    fn task_list_newline_continues_unchecked_marker() {
+        assert_eq!(
+            list_newline_edit_for_line("- [ ] Task", TextRange::new(0, 10), &(10..10)),
+            Some((10..10, "\n- [ ] ".to_string(), 17..17))
+        );
+        assert_eq!(
+            list_newline_edit_for_line("- [x] Done", TextRange::new(0, 10), &(10..10)),
+            Some((10..10, "\n- [ ] ".to_string(), 17..17))
+        );
+        assert_eq!(
+            list_newline_edit_for_line("1. [X] Done", TextRange::new(0, 11), &(11..11)),
+            Some((11..11, "\n2. [ ] ".to_string(), 19..19))
+        );
+    }
+
+    #[test]
+    fn list_newline_exits_empty_item() {
+        assert_eq!(
+            list_newline_edit_for_line("- ", TextRange::new(8, 10), &(10..10)),
+            Some((8..10, String::new(), 8..8))
+        );
+        assert_eq!(
+            list_newline_edit_for_line("2.    ", TextRange::new(0, 6), &(6..6)),
+            Some((0..6, String::new(), 0..0))
+        );
+        assert_eq!(
+            list_newline_edit_for_line("- [ ] ", TextRange::new(0, 6), &(6..6)),
+            Some((0..6, String::new(), 0..0))
+        );
+    }
+
+    #[test]
+    fn list_newline_ignores_plain_lines_and_selections() {
+        assert_eq!(
+            list_newline_edit_for_line("Item", TextRange::new(0, 4), &(4..4)),
+            None
+        );
+        assert_eq!(
+            list_newline_edit_for_line("- Item", TextRange::new(0, 6), &(2..6)),
+            None
+        );
+    }
+
+    #[test]
     fn drag_selection_starts_only_after_pointer_moves_past_threshold() {
         let origin = point(px(10.0), px(10.0));
 
@@ -2118,6 +2954,78 @@ mod tests {
             origin,
             point(px(12.1), px(10.0))
         ));
+    }
+
+    #[test]
+    fn left_gutter_click_targets_content_start() {
+        assert_eq!(
+            line_marker_hit_offset(
+                px(34.0),
+                Some(TextRange::new(8, 10)),
+                px(33.0),
+                MarkerHitMode::ContentStart
+            ),
+            Some(10)
+        );
+        assert_eq!(
+            line_marker_hit_offset(
+                px(34.0),
+                Some(TextRange::new(8, 10)),
+                px(34.0),
+                MarkerHitMode::ContentStart
+            ),
+            None
+        );
+        assert_eq!(
+            line_marker_hit_offset(px(34.0), None, px(33.0), MarkerHitMode::ContentStart),
+            None
+        );
+    }
+
+    #[test]
+    fn left_gutter_drag_targets_line_marker_start() {
+        assert_eq!(
+            line_marker_hit_offset(
+                px(34.0),
+                Some(TextRange::new(8, 10)),
+                px(33.0),
+                MarkerHitMode::MarkerStart
+            ),
+            Some(8)
+        );
+        assert_eq!(
+            line_marker_hit_offset(
+                px(34.0),
+                Some(TextRange::new(8, 10)),
+                px(34.0),
+                MarkerHitMode::MarkerStart
+            ),
+            None
+        );
+        assert_eq!(
+            line_marker_hit_offset(px(34.0), None, px(33.0), MarkerHitMode::MarkerStart),
+            None
+        );
+    }
+
+    #[test]
+    fn task_marker_state_char_range_targets_checkbox_state() {
+        assert_eq!(
+            task_marker_state_char_range("- [ ] Task", TextRange::new(0, 6)),
+            Some(3..4)
+        );
+        assert_eq!(
+            task_marker_state_char_range("- [x] Task", TextRange::new(0, 6)),
+            Some(3..4)
+        );
+        assert_eq!(
+            task_marker_state_char_range("1. [X] Task", TextRange::new(0, 7)),
+            Some(4..5)
+        );
+        assert_eq!(
+            task_marker_state_char_range("- Item", TextRange::new(0, 2)),
+            None
+        );
     }
 
     fn visible_selection_text(source: &str, selection: TextRange) -> String {
@@ -2201,6 +3109,7 @@ fn main() {
                             session: session.take().expect("initial session was already opened"),
                             marked_range: None,
                             last_lines: Vec::new(),
+                            last_task_markers: Vec::new(),
                             preferred_column: None,
                             selection_anchor: None,
                             selection_head: None,

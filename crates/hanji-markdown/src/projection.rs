@@ -1,6 +1,6 @@
 use hanji_core::{Document, TextRange};
 
-use crate::{MarkdownLine, blockquote_content_start, classify_line};
+use crate::{MarkdownLine, blockquote_content_start, classify_line, list_item_content_start};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarkdownProjection<'a> {
@@ -17,6 +17,7 @@ impl<'a> MarkdownProjection<'a> {
 pub enum ProjectedSegmentKind {
     Text,
     BlockquoteMarker,
+    ListMarker,
     StrongMarker,
     StrongContent,
     EmphasisMarker,
@@ -110,6 +111,19 @@ impl<'a> ProjectedLine<'a> {
     ) -> Vec<ProjectedVisibleSegment<'a>> {
         let mut segments = Vec::new();
         let mut visible_start = 0;
+        let reveal_marker = self.should_reveal_marker(reveal_range);
+
+        if reveal_marker && let Some(marker_range) = self.marker_range {
+            push_visible_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                &mut visible_start,
+                marker_range,
+                marker_range,
+                block_marker_kind(self.kind),
+            );
+        }
 
         for (index, inline) in self.inlines.iter().enumerate() {
             if reveal_range.is_some_and(|range| should_reveal_inline(inline.source_range, range)) {
@@ -127,7 +141,7 @@ impl<'a> ProjectedLine<'a> {
                     self.range.start,
                     &mut visible_start,
                     inline,
-                    self.hidden_source_outer_range(index, inline),
+                    self.hidden_source_outer_range(index, inline, reveal_marker),
                 );
             }
         }
@@ -219,7 +233,7 @@ impl<'a> ProjectedLine<'a> {
                 self.source,
                 self.range.start,
                 marker_range,
-                ProjectedSegmentKind::BlockquoteMarker,
+                block_marker_kind(self.kind),
             );
         }
 
@@ -313,14 +327,24 @@ impl<'a> ProjectedLine<'a> {
         &self,
         inline_index: usize,
         inline: &ProjectedInline<'_>,
+        marker_revealed: bool,
     ) -> TextRange {
-        if inline_index == 0
+        if !marker_revealed
+            && inline_index == 0
             && let Some(marker_range) = self.marker_range
         {
             return TextRange::new(marker_range.start, inline.source_range.end);
         }
 
         inline.source_range
+    }
+
+    fn should_reveal_marker(&self, reveal_range: Option<TextRange>) -> bool {
+        let Some(marker_range) = self.marker_range else {
+            return false;
+        };
+
+        reveal_range.is_some_and(|range| should_reveal_line_marker(marker_range, range))
     }
 }
 
@@ -389,6 +413,14 @@ fn should_reveal_inline(inline_range: TextRange, reveal_range: TextRange) -> boo
     }
 }
 
+fn should_reveal_line_marker(marker_range: TextRange, reveal_range: TextRange) -> bool {
+    if reveal_range.is_empty() {
+        reveal_range.start >= marker_range.start && reveal_range.start < marker_range.end
+    } else {
+        reveal_range.start < marker_range.end && reveal_range.end > marker_range.start
+    }
+}
+
 pub fn project_document(document: &Document) -> MarkdownProjection<'_> {
     let mut lines = Vec::new();
 
@@ -400,6 +432,7 @@ pub fn project_document(document: &Document) -> MarkdownProjection<'_> {
         let kind = classify_line(source);
         let content_start = match kind {
             MarkdownLine::Blockquote => blockquote_content_start(source).unwrap_or(0),
+            MarkdownLine::ListItem { .. } => list_item_content_start(source).unwrap_or(0),
             MarkdownLine::Blank | MarkdownLine::Paragraph | MarkdownLine::Heading { .. } => 0,
         };
         let marker_range =
@@ -415,6 +448,16 @@ pub fn project_document(document: &Document) -> MarkdownProjection<'_> {
     }
 
     MarkdownProjection { lines }
+}
+
+fn block_marker_kind(kind: MarkdownLine) -> ProjectedSegmentKind {
+    match kind {
+        MarkdownLine::Blockquote => ProjectedSegmentKind::BlockquoteMarker,
+        MarkdownLine::ListItem { .. } => ProjectedSegmentKind::ListMarker,
+        MarkdownLine::Blank | MarkdownLine::Paragraph | MarkdownLine::Heading { .. } => {
+            ProjectedSegmentKind::Text
+        }
+    }
 }
 
 fn push_segment<'a>(
@@ -982,6 +1025,169 @@ mod tests {
         assert_eq!(line.visible_text(), "Quote");
         assert_eq!(line.marker_range, Some(TextRange::new(0, 5)));
         assert_eq!(line.visible_to_source_caret_offset(0), 5);
+    }
+
+    #[test]
+    fn hides_unordered_list_markers_from_visible_text() {
+        let document = Document::new("- Item");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(
+            line.kind,
+            MarkdownLine::ListItem {
+                marker: crate::MarkdownListMarker::Unordered { marker: '-' },
+                task: None,
+            }
+        );
+        assert_eq!(line.visible_text(), "Item");
+        assert_eq!(line.marker_range, Some(TextRange::new(0, 2)));
+        assert_eq!(
+            line.source_visible_segments()[0],
+            ProjectedSegment {
+                range: TextRange::new(0, 2),
+                source: "- ",
+                kind: ProjectedSegmentKind::ListMarker,
+            }
+        );
+        assert_eq!(
+            line.visible_segments(),
+            vec![ProjectedVisibleSegment {
+                visible_range: TextRange::new(0, 4),
+                source_range: TextRange::new(2, 6),
+                source_outer_range: TextRange::new(0, 6),
+                source: "Item",
+                kind: ProjectedSegmentKind::Text,
+            }]
+        );
+        assert_eq!(line.visible_to_source_caret_offset(0), 2);
+    }
+
+    #[test]
+    fn caret_inside_list_marker_reveals_marker_source() {
+        let document = Document::new("- Item");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::caret(1))),
+            "- Item"
+        );
+        assert_eq!(
+            line.visible_segments_revealing_source_in(Some(TextRange::caret(1))),
+            vec![
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(0, 2),
+                    source_range: TextRange::new(0, 2),
+                    source_outer_range: TextRange::new(0, 2),
+                    source: "- ",
+                    kind: ProjectedSegmentKind::ListMarker,
+                },
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(2, 6),
+                    source_range: TextRange::new(2, 6),
+                    source_outer_range: TextRange::new(2, 6),
+                    source: "Item",
+                    kind: ProjectedSegmentKind::Text,
+                },
+            ]
+        );
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::caret(2))),
+            "Item"
+        );
+    }
+
+    #[test]
+    fn selection_over_list_marker_reveals_marker_source() {
+        let document = Document::new("- Item");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::new(1, 4))),
+            "- Item"
+        );
+    }
+
+    #[test]
+    fn hides_ordered_list_markers_from_visible_text() {
+        let document = Document::new("12. Item");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(
+            line.kind,
+            MarkdownLine::ListItem {
+                marker: crate::MarkdownListMarker::Ordered {
+                    number: 12,
+                    delimiter: crate::OrderedListDelimiter::Dot,
+                },
+                task: None,
+            }
+        );
+        assert_eq!(line.visible_text(), "Item");
+        assert_eq!(line.marker_range, Some(TextRange::new(0, 4)));
+        assert_eq!(line.visible_to_source_caret_offset(0), 4);
+    }
+
+    #[test]
+    fn hides_task_list_markers_from_visible_text() {
+        let document = Document::new("- [x] Done");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(
+            line.kind,
+            MarkdownLine::ListItem {
+                marker: crate::MarkdownListMarker::Unordered { marker: '-' },
+                task: Some(crate::MarkdownTaskState::Checked),
+            }
+        );
+        assert_eq!(line.visible_text(), "Done");
+        assert_eq!(line.marker_range, Some(TextRange::new(0, 6)));
+        assert_eq!(
+            line.source_visible_segments()[0],
+            ProjectedSegment {
+                range: TextRange::new(0, 6),
+                source: "- [x] ",
+                kind: ProjectedSegmentKind::ListMarker,
+            }
+        );
+        assert_eq!(
+            line.visible_segments(),
+            vec![ProjectedVisibleSegment {
+                visible_range: TextRange::new(0, 4),
+                source_range: TextRange::new(6, 10),
+                source_outer_range: TextRange::new(0, 10),
+                source: "Done",
+                kind: ProjectedSegmentKind::Text,
+            }]
+        );
+        assert_eq!(line.visible_to_source_caret_offset(0), 6);
+    }
+
+    #[test]
+    fn keeps_pending_task_marker_source_visible_until_padding() {
+        let document = Document::new("- [ ]");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.kind, MarkdownLine::Paragraph);
+        assert_eq!(line.marker_range, None);
+        assert_eq!(line.visible_text(), "- [ ]");
+    }
+
+    #[test]
+    fn caret_inside_task_list_marker_reveals_marker_source() {
+        let document = Document::new("- [x] Done");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::caret(5))),
+            "- [x] Done"
+        );
     }
 
     #[test]
