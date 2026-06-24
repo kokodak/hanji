@@ -8,12 +8,12 @@ Design notes should describe durable concepts before implementation details. Whe
 
 - [Editor Core](editor-core.md)
 - [Document Model](document-model.md)
+- [Source-Backed WYSIWYG](source-backed-wysiwyg.md)
 
 ## Future Notes
 
 - Selection model
 - Command model
 - Undo and transaction history
-- Markdown source mapping
 - Block widgets
 - Plugin capabilities
