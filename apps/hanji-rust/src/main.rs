@@ -32,6 +32,7 @@ actions!(
         End,
         Newline,
         ToggleStrong,
+        ToggleCode,
         Undo,
         Redo,
         Save,
@@ -145,11 +146,36 @@ impl Hanji {
     }
 
     fn toggle_strong(&mut self, _: &ToggleStrong, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_markdown_command(
+            MarkdownCommand::ToggleStrong,
+            "Could not toggle strong text.",
+            window,
+            cx,
+        );
+    }
+
+    fn toggle_code(&mut self, _: &ToggleCode, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_markdown_command(
+            MarkdownCommand::ToggleCode,
+            "Could not toggle code text.",
+            window,
+            cx,
+        );
+    }
+
+    fn apply_markdown_command(
+        &mut self,
+        command: MarkdownCommand,
+        failure_message: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.marked_range = None;
 
-        match self.session.edit_document(|document| {
-            execute_markdown_command(document, MarkdownCommand::ToggleStrong)
-        }) {
+        match self
+            .session
+            .edit_document(|document| execute_markdown_command(document, command))
+        {
             Ok(true) => {
                 self.preferred_column = None;
                 self.document_changed(window, cx);
@@ -161,7 +187,7 @@ impl Hanji {
                 cx.notify();
             }
             Err(MarkdownCommandError::Edit(_)) => {
-                self.status_message = Some("Could not toggle strong text.".to_string());
+                self.status_message = Some(failure_message.to_string());
                 cx.notify();
             }
         }
@@ -549,6 +575,7 @@ impl Render for Hanji {
             .on_action(cx.listener(Self::end))
             .on_action(cx.listener(Self::newline))
             .on_action(cx.listener(Self::toggle_strong))
+            .on_action(cx.listener(Self::toggle_code))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
             .on_action(cx.listener(Self::save))
@@ -1020,6 +1047,7 @@ fn main() {
             KeyBinding::new("cmd-right", End, None),
             KeyBinding::new("enter", Newline, None),
             KeyBinding::new("cmd-b", ToggleStrong, None),
+            KeyBinding::new("cmd-e", ToggleCode, None),
             KeyBinding::new("cmd-z", Undo, None),
             KeyBinding::new("cmd-shift-z", Redo, None),
             KeyBinding::new("cmd-s", Save, None),

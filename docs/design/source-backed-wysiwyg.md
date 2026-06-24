@@ -79,4 +79,4 @@ Hanji should introduce marker hiding gradually:
 
 `hanji-core` owns source editing primitives such as text ranges, selections, transactions, undo, and grapheme-safe caret boundaries.
 
-`apps/hanji-rust` owns GPUI rendering, hit testing, and shortcut routing. It should consume projection data, translate platform events back into core source positions, and route formatting shortcuts through `hanji-markdown` commands instead of editing Markdown markers in renderer code.
+`apps/hanji-rust` owns GPUI rendering, hit testing, and shortcut routing. It should consume projection data, translate platform events back into core source positions, and route formatting shortcuts such as strong and inline code through `hanji-markdown` commands instead of editing Markdown markers in renderer code.

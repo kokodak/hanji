@@ -3,6 +3,7 @@ use hanji_core::{Document, EditError, Selection, TextEdit, TextRange, Transactio
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarkdownCommand {
     ToggleStrong,
+    ToggleCode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,42 +24,56 @@ pub fn execute_markdown_command(
 ) -> Result<bool, MarkdownCommandError> {
     match command {
         MarkdownCommand::ToggleStrong => toggle_strong(document),
+        MarkdownCommand::ToggleCode => toggle_code(document),
     }
 }
 
 pub fn toggle_strong(document: &mut Document) -> Result<bool, MarkdownCommandError> {
+    toggle_delimited(document, "**")
+}
+
+pub fn toggle_code(document: &mut Document) -> Result<bool, MarkdownCommandError> {
+    toggle_delimited(document, "`")
+}
+
+fn toggle_delimited(
+    document: &mut Document,
+    marker: &'static str,
+) -> Result<bool, MarkdownCommandError> {
     let range = single_selection_range(document)?;
 
     if range.is_empty() {
         return Ok(false);
     }
 
-    if let Some(unwrapped_range) = strong_range(document.text(), range) {
+    let marker_len = marker.len();
+
+    if let Some(unwrapped_range) = delimited_range(document.text(), range, marker) {
         document.apply(Transaction::new(
             vec![
                 TextEdit::replace(
-                    TextRange::new(unwrapped_range.end, unwrapped_range.end + 2),
+                    TextRange::new(unwrapped_range.end, unwrapped_range.end + marker_len),
                     "",
                 ),
                 TextEdit::replace(
-                    TextRange::new(unwrapped_range.start - 2, unwrapped_range.start),
+                    TextRange::new(unwrapped_range.start - marker_len, unwrapped_range.start),
                     "",
                 ),
             ],
             Some(Selection::single(TextRange::new(
-                unwrapped_range.start - 2,
-                unwrapped_range.end - 2,
+                unwrapped_range.start - marker_len,
+                unwrapped_range.end - marker_len,
             ))),
         ))?;
     } else {
         document.apply(Transaction::new(
             vec![
-                TextEdit::insert(range.end, "**"),
-                TextEdit::insert(range.start, "**"),
+                TextEdit::insert(range.end, marker),
+                TextEdit::insert(range.start, marker),
             ],
             Some(Selection::single(TextRange::new(
-                range.start + 2,
-                range.end + 2,
+                range.start + marker_len,
+                range.end + marker_len,
             ))),
         ))?;
     }
@@ -76,22 +91,27 @@ fn single_selection_range(document: &Document) -> Result<TextRange, MarkdownComm
     Ok(ranges[0])
 }
 
-fn strong_range(text: &str, range: TextRange) -> Option<TextRange> {
+fn delimited_range(text: &str, range: TextRange, marker: &str) -> Option<TextRange> {
     let bytes = text.as_bytes();
+    let marker = marker.as_bytes();
+    let marker_len = marker.len();
 
-    if range.start >= 2
-        && range.end + 2 <= text.len()
-        && bytes.get(range.start - 2..range.start) == Some(b"**")
-        && bytes.get(range.end..range.end + 2) == Some(b"**")
+    if range.start >= marker_len
+        && range.end + marker_len <= text.len()
+        && bytes.get(range.start - marker_len..range.start) == Some(marker)
+        && bytes.get(range.end..range.end + marker_len) == Some(marker)
     {
         return Some(range);
     }
 
-    if range.len() >= 4
-        && bytes.get(range.start..range.start + 2) == Some(b"**")
-        && bytes.get(range.end - 2..range.end) == Some(b"**")
+    if range.len() >= marker_len * 2
+        && bytes.get(range.start..range.start + marker_len) == Some(marker)
+        && bytes.get(range.end - marker_len..range.end) == Some(marker)
     {
-        return Some(TextRange::new(range.start + 2, range.end - 2));
+        return Some(TextRange::new(
+            range.start + marker_len,
+            range.end - marker_len,
+        ));
     }
 
     None
@@ -174,6 +194,103 @@ mod tests {
         execute_markdown_command(&mut document, MarkdownCommand::ToggleStrong).unwrap();
 
         assert_eq!(document.text(), "Hanji **notes**");
+    }
+
+    #[test]
+    fn toggle_code_wraps_selection() {
+        let mut document = Document::new("Use code");
+        document
+            .set_selection(Selection::single(TextRange::new(4, 8)))
+            .unwrap();
+
+        toggle_code(&mut document).unwrap();
+
+        assert_eq!(document.text(), "Use `code`");
+        assert_eq!(document.selection().primary(), TextRange::new(5, 9));
+    }
+
+    #[test]
+    fn toggle_code_unwraps_when_selection_is_inside_markers() {
+        let mut document = Document::new("Use `code`");
+        document
+            .set_selection(Selection::single(TextRange::new(5, 9)))
+            .unwrap();
+
+        toggle_code(&mut document).unwrap();
+
+        assert_eq!(document.text(), "Use code");
+        assert_eq!(document.selection().primary(), TextRange::new(4, 8));
+    }
+
+    #[test]
+    fn toggle_code_unwraps_when_selection_includes_markers() {
+        let mut document = Document::new("Use `code`");
+        document
+            .set_selection(Selection::single(TextRange::new(4, 10)))
+            .unwrap();
+
+        toggle_code(&mut document).unwrap();
+
+        assert_eq!(document.text(), "Use code");
+        assert_eq!(document.selection().primary(), TextRange::new(4, 8));
+    }
+
+    #[test]
+    fn toggle_code_handles_korean_selection() {
+        let mut document = Document::new("한지 코드");
+        document
+            .set_selection(Selection::single(TextRange::new(
+                "한지 ".len(),
+                "한지 코드".len(),
+            )))
+            .unwrap();
+
+        toggle_code(&mut document).unwrap();
+
+        assert_eq!(document.text(), "한지 `코드`");
+    }
+
+    #[test]
+    fn toggle_code_handles_emoji_selection() {
+        let text = "Flag 🇰🇷";
+        let mut document = Document::new(text);
+        let selection_start = "Flag ".len();
+        let selection_end = text.len();
+        document
+            .set_selection(Selection::single(TextRange::new(
+                selection_start,
+                selection_end,
+            )))
+            .unwrap();
+
+        toggle_code(&mut document).unwrap();
+
+        assert_eq!(document.text(), "Flag `🇰🇷`");
+        assert_eq!(
+            document.selection().primary(),
+            TextRange::new(selection_start + 1, selection_end + 1)
+        );
+    }
+
+    #[test]
+    fn toggle_code_noops_without_selection() {
+        let mut document = Document::new("Hanji");
+
+        assert!(!toggle_code(&mut document).unwrap());
+        assert_eq!(document.text(), "Hanji");
+        assert_eq!(document.selection().primary(), TextRange::caret(0));
+    }
+
+    #[test]
+    fn execute_markdown_command_dispatches_toggle_code() {
+        let mut document = Document::new("Use code");
+        document
+            .set_selection(Selection::single(TextRange::new(4, 8)))
+            .unwrap();
+
+        execute_markdown_command(&mut document, MarkdownCommand::ToggleCode).unwrap();
+
+        assert_eq!(document.text(), "Use `code`");
     }
 
     #[test]
