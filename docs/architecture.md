@@ -15,7 +15,7 @@ The Rust track should be built around small crates with clear ownership. GPUI is
 ```text
 crates/
   hanji-core/       Text buffer, selections, transactions, undo, commands
-  hanji-markdown/   Markdown parsing, source mapping, formatting helpers
+  hanji-markdown/   Markdown parsing, source mapping, projection, formatting commands
   hanji-storage/    Local spaces, files, autosave, app metadata
   hanji-plugin-api/ Future public plugin contracts
 
@@ -31,6 +31,14 @@ This structure is intentionally small. Crates can stay thin until their boundari
 - `hanji-markdown` treats Markdown text as the source of truth.
 - `hanji-storage` keeps documents visible as normal files and keeps app metadata separate.
 - `apps/hanji-rust` translates GPUI input, rendering, and window events into core commands.
+
+## Markdown Crate Boundaries
+
+`hanji-markdown` owns Markdown-specific behavior while keeping the Markdown source as the source of truth. It should not import GPUI or storage types.
+
+- `line` classifies Markdown source lines into semantic block-like roles.
+- `command` turns Markdown formatting actions into core transactions.
+- `projection` builds source-backed views for WYSIWYG rendering, preserving source ranges so the raw Markdown text remains recoverable.
 
 ## WYSIWYG Strategy
 
