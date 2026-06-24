@@ -173,91 +173,144 @@ fn project_inlines(source: &str, source_start: usize) -> Vec<ProjectedInline<'_>
     let mut text_start = 0;
     let mut search_start = 0;
 
-    while let Some(marker) = find_next_marker(source, search_start) {
-        match marker {
-            InlineMarker::Strong { start } => {
-                let content_start = start + 2;
-                let Some(closing_start) = find_strong_marker(source, content_start) else {
-                    search_start = content_start;
-                    continue;
-                };
+    while let Some(opening_start) = find_code_marker(source, search_start) {
+        let content_start = opening_start + 1;
+        let Some(closing_start) = find_code_marker(source, content_start) else {
+            search_start = content_start;
+            continue;
+        };
 
-                if closing_start == content_start {
-                    search_start = content_start;
-                    continue;
-                }
-
-                push_text_inline(&mut inlines, source, source_start, text_start, start);
-                push_strong_inline(
-                    &mut inlines,
-                    source,
-                    source_start,
-                    start,
-                    content_start,
-                    closing_start,
-                );
-
-                search_start = closing_start + 2;
-                text_start = search_start;
-            }
-            InlineMarker::Code { start } => {
-                let content_start = start + 1;
-                let Some(closing_start) = find_code_marker(source, content_start) else {
-                    search_start = content_start;
-                    continue;
-                };
-
-                if closing_start == content_start {
-                    search_start = content_start;
-                    continue;
-                }
-
-                push_text_inline(&mut inlines, source, source_start, text_start, start);
-                push_code_inline(
-                    &mut inlines,
-                    source,
-                    source_start,
-                    start,
-                    content_start,
-                    closing_start,
-                );
-
-                search_start = closing_start + 1;
-                text_start = search_start;
-            }
+        if closing_start == content_start {
+            search_start = content_start;
+            continue;
         }
+
+        push_text_with_strong_inlines(
+            &mut inlines,
+            source,
+            source_start,
+            text_start,
+            opening_start,
+        );
+        push_code_inline(
+            &mut inlines,
+            source,
+            source_start,
+            opening_start,
+            content_start,
+            closing_start,
+        );
+
+        search_start = closing_start + 1;
+        text_start = search_start;
     }
 
-    push_text_inline(&mut inlines, source, source_start, text_start, source.len());
+    push_text_with_strong_inlines(&mut inlines, source, source_start, text_start, source.len());
 
     inlines
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum InlineMarker {
-    Strong { start: usize },
-    Code { start: usize },
-}
+fn push_text_with_strong_inlines<'a>(
+    inlines: &mut Vec<ProjectedInline<'a>>,
+    source: &'a str,
+    source_start: usize,
+    start: usize,
+    end: usize,
+) {
+    let mut text_start = start;
 
-fn find_next_marker(source: &str, search_start: usize) -> Option<InlineMarker> {
-    let strong = find_strong_marker(source, search_start);
-    let code = find_code_marker(source, search_start);
-
-    match (strong, code) {
-        (Some(strong), Some(code)) if strong <= code => {
-            Some(InlineMarker::Strong { start: strong })
+    for (opening_start, closing_start) in strong_pairs(source, start, end) {
+        if opening_start < text_start {
+            continue;
         }
-        (Some(_), Some(code)) => Some(InlineMarker::Code { start: code }),
-        (Some(strong), None) => Some(InlineMarker::Strong { start: strong }),
-        (None, Some(code)) => Some(InlineMarker::Code { start: code }),
-        (None, None) => None,
+
+        push_text_inline(inlines, source, source_start, text_start, opening_start);
+        push_strong_inline(
+            inlines,
+            source,
+            source_start,
+            opening_start,
+            opening_start + 2,
+            closing_start,
+        );
+
+        text_start = closing_start + 2;
     }
+
+    push_text_inline(inlines, source, source_start, text_start, end);
 }
 
-fn find_strong_marker(source: &str, search_start: usize) -> Option<usize> {
-    source[search_start..]
-        .find("**")
-        .map(|offset| search_start + offset)
+fn strong_pairs(source: &str, start: usize, end: usize) -> Vec<(usize, usize)> {
+    let mut pairs = Vec::new();
+    let mut pending_opening = None;
+    let mut search_start = start;
+
+    while let Some(marker_start) = find_exact_strong_marker(source, search_start, end) {
+        let can_close = can_close_strong(source, marker_start);
+        let can_open = can_open_strong(source, marker_start, end);
+
+        if let Some(opening_start) = pending_opening
+            && can_close
+            && opening_start + 2 < marker_start
+        {
+            pairs.push((opening_start, marker_start));
+            pending_opening = None;
+        } else if can_open {
+            pending_opening = Some(marker_start);
+        }
+
+        search_start = marker_start + 2;
+    }
+
+    pairs
+}
+
+fn find_exact_strong_marker(source: &str, search_start: usize, end: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut cursor = search_start;
+
+    while cursor + 2 <= end {
+        if bytes[cursor] == b'*' && bytes[cursor + 1] == b'*' {
+            let starts_run = cursor == 0 || bytes[cursor - 1] != b'*';
+            let ends_run = cursor + 2 >= source.len() || bytes[cursor + 2] != b'*';
+
+            if starts_run && ends_run {
+                return Some(cursor);
+            }
+
+            while cursor < end && bytes[cursor] == b'*' {
+                cursor += 1;
+            }
+        } else {
+            cursor += 1;
+        }
+    }
+
+    None
+}
+
+fn can_open_strong(source: &str, marker_start: usize, end: usize) -> bool {
+    next_char(source, marker_start + 2, end).is_some_and(|character| !character.is_whitespace())
+}
+
+fn can_close_strong(source: &str, marker_start: usize) -> bool {
+    previous_char(source, marker_start).is_some_and(|character| !character.is_whitespace())
+}
+
+fn next_char(source: &str, start: usize, end: usize) -> Option<char> {
+    if start >= end {
+        return None;
+    }
+
+    source[start..end].chars().next()
+}
+
+fn previous_char(source: &str, end: usize) -> Option<char> {
+    if end == 0 {
+        return None;
+    }
+
+    source[..end].chars().next_back()
 }
 
 fn find_code_marker(source: &str, search_start: usize) -> Option<usize> {
@@ -452,6 +505,54 @@ mod tests {
         assert_eq!(inlines.len(), 1);
         assert_eq!(inlines[0].source, "This is **not closed");
         assert_eq!(inlines[0].kind, MarkdownInline::Text);
+    }
+
+    #[test]
+    fn does_not_project_single_asterisk_emphasis_as_strong() {
+        let document = Document::new("This is *not strong*");
+        let projection = project_document(&document);
+        let inlines = &projection.lines()[0].inlines;
+
+        assert_eq!(inlines.len(), 1);
+        assert_eq!(inlines[0].source, "This is *not strong*");
+        assert_eq!(inlines[0].kind, MarkdownInline::Text);
+    }
+
+    #[test]
+    fn does_not_project_strong_from_longer_asterisk_runs() {
+        let document = Document::new("This is ***not stable***");
+        let projection = project_document(&document);
+        let inlines = &projection.lines()[0].inlines;
+
+        assert_eq!(inlines.len(), 1);
+        assert_eq!(inlines[0].source, "This is ***not stable***");
+        assert_eq!(inlines[0].kind, MarkdownInline::Text);
+    }
+
+    #[test]
+    fn does_not_project_strong_from_partially_deleted_adjacent_markers() {
+        let document = Document::new("This is *abc* before **bold**");
+        let projection = project_document(&document);
+        let inlines = &projection.lines()[0].inlines;
+
+        assert_eq!(inlines.len(), 2);
+        assert_eq!(inlines[0].source, "This is *abc* before ");
+        assert_eq!(inlines[0].kind, MarkdownInline::Text);
+        assert_eq!(inlines[1].source, "**bold**");
+        assert!(matches!(inlines[1].kind, MarkdownInline::Strong { .. }));
+    }
+
+    #[test]
+    fn uses_later_opening_when_an_earlier_strong_marker_stays_unclosed() {
+        let document = Document::new("This is **broken **strong**");
+        let projection = project_document(&document);
+        let inlines = &projection.lines()[0].inlines;
+
+        assert_eq!(inlines.len(), 2);
+        assert_eq!(inlines[0].source, "This is **broken ");
+        assert_eq!(inlines[0].kind, MarkdownInline::Text);
+        assert_eq!(inlines[1].source, "**strong**");
+        assert!(matches!(inlines[1].kind, MarkdownInline::Strong { .. }));
     }
 
     #[test]

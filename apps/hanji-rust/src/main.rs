@@ -1121,6 +1121,23 @@ mod tests {
             )]
         );
     }
+
+    #[test]
+    fn single_asterisk_emphasis_does_not_create_strong_runs() {
+        let document = Document::new("Capture *thought* with `code`.");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let runs = line_text_runs(line, line_presentation(line.kind), &TextStyle::default());
+
+        assert!(runs.iter().all(|run| run.font.weight != FontWeight::BLACK));
+        assert_eq!(
+            code_background_ranges(line),
+            vec![TextRange::new(
+                "Capture *thought* with ".len(),
+                "Capture *thought* with `code`".len()
+            )]
+        );
+    }
 }
 
 fn main() {
