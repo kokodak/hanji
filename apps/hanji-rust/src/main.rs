@@ -17,6 +17,7 @@ use hanji_storage::DocumentSession;
 
 const LINE_HEIGHT: f32 = 24.0;
 const FONT_SIZE: f32 = 16.0;
+const DRAG_SELECTION_THRESHOLD: f64 = 2.0;
 const SAMPLE_DOCUMENT: &str = "# Hanji\n\nCapture the **thought** with `code`.";
 
 actions!(
@@ -53,6 +54,7 @@ struct Hanji {
     selection_anchor: Option<usize>,
     selection_head: Option<usize>,
     is_selecting: bool,
+    selection_drag_origin: Option<gpui::Point<Pixels>>,
     status_message: Option<String>,
 }
 
@@ -266,7 +268,8 @@ impl Hanji {
         self.marked_range = None;
         let offset = self.index_for_mouse_position(event.position);
 
-        self.is_selecting = true;
+        self.is_selecting = false;
+        self.selection_drag_origin = Some(event.position);
         if event.modifiers.shift {
             let (anchor, _) = self.selection_extension_points(1);
             self.select_from_anchor_to(anchor, offset, None, cx);
@@ -276,8 +279,20 @@ impl Hanji {
     }
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.is_selecting || event.pressed_button != Some(MouseButton::Left) {
+        if event.pressed_button != Some(MouseButton::Left) {
             return;
+        }
+
+        if !self.is_selecting {
+            let Some(origin) = self.selection_drag_origin else {
+                return;
+            };
+
+            if !drag_distance_exceeds_threshold(origin, event.position) {
+                return;
+            }
+
+            self.is_selecting = true;
         }
 
         let anchor = self
@@ -293,6 +308,7 @@ impl Hanji {
 
     fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
         self.is_selecting = false;
+        self.selection_drag_origin = None;
     }
 
     fn move_caret(&mut self, offset: usize, cx: &mut Context<Self>) {
@@ -435,6 +451,7 @@ impl Hanji {
         self.selection_anchor = None;
         self.selection_head = None;
         self.is_selecting = false;
+        self.selection_drag_origin = None;
     }
 
     fn selected_range(&self) -> Range<usize> {
@@ -836,6 +853,13 @@ fn extension_points_for_selection(selection: TextRange, direction: isize) -> (us
     } else {
         (selection.start, selection.end)
     }
+}
+
+fn drag_distance_exceeds_threshold(
+    origin: gpui::Point<Pixels>,
+    position: gpui::Point<Pixels>,
+) -> bool {
+    (position - origin).magnitude() > DRAG_SELECTION_THRESHOLD
 }
 
 fn source_to_visible_offset_in_segments(
@@ -1609,6 +1633,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn drag_selection_starts_only_after_pointer_moves_past_threshold() {
+        let origin = point(px(10.0), px(10.0));
+
+        assert!(!drag_distance_exceeds_threshold(
+            origin,
+            point(px(12.0), px(10.0))
+        ));
+        assert!(drag_distance_exceeds_threshold(
+            origin,
+            point(px(12.1), px(10.0))
+        ));
+    }
+
     fn visible_selection_text(source: &str, selection: TextRange) -> String {
         let document = Document::new(source);
         let projection = project_document(&document);
@@ -1683,6 +1721,7 @@ fn main() {
                             selection_anchor: None,
                             selection_head: None,
                             is_selecting: false,
+                            selection_drag_origin: None,
                             status_message: None,
                         };
                         editor.update_window_title(window);
