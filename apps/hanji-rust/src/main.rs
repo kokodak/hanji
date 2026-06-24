@@ -1130,6 +1130,7 @@ struct EditorElement {
 
 struct EditorPrepaintState {
     lines: Vec<LineSnapshot>,
+    blockquote_bars: Vec<PaintQuad>,
     code_backgrounds: Vec<PaintQuad>,
     cursor: Option<PaintQuad>,
     selections: Vec<PaintQuad>,
@@ -1140,6 +1141,8 @@ struct LinePresentation {
     font_size: f32,
     line_height: f32,
     is_heading: bool,
+    is_blockquote: bool,
+    text_indent: f32,
 }
 
 impl IntoElement for EditorElement {
@@ -1197,6 +1200,7 @@ impl Element for EditorElement {
         let editor = self.editor.read(cx);
         let text_style = window.text_style();
         let mut lines = Vec::new();
+        let mut blockquote_bars = Vec::new();
         let mut code_backgrounds = Vec::new();
         let mut top = 0.0;
 
@@ -1214,10 +1218,20 @@ impl Element for EditorElement {
                 window
                     .text_system()
                     .shape_line(line_text, px(presentation.font_size), &runs, None);
-            let line_bounds = Bounds::new(
+            let container_bounds = Bounds::new(
                 point(bounds.left(), bounds.top() + px(top)),
                 size(bounds.size.width, px(presentation.line_height)),
             );
+            let line_bounds = Bounds::new(
+                point(
+                    bounds.left() + px(presentation.text_indent),
+                    bounds.top() + px(top),
+                ),
+                size(bounds.size.width, px(presentation.line_height)),
+            );
+            if presentation.is_blockquote {
+                blockquote_bars.push(blockquote_bar_quad(container_bounds));
+            }
             code_backgrounds.extend(code_background_quads(
                 &visible_segments,
                 &layout,
@@ -1246,6 +1260,7 @@ impl Element for EditorElement {
 
         EditorPrepaintState {
             lines,
+            blockquote_bars,
             code_backgrounds,
             cursor,
             selections,
@@ -1268,6 +1283,10 @@ impl Element for EditorElement {
             ElementInputHandler::new(bounds, self.editor.clone()),
             cx,
         );
+
+        for bar in prepaint.blockquote_bars.drain(..) {
+            window.paint_quad(bar);
+        }
 
         for background in prepaint.code_backgrounds.drain(..) {
             window.paint_quad(background);
@@ -1369,6 +1388,8 @@ fn push_text_run(
     }
     let color = if presentation.is_heading {
         rgb(0x1f3f5b).into()
+    } else if presentation.is_blockquote {
+        rgb(0x5f6267).into()
     } else {
         text_style.color
     };
@@ -1411,6 +1432,16 @@ fn code_background_ranges(segments: &[ProjectedVisibleSegment<'_>]) -> Vec<TextR
             | ProjectedSegmentKind::StrongContent => None,
         })
         .collect()
+}
+
+fn blockquote_bar_quad(bounds: Bounds<Pixels>) -> PaintQuad {
+    fill(
+        Bounds::new(
+            point(bounds.left() + px(4.0), bounds.top() + px(4.0)),
+            size(px(3.0), bounds.bottom() - bounds.top() - px(8.0)),
+        ),
+        rgb(0xaeb6bf),
+    )
 }
 
 fn code_background_quads(
@@ -1459,12 +1490,23 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
                 font_size,
                 line_height: font_size + 12.0,
                 is_heading: true,
+                is_blockquote: false,
+                text_indent: 0.0,
             }
         }
+        MarkdownLine::Blockquote => LinePresentation {
+            font_size: FONT_SIZE,
+            line_height: LINE_HEIGHT,
+            is_heading: false,
+            is_blockquote: true,
+            text_indent: 18.0,
+        },
         MarkdownLine::Blank | MarkdownLine::Paragraph => LinePresentation {
             font_size: FONT_SIZE,
             line_height: LINE_HEIGHT,
             is_heading: false,
+            is_blockquote: false,
+            text_indent: 0.0,
         },
     }
 }
@@ -1643,6 +1685,17 @@ mod tests {
                 "Capture **thought* with code".len()
             )]
         );
+    }
+
+    #[test]
+    fn blockquote_lines_use_indented_presentation() {
+        let presentation = line_presentation(MarkdownLine::Blockquote);
+
+        assert!(!presentation.is_heading);
+        assert!(presentation.is_blockquote);
+        assert_eq!(presentation.font_size, FONT_SIZE);
+        assert_eq!(presentation.line_height, LINE_HEIGHT);
+        assert!(presentation.text_indent > 0.0);
     }
 
     #[test]

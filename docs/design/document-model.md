@@ -17,7 +17,8 @@ The editor can derive several views from the source:
 
 - A Markdown syntax tree for structure.
 - A layout model for visible lines and blocks.
-- Inline style runs for emphasis, links, code, and headings, with source and marker ranges preserved.
+- Line classifications for headings and blockquotes.
+- Inline style runs for emphasis, links, and code, with source and marker ranges preserved.
 - Block widgets for tables, images, and future interactive surfaces.
 
 Derived views must be disposable. Rebuilding them should not lose document data.

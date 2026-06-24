@@ -61,7 +61,7 @@ Text:
 
 The first rendering step kept markers visible and only applied styling to known spans. Marker hiding now depends on explicit visible-to-source mapping.
 
-Current inline projection starts with plain text, strong spans, and inline code spans. The GPUI app hides inactive inline markers, styles strong content with a heavier font weight, and draws inline code backgrounds from source-backed visible ranges. GPUI 0.2.2 can merge line layout runs when only font changes, so strong text currently forces an invisible decoration boundary in the app renderer. Strong projection only recognizes exact two-asterisk delimiter runs for now; single, longer, or malformed asterisk runs remain text. Malformed markers should not stop projection of later valid spans. Escapes, nesting, emphasis, links, and parser-grade CommonMark behavior should be added incrementally with source mapping tests.
+Current inline projection starts with plain text, strong spans, and inline code spans. Current line projection recognizes headings and blockquotes. The GPUI app hides inactive inline markers, styles strong content with a heavier font weight, draws inline code backgrounds from source-backed visible ranges, and renders blockquote lines with a quote bar and indentation. GPUI 0.2.2 can merge line layout runs when only font changes, so strong text currently forces an invisible decoration boundary in the app renderer. Strong projection only recognizes exact two-asterisk delimiter runs for now; single, longer, or malformed asterisk runs remain text. Malformed markers should not stop projection of later valid spans. Escapes, nesting, emphasis, links, line marker hiding, and parser-grade CommonMark behavior should be added incrementally with source mapping tests.
 
 ## Marker Policy
 

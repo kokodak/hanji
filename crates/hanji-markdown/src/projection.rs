@@ -737,11 +737,11 @@ mod tests {
 
     #[test]
     fn projects_lines_with_source_ranges_and_kinds() {
-        let document = Document::new("# Hanji\n\nNotes");
+        let document = Document::new("# Hanji\n\n> Quote\nNotes");
         let projection = project_document(&document);
         let lines = projection.lines();
 
-        assert_eq!(lines.len(), 3);
+        assert_eq!(lines.len(), 4);
         assert_eq!(lines[0].range, TextRange::new(0, 7));
         assert_eq!(lines[0].source, "# Hanji");
         assert_eq!(lines[0].kind, MarkdownLine::Heading { level: 1 });
@@ -750,10 +750,14 @@ mod tests {
         assert_eq!(lines[1].source, "");
         assert_eq!(lines[1].kind, MarkdownLine::Blank);
         assert_eq!(lines[1].inlines.len(), 0);
-        assert_eq!(lines[2].range, TextRange::new(9, 14));
-        assert_eq!(lines[2].source, "Notes");
-        assert_eq!(lines[2].kind, MarkdownLine::Paragraph);
+        assert_eq!(lines[2].range, TextRange::new(9, 16));
+        assert_eq!(lines[2].source, "> Quote");
+        assert_eq!(lines[2].kind, MarkdownLine::Blockquote);
         assert_eq!(lines[2].inlines.len(), 1);
+        assert_eq!(lines[3].range, TextRange::new(17, 22));
+        assert_eq!(lines[3].source, "Notes");
+        assert_eq!(lines[3].kind, MarkdownLine::Paragraph);
+        assert_eq!(lines[3].inlines.len(), 1);
     }
 
     #[test]

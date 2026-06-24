@@ -3,6 +3,7 @@ pub enum MarkdownLine {
     Blank,
     Paragraph,
     Heading { level: u8 },
+    Blockquote,
 }
 
 pub fn first_heading(markdown: &str) -> Option<&str> {
@@ -33,6 +34,10 @@ pub fn classify_line(line: &str) -> MarkdownLine {
     }
 
     let content = &line[indent..];
+    if content.starts_with('>') {
+        return MarkdownLine::Blockquote;
+    }
+
     let level = content.bytes().take_while(|byte| *byte == b'#').count();
     if !(1..=6).contains(&level) {
         return MarkdownLine::Paragraph;
@@ -67,6 +72,14 @@ mod tests {
             classify_line("   ## Indented"),
             MarkdownLine::Heading { level: 2 }
         );
+    }
+
+    #[test]
+    fn classifies_blockquotes() {
+        assert_eq!(classify_line("> Quote"), MarkdownLine::Blockquote);
+        assert_eq!(classify_line(">Quote"), MarkdownLine::Blockquote);
+        assert_eq!(classify_line("   > Indented"), MarkdownLine::Blockquote);
+        assert_eq!(classify_line("    > Code"), MarkdownLine::Paragraph);
     }
 
     #[test]
