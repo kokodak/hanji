@@ -4,11 +4,11 @@ use gpui::{
     App, Application, Bounds, Context, CursorStyle, Element, ElementId, ElementInputHandler,
     Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId, InspectorElementId,
     IntoElement, KeyBinding, LayoutId, MouseButton, MouseDownEvent, PaintQuad, Pixels, Render,
-    ShapedLine, SharedString, Style, TextRun, UTF16Selection, Window, WindowBounds, WindowOptions,
-    actions, div, fill, point, prelude::*, px, relative, rgb, rgba, size,
+    ShapedLine, SharedString, Style, TextRun, TextStyle, UTF16Selection, Window, WindowBounds,
+    WindowOptions, actions, div, fill, point, prelude::*, px, relative, rgb, rgba, size,
 };
 use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
-use hanji_markdown::{MarkdownLine, project_document};
+use hanji_markdown::{MarkdownInline, MarkdownLine, ProjectedLine, project_document};
 use hanji_storage::DocumentSession;
 
 const LINE_HEIGHT: f32 = 24.0;
@@ -646,29 +646,7 @@ impl Element for EditorElement {
         for line in projection.lines() {
             let presentation = line_presentation(line.kind);
             let line_text: SharedString = line.source.to_owned().into();
-            let runs = if line_text.is_empty() {
-                Vec::new()
-            } else {
-                let font = if presentation.is_heading {
-                    text_style.font().bold()
-                } else {
-                    text_style.font()
-                };
-                let color = if presentation.is_heading {
-                    rgb(0x1f3f5b).into()
-                } else {
-                    text_style.color
-                };
-
-                vec![TextRun {
-                    len: line_text.len(),
-                    font,
-                    color,
-                    background_color: None,
-                    underline: None,
-                    strikethrough: None,
-                }]
-            };
+            let runs = line_text_runs(line, presentation, &text_style);
             let layout =
                 window
                     .text_system()
@@ -744,6 +722,71 @@ impl Element for EditorElement {
             editor.last_lines = lines;
         });
     }
+}
+
+fn line_text_runs(
+    line: &ProjectedLine<'_>,
+    presentation: LinePresentation,
+    text_style: &TextStyle,
+) -> Vec<TextRun> {
+    let mut runs = Vec::new();
+
+    for inline in &line.inlines {
+        match inline.kind {
+            MarkdownInline::Text => {
+                push_text_run(
+                    &mut runs,
+                    inline.source.len(),
+                    false,
+                    presentation,
+                    text_style,
+                );
+            }
+            MarkdownInline::Strong { markers } => {
+                let opening_len = markers.opening.len();
+                let content_len = inline.content_range.len();
+                let closing_len = markers.closing.len();
+
+                push_text_run(&mut runs, opening_len, false, presentation, text_style);
+                push_text_run(&mut runs, content_len, true, presentation, text_style);
+                push_text_run(&mut runs, closing_len, false, presentation, text_style);
+            }
+        }
+    }
+
+    runs
+}
+
+fn push_text_run(
+    runs: &mut Vec<TextRun>,
+    len: usize,
+    bold: bool,
+    presentation: LinePresentation,
+    text_style: &TextStyle,
+) {
+    if len == 0 {
+        return;
+    }
+
+    let font = if presentation.is_heading || bold {
+        text_style.font().bold()
+    } else {
+        text_style.font()
+    };
+    let color = if presentation.is_heading {
+        rgb(0x1f3f5b).into()
+    } else {
+        text_style.color
+    };
+
+    runs.push(TextRun {
+        len,
+        font,
+        color,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    });
 }
 
 fn line_presentation(line: MarkdownLine) -> LinePresentation {
