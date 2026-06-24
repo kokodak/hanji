@@ -75,7 +75,8 @@ Hanji should introduce marker hiding gradually:
 - Render styles while keeping source text visible.
 - Add tests for caret movement, selection, and editing around markers.
 - Hide markers only when the visible-to-source mapping is explicit.
-- Consider showing markers near the caret if editing would otherwise feel ambiguous.
+- Reveal source markers for the inline span that contains the caret or active selection.
+- Consider broader marker reveal rules later if editing still feels ambiguous.
 
 ## Ownership
 

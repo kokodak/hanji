@@ -76,9 +76,13 @@ pub struct ProjectedLine<'a> {
 
 impl<'a> ProjectedLine<'a> {
     pub fn visible_text(&self) -> String {
+        self.visible_text_revealing_source_in(None)
+    }
+
+    pub fn visible_text_revealing_source_in(&self, reveal_range: Option<TextRange>) -> String {
         let mut text = String::new();
 
-        for segment in self.visible_segments() {
+        for segment in self.visible_segments_revealing_source_in(reveal_range) {
             text.push_str(segment.source);
         }
 
@@ -92,25 +96,34 @@ impl<'a> ProjectedLine<'a> {
     }
 
     pub fn visible_segments(&self) -> Vec<ProjectedVisibleSegment<'a>> {
+        self.visible_segments_revealing_source_in(None)
+    }
+
+    pub fn visible_segments_revealing_source_in(
+        &self,
+        reveal_range: Option<TextRange>,
+    ) -> Vec<ProjectedVisibleSegment<'a>> {
         let mut segments = Vec::new();
         let mut visible_start = 0;
 
         for inline in &self.inlines {
-            let kind = match inline.kind {
-                MarkdownInline::Text => ProjectedSegmentKind::Text,
-                MarkdownInline::Strong { .. } => ProjectedSegmentKind::StrongContent,
-                MarkdownInline::Code { .. } => ProjectedSegmentKind::CodeContent,
-            };
-
-            push_visible_segment(
-                &mut segments,
-                self.source,
-                self.range.start,
-                &mut visible_start,
-                inline.source_range,
-                inline.content_range,
-                kind,
-            );
+            if reveal_range.is_some_and(|range| should_reveal_inline(inline.source_range, range)) {
+                push_source_visible_segments(
+                    &mut segments,
+                    self.source,
+                    self.range.start,
+                    &mut visible_start,
+                    inline,
+                );
+            } else {
+                push_hidden_visible_segment(
+                    &mut segments,
+                    self.source,
+                    self.range.start,
+                    &mut visible_start,
+                    inline,
+                );
+            }
         }
 
         segments
@@ -249,6 +262,14 @@ impl<'a> ProjectedLine<'a> {
     }
 }
 
+fn should_reveal_inline(inline_range: TextRange, reveal_range: TextRange) -> bool {
+    if reveal_range.is_empty() {
+        reveal_range.start >= inline_range.start && reveal_range.start <= inline_range.end
+    } else {
+        reveal_range.start < inline_range.end && reveal_range.end > inline_range.start
+    }
+}
+
 pub fn project_document(document: &Document) -> MarkdownProjection<'_> {
     let mut lines = Vec::new();
 
@@ -316,6 +337,110 @@ fn push_visible_segment<'a>(
     });
 
     *visible_start += len;
+}
+
+fn push_hidden_visible_segment<'a>(
+    segments: &mut Vec<ProjectedVisibleSegment<'a>>,
+    line_source: &'a str,
+    line_start: usize,
+    visible_start: &mut usize,
+    inline: &ProjectedInline<'a>,
+) {
+    let kind = match inline.kind {
+        MarkdownInline::Text => ProjectedSegmentKind::Text,
+        MarkdownInline::Strong { .. } => ProjectedSegmentKind::StrongContent,
+        MarkdownInline::Code { .. } => ProjectedSegmentKind::CodeContent,
+    };
+
+    push_visible_segment(
+        segments,
+        line_source,
+        line_start,
+        visible_start,
+        inline.source_range,
+        inline.content_range,
+        kind,
+    );
+}
+
+fn push_source_visible_segments<'a>(
+    segments: &mut Vec<ProjectedVisibleSegment<'a>>,
+    line_source: &'a str,
+    line_start: usize,
+    visible_start: &mut usize,
+    inline: &ProjectedInline<'a>,
+) {
+    match inline.kind {
+        MarkdownInline::Text => {
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                inline.source_range,
+                inline.source_range,
+                ProjectedSegmentKind::Text,
+            );
+        }
+        MarkdownInline::Strong { markers } => {
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                markers.opening,
+                markers.opening,
+                ProjectedSegmentKind::StrongMarker,
+            );
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                inline.content_range,
+                inline.content_range,
+                ProjectedSegmentKind::StrongContent,
+            );
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                markers.closing,
+                markers.closing,
+                ProjectedSegmentKind::StrongMarker,
+            );
+        }
+        MarkdownInline::Code { markers } => {
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                markers.opening,
+                markers.opening,
+                ProjectedSegmentKind::CodeMarker,
+            );
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                inline.content_range,
+                inline.content_range,
+                ProjectedSegmentKind::CodeContent,
+            );
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                markers.closing,
+                markers.closing,
+                ProjectedSegmentKind::CodeMarker,
+            );
+        }
+    }
 }
 
 fn project_inlines(source: &str, source_start: usize) -> Vec<ProjectedInline<'_>> {
@@ -687,6 +812,92 @@ mod tests {
                     kind: ProjectedSegmentKind::Text,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn reveals_source_markers_for_inline_at_caret() {
+        let document = Document::new("This is **bold** and `code`");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let reveal_range = TextRange::caret("This is **bo".len());
+
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(reveal_range)),
+            "This is **bold** and code"
+        );
+        assert_eq!(
+            line.visible_segments_revealing_source_in(Some(reveal_range)),
+            vec![
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(0, 8),
+                    source_range: TextRange::new(0, 8),
+                    source_outer_range: TextRange::new(0, 8),
+                    source: "This is ",
+                    kind: ProjectedSegmentKind::Text,
+                },
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(8, 10),
+                    source_range: TextRange::new(8, 10),
+                    source_outer_range: TextRange::new(8, 10),
+                    source: "**",
+                    kind: ProjectedSegmentKind::StrongMarker,
+                },
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(10, 14),
+                    source_range: TextRange::new(10, 14),
+                    source_outer_range: TextRange::new(10, 14),
+                    source: "bold",
+                    kind: ProjectedSegmentKind::StrongContent,
+                },
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(14, 16),
+                    source_range: TextRange::new(14, 16),
+                    source_outer_range: TextRange::new(14, 16),
+                    source: "**",
+                    kind: ProjectedSegmentKind::StrongMarker,
+                },
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(16, 21),
+                    source_range: TextRange::new(16, 21),
+                    source_outer_range: TextRange::new(16, 21),
+                    source: " and ",
+                    kind: ProjectedSegmentKind::Text,
+                },
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(21, 25),
+                    source_range: TextRange::new(22, 26),
+                    source_outer_range: TextRange::new(21, 27),
+                    source: "code",
+                    kind: ProjectedSegmentKind::CodeContent,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn reveals_source_markers_for_selected_inline() {
+        let document = Document::new("This is **bold** and `code`");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let reveal_range = TextRange::new("This is **b".len(), "This is **bol".len());
+
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(reveal_range)),
+            "This is **bold** and code"
+        );
+    }
+
+    #[test]
+    fn keeps_other_inline_markers_hidden_when_revealing_current_inline() {
+        let document = Document::new("This is **bold** and `code`");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let reveal_range = TextRange::caret("This is **bold** and `co".len());
+
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(reveal_range)),
+            "This is bold and `code`"
         );
     }
 

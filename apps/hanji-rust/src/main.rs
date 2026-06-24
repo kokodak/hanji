@@ -10,8 +10,8 @@ use gpui::{
 };
 use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
 use hanji_markdown::{
-    MarkdownCommand, MarkdownCommandError, MarkdownInline, MarkdownLine, ProjectedLine,
-    ProjectedSegmentKind, execute_markdown_command, project_document,
+    MarkdownCommand, MarkdownCommandError, MarkdownLine, ProjectedSegmentKind,
+    ProjectedVisibleSegment, VisibleOffsetAffinity, execute_markdown_command, project_document,
 };
 use hanji_storage::DocumentSession;
 
@@ -354,8 +354,11 @@ impl Hanji {
             .find(|line| position.y >= line.bounds.top() && position.y <= line.bounds.bottom())
             .unwrap_or(last_line);
         let local_x = position.x - line.bounds.left();
-        let local_index = line.layout.closest_index_for_x(local_x);
-        let offset = line.range.start + local_index.min(line.range.len());
+        let visible_offset = line
+            .layout
+            .closest_index_for_x(local_x)
+            .min(line.visible_len);
+        let offset = line.visible_to_source_offset(visible_offset, VisibleOffsetAffinity::After);
 
         self.session
             .document()
@@ -378,14 +381,8 @@ impl Hanji {
     fn bounds_for_byte_range(&self, range: Range<usize>) -> Option<Bounds<Pixels>> {
         let range = self.snap_byte_range(range);
         let line = self.line_for_offset(range.start)?;
-        let start = range
-            .start
-            .saturating_sub(line.range.start)
-            .min(line.range.len());
-        let end = range
-            .end
-            .saturating_sub(line.range.start)
-            .min(line.range.len());
+        let start = line.source_to_visible_offset(range.start);
+        let end = line.source_to_visible_offset(range.end);
         let start_x = line.layout.x_for_index(start);
         let end_x = line.layout.x_for_index(end).max(start_x + px(2.0));
 
@@ -629,8 +626,94 @@ impl Render for Hanji {
 #[derive(Clone)]
 struct LineSnapshot {
     range: TextRange,
+    visible_len: usize,
+    segments: Vec<LineSegmentSnapshot>,
     layout: ShapedLine,
     bounds: Bounds<Pixels>,
+}
+
+impl LineSnapshot {
+    fn source_to_visible_offset(&self, source_offset: usize) -> usize {
+        let source_offset = source_offset.clamp(self.range.start, self.range.end);
+
+        for segment in &self.segments {
+            if source_offset < segment.source_outer_range.start {
+                return segment.visible_range.start;
+            }
+
+            if source_offset <= segment.source_outer_range.end {
+                if source_offset < segment.source_range.start {
+                    return segment.visible_range.start;
+                }
+
+                if source_offset <= segment.source_range.end {
+                    return segment.visible_range.start + source_offset
+                        - segment.source_range.start;
+                }
+
+                return segment.visible_range.end;
+            }
+        }
+
+        self.visible_len
+    }
+
+    fn visible_to_source_offset(
+        &self,
+        visible_offset: usize,
+        affinity: VisibleOffsetAffinity,
+    ) -> usize {
+        let visible_offset = visible_offset.min(self.visible_len);
+
+        for (index, segment) in self.segments.iter().enumerate() {
+            if visible_offset < segment.visible_range.start {
+                return segment.source_outer_range.start;
+            }
+
+            if visible_offset > segment.visible_range.end {
+                continue;
+            }
+
+            if visible_offset == segment.visible_range.start
+                && matches!(affinity, VisibleOffsetAffinity::Before)
+            {
+                return segment.source_outer_range.start;
+            }
+
+            if visible_offset == segment.visible_range.end
+                && matches!(affinity, VisibleOffsetAffinity::After)
+            {
+                if let Some(next_segment) = self.segments.get(index + 1)
+                    && next_segment.visible_range.start == visible_offset
+                {
+                    return next_segment.source_range.start;
+                }
+
+                return segment.source_outer_range.end;
+            }
+
+            return segment.source_range.start + visible_offset - segment.visible_range.start;
+        }
+
+        self.range.end
+    }
+}
+
+#[derive(Clone, Copy)]
+struct LineSegmentSnapshot {
+    visible_range: TextRange,
+    source_range: TextRange,
+    source_outer_range: TextRange,
+}
+
+impl From<ProjectedVisibleSegment<'_>> for LineSegmentSnapshot {
+    fn from(segment: ProjectedVisibleSegment<'_>) -> Self {
+        Self {
+            visible_range: segment.visible_range,
+            source_range: segment.source_range,
+            source_outer_range: segment.source_outer_range,
+        }
+    }
 }
 
 struct EditorElement {
@@ -710,13 +793,15 @@ impl Element for EditorElement {
         let mut top = 0.0;
 
         let document = editor.session.document();
+        let selection = document.selection().primary();
 
         let projection = project_document(document);
 
         for line in projection.lines() {
             let presentation = line_presentation(line.kind);
-            let line_text: SharedString = line.source.to_owned().into();
-            let runs = line_text_runs(line, presentation, &text_style);
+            let visible_segments = line.visible_segments_revealing_source_in(Some(selection));
+            let line_text: SharedString = visible_text_from_segments(&visible_segments).into();
+            let runs = line_text_runs(&visible_segments, presentation, &text_style);
             let layout =
                 window
                     .text_system()
@@ -725,17 +810,25 @@ impl Element for EditorElement {
                 point(bounds.left(), bounds.top() + px(top)),
                 size(bounds.size.width, px(presentation.line_height)),
             );
-            code_backgrounds.extend(code_background_quads(line, &layout, line_bounds));
+            code_backgrounds.extend(code_background_quads(
+                &visible_segments,
+                &layout,
+                line_bounds,
+            ));
             top += presentation.line_height;
+            let visible_len = visible_segments
+                .last()
+                .map_or(0, |segment| segment.visible_range.end);
 
             lines.push(LineSnapshot {
                 range: line.range,
+                visible_len,
+                segments: visible_segments.into_iter().map(Into::into).collect(),
                 layout,
                 bounds: line_bounds,
             });
         }
 
-        let selection = editor.session.document().selection().primary();
         let cursor = if selection.is_empty() {
             caret_quad(&lines, selection.start)
         } else {
@@ -800,14 +893,24 @@ impl Element for EditorElement {
     }
 }
 
+fn visible_text_from_segments(segments: &[ProjectedVisibleSegment<'_>]) -> String {
+    let mut text = String::new();
+
+    for segment in segments {
+        text.push_str(segment.source);
+    }
+
+    text
+}
+
 fn line_text_runs(
-    line: &ProjectedLine<'_>,
+    segments: &[ProjectedVisibleSegment<'_>],
     presentation: LinePresentation,
     text_style: &TextStyle,
 ) -> Vec<TextRun> {
     let mut runs = Vec::new();
 
-    for segment in line.source_visible_segments() {
+    for segment in segments {
         let style = match segment.kind {
             ProjectedSegmentKind::StrongContent => InlineRunStyle::Strong,
             ProjectedSegmentKind::CodeMarker | ProjectedSegmentKind::CodeContent => {
@@ -888,42 +991,42 @@ fn font_run_boundary_marker() -> UnderlineStyle {
     }
 }
 
-fn code_background_ranges(line: &ProjectedLine<'_>) -> Vec<TextRange> {
-    line.inlines
+fn code_background_ranges(segments: &[ProjectedVisibleSegment<'_>]) -> Vec<TextRange> {
+    segments
         .iter()
-        .filter_map(|inline| match inline.kind {
-            MarkdownInline::Code { .. } => Some(inline.source_range),
-            MarkdownInline::Text | MarkdownInline::Strong { .. } => None,
+        .filter_map(|segment| match segment.kind {
+            ProjectedSegmentKind::CodeMarker | ProjectedSegmentKind::CodeContent => {
+                Some(segment.visible_range)
+            }
+            ProjectedSegmentKind::Text
+            | ProjectedSegmentKind::StrongMarker
+            | ProjectedSegmentKind::StrongContent => None,
         })
         .collect()
 }
 
 fn code_background_quads(
-    line: &ProjectedLine<'_>,
+    segments: &[ProjectedVisibleSegment<'_>],
     layout: &ShapedLine,
     bounds: Bounds<Pixels>,
 ) -> Vec<PaintQuad> {
-    code_background_ranges(line)
+    code_background_ranges(segments)
         .into_iter()
-        .filter_map(|range| code_background_quad(line.range, layout, bounds, range))
+        .filter_map(|range| code_background_quad(layout, bounds, range))
         .collect()
 }
 
 fn code_background_quad(
-    line_range: TextRange,
     layout: &ShapedLine,
     bounds: Bounds<Pixels>,
     range: TextRange,
 ) -> Option<PaintQuad> {
-    let start = range.start.max(line_range.start);
-    let end = range.end.min(line_range.end);
-
-    if start >= end {
+    if range.is_empty() {
         return None;
     }
 
-    let start_x = layout.x_for_index(start - line_range.start);
-    let end_x = layout.x_for_index(end - line_range.start);
+    let start_x = layout.x_for_index(range.start);
+    let end_x = layout.x_for_index(range.end);
 
     Some(fill(
         Bounds::from_corners(
@@ -960,10 +1063,8 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
 
 fn caret_quad(lines: &[LineSnapshot], offset: usize) -> Option<PaintQuad> {
     let line = line_for_offset(lines, offset)?;
-    let local_index = offset
-        .saturating_sub(line.range.start)
-        .min(line.range.len());
-    let x = line.layout.x_for_index(local_index);
+    let visible_offset = line.source_to_visible_offset(offset);
+    let x = line.layout.x_for_index(visible_offset);
 
     Some(fill(
         Bounds::new(
@@ -989,8 +1090,15 @@ fn selection_quads(lines: &[LineSnapshot], selection: TextRange) -> Vec<PaintQua
                 return None;
             }
 
-            let start_x = line.layout.x_for_index(start - line.range.start);
-            let end_x = line.layout.x_for_index(end - line.range.start);
+            let visible_start = line.source_to_visible_offset(start);
+            let visible_end = line.source_to_visible_offset(end);
+
+            if visible_start >= visible_end {
+                return None;
+            }
+
+            let start_x = line.layout.x_for_index(visible_start);
+            let end_x = line.layout.x_for_index(visible_end);
 
             Some(fill(
                 Bounds::from_corners(
@@ -1075,12 +1183,13 @@ mod tests {
         let document = Document::new("Capture thought with `code`.");
         let projection = project_document(&document);
         let line = &projection.lines()[0];
+        let segments = line.visible_segments();
 
         assert_eq!(
-            code_background_ranges(line),
+            code_background_ranges(&segments),
             vec![TextRange::new(
                 "Capture thought with ".len(),
-                "Capture thought with `code`".len()
+                "Capture thought with code".len()
             )]
         );
     }
@@ -1090,7 +1199,12 @@ mod tests {
         let document = Document::new("Capture **thought** with `code`.");
         let projection = project_document(&document);
         let line = &projection.lines()[0];
-        let runs = line_text_runs(line, line_presentation(line.kind), &TextStyle::default());
+        let segments = line.visible_segments();
+        let runs = line_text_runs(
+            &segments,
+            line_presentation(line.kind),
+            &TextStyle::default(),
+        );
 
         assert!(runs.iter().all(|run| run.background_color.is_none()));
         assert!(
@@ -1099,10 +1213,10 @@ mod tests {
                 .is_some_and(|run| run.underline.is_some())
         );
         assert_eq!(
-            code_background_ranges(line),
+            code_background_ranges(&segments),
             vec![TextRange::new(
-                "Capture **thought** with ".len(),
-                "Capture **thought** with `code`".len()
+                "Capture thought with ".len(),
+                "Capture thought with code".len()
             )]
         );
     }
@@ -1112,12 +1226,13 @@ mod tests {
         let document = Document::new("Capture **thought* with `code`.");
         let projection = project_document(&document);
         let line = &projection.lines()[0];
+        let segments = line.visible_segments();
 
         assert_eq!(
-            code_background_ranges(line),
+            code_background_ranges(&segments),
             vec![TextRange::new(
                 "Capture **thought* with ".len(),
-                "Capture **thought* with `code`".len()
+                "Capture **thought* with code".len()
             )]
         );
     }
@@ -1127,15 +1242,73 @@ mod tests {
         let document = Document::new("Capture *thought* with `code`.");
         let projection = project_document(&document);
         let line = &projection.lines()[0];
-        let runs = line_text_runs(line, line_presentation(line.kind), &TextStyle::default());
+        let segments = line.visible_segments();
+        let runs = line_text_runs(
+            &segments,
+            line_presentation(line.kind),
+            &TextStyle::default(),
+        );
 
         assert!(runs.iter().all(|run| run.font.weight != FontWeight::BLACK));
         assert_eq!(
-            code_background_ranges(line),
+            code_background_ranges(&segments),
             vec![TextRange::new(
                 "Capture *thought* with ".len(),
-                "Capture *thought* with `code`".len()
+                "Capture *thought* with code".len()
             )]
+        );
+    }
+
+    #[test]
+    fn caret_inside_strong_reveals_only_that_inline_source() {
+        let document = Document::new("Capture **thought** with `code`.");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let segments = line
+            .visible_segments_revealing_source_in(Some(TextRange::caret("Capture **tho".len())));
+
+        assert_eq!(
+            visible_text_from_segments(&segments),
+            "Capture **thought** with code."
+        );
+        assert_eq!(
+            code_background_ranges(&segments),
+            vec![TextRange::new(
+                "Capture **thought** with ".len(),
+                "Capture **thought** with code".len()
+            )]
+        );
+    }
+
+    #[test]
+    fn caret_inside_code_reveals_code_markers() {
+        let document = Document::new("Capture **thought** with `code`.");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let segments = line.visible_segments_revealing_source_in(Some(TextRange::caret(
+            "Capture **thought** with `co".len(),
+        )));
+
+        assert_eq!(
+            visible_text_from_segments(&segments),
+            "Capture thought with `code`."
+        );
+        assert_eq!(
+            code_background_ranges(&segments),
+            vec![
+                TextRange::new(
+                    "Capture thought with ".len(),
+                    "Capture thought with `".len()
+                ),
+                TextRange::new(
+                    "Capture thought with `".len(),
+                    "Capture thought with `code".len()
+                ),
+                TextRange::new(
+                    "Capture thought with `code".len(),
+                    "Capture thought with `code`".len()
+                ),
+            ]
         );
     }
 }
