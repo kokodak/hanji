@@ -59,9 +59,9 @@ Text:
   content range: text
 ```
 
-The first rendering step can keep markers visible and only apply styling to known spans. Hiding markers should come later, after caret mapping and editing behavior are trustworthy.
+The first rendering step kept markers visible and only applied styling to known spans. Marker hiding now depends on explicit visible-to-source mapping.
 
-Current inline projection starts with plain text, strong spans, and inline code spans. The GPUI app keeps source markers visible: strong content uses a heavier font weight, and inline code markers plus content share a source-backed background quad drawn by the app renderer. GPUI 0.2.2 can merge line layout runs when only font changes, so strong text currently forces an invisible decoration boundary in the app renderer. Strong projection only recognizes exact two-asterisk delimiter runs for now; single, longer, or malformed asterisk runs remain text. Malformed markers should not stop projection of later valid spans. Escapes, nesting, emphasis, links, and parser-grade CommonMark behavior should be added incrementally with source mapping tests.
+Current inline projection starts with plain text, strong spans, and inline code spans. The GPUI app hides inactive inline markers, styles strong content with a heavier font weight, and draws inline code backgrounds from source-backed visible ranges. GPUI 0.2.2 can merge line layout runs when only font changes, so strong text currently forces an invisible decoration boundary in the app renderer. Strong projection only recognizes exact two-asterisk delimiter runs for now; single, longer, or malformed asterisk runs remain text. Malformed markers should not stop projection of later valid spans. Escapes, nesting, emphasis, links, and parser-grade CommonMark behavior should be added incrementally with source mapping tests.
 
 ## Marker Policy
 
@@ -69,14 +69,31 @@ Markdown markers are not decoration. They are source text.
 
 When markers are visible, source and visible coordinates are close to one-to-one. When markers are hidden, projection code must map visible positions back to source positions explicitly.
 
-Hanji should introduce marker hiding gradually:
+Hanji uses an Obsidian-like live preview policy for supported inline Markdown:
 
-- Build source-backed spans first.
-- Render styles while keeping source text visible.
-- Add tests for caret movement, selection, and editing around markers.
-- Hide markers only when the visible-to-source mapping is explicit.
-- Reveal source markers for the inline span that contains the caret or active selection.
-- Consider broader marker reveal rules later if editing still feels ambiguous.
+- Hide recognized inline markers by default.
+- Reveal source markers for the inline span whose outer source range contains the text caret.
+- Reveal source markers for any inline span whose outer source range intersects the active selection.
+- Do not reveal markers on mouse hover alone.
+- Keep unrelated inline spans hidden when one span is active.
+- Treat revealed markers as ordinary source text. Typing, Backspace, and Delete should operate on what is visible, even if that leaves temporarily malformed Markdown.
+- Treat malformed or unsupported Markdown as plain source text instead of guessing a WYSIWYG shape.
+
+Caret reveal includes the opening and closing marker boundaries. This keeps deletion and insertion near marker edges honest: when the caret can edit a marker, the marker should be visible.
+
+Hidden markers must never be edited implicitly. Any edit that starts from visible coordinates must first resolve to a source range with explicit boundary affinity.
+
+## Test Scenarios
+
+Projection tests should focus on behavior that can change editing meaning:
+
+- Hidden markers are omitted from the default visible text while content keeps source ranges.
+- A caret inside an inline span reveals that span's markers only.
+- A caret on an opening or closing marker boundary reveals the span.
+- A selection that intersects hidden markers reveals the span.
+- A selection spanning multiple inline spans reveals each intersected span.
+- Adjacent or malformed markers do not leak styles into unrelated spans.
+- Inline code and strong spans remain independent when one of them becomes malformed.
 
 ## Ownership
 

@@ -902,6 +902,61 @@ mod tests {
     }
 
     #[test]
+    fn caret_on_inline_source_boundary_reveals_markers() {
+        let document = Document::new("This is **bold** and `code`");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        for caret in ["This is ".len(), "This is **bold**".len()] {
+            assert_eq!(
+                line.visible_text_revealing_source_in(Some(TextRange::caret(caret))),
+                "This is **bold** and code"
+            );
+        }
+
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::caret("This is".len()))),
+            "This is bold and code"
+        );
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::caret(
+                "This is **bold** ".len()
+            ))),
+            "This is bold and code"
+        );
+    }
+
+    #[test]
+    fn selection_over_hidden_marker_reveals_inline_source() {
+        let document = Document::new("This is **bold** and `code`");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        for reveal_range in [
+            TextRange::new("This is ".len(), "This is **".len()),
+            TextRange::new("This is **bold".len(), "This is **bold**".len()),
+        ] {
+            assert_eq!(
+                line.visible_text_revealing_source_in(Some(reveal_range)),
+                "This is **bold** and code"
+            );
+        }
+    }
+
+    #[test]
+    fn selection_spanning_multiple_inlines_reveals_each_source() {
+        let document = Document::new("This is **bold** and `code`");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let reveal_range = TextRange::new("This is **bo".len(), "This is **bold** and `co".len());
+
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(reveal_range)),
+            "This is **bold** and `code`"
+        );
+    }
+
+    #[test]
     fn maps_source_offsets_inside_hidden_markers_to_visible_boundaries() {
         let document = Document::new("This is **bold** text");
         let projection = project_document(&document);
