@@ -34,7 +34,7 @@ pub fn classify_line(line: &str) -> MarkdownLine {
     }
 
     let content = &line[indent..];
-    if content.starts_with('>') {
+    if content.starts_with("> ") {
         return MarkdownLine::Blockquote;
     }
 
@@ -76,8 +76,10 @@ mod tests {
 
     #[test]
     fn classifies_blockquotes() {
+        assert_eq!(classify_line(">"), MarkdownLine::Paragraph);
+        assert_eq!(classify_line(">Quote"), MarkdownLine::Paragraph);
+        assert_eq!(classify_line("> "), MarkdownLine::Blockquote);
         assert_eq!(classify_line("> Quote"), MarkdownLine::Blockquote);
-        assert_eq!(classify_line(">Quote"), MarkdownLine::Blockquote);
         assert_eq!(classify_line("   > Indented"), MarkdownLine::Blockquote);
         assert_eq!(classify_line("    > Code"), MarkdownLine::Paragraph);
     }
