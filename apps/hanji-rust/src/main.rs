@@ -11,7 +11,7 @@ use gpui::{
 use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
 use hanji_markdown::{
     MarkdownCommand, MarkdownCommandError, MarkdownLine, ProjectedSegmentKind,
-    ProjectedVisibleSegment, VisibleOffsetAffinity, execute_markdown_command, project_document,
+    ProjectedVisibleSegment, execute_markdown_command, project_document,
 };
 use hanji_storage::DocumentSession;
 
@@ -358,7 +358,7 @@ impl Hanji {
             .layout
             .closest_index_for_x(local_x)
             .min(line.visible_len);
-        let offset = line.visible_to_source_offset(visible_offset, VisibleOffsetAffinity::After);
+        let offset = line.visible_to_source_caret_offset(visible_offset);
 
         self.session
             .document()
@@ -658,44 +658,13 @@ impl LineSnapshot {
         self.visible_len
     }
 
-    fn visible_to_source_offset(
-        &self,
-        visible_offset: usize,
-        affinity: VisibleOffsetAffinity,
-    ) -> usize {
-        let visible_offset = visible_offset.min(self.visible_len);
-
-        for (index, segment) in self.segments.iter().enumerate() {
-            if visible_offset < segment.visible_range.start {
-                return segment.source_outer_range.start;
-            }
-
-            if visible_offset > segment.visible_range.end {
-                continue;
-            }
-
-            if visible_offset == segment.visible_range.start
-                && matches!(affinity, VisibleOffsetAffinity::Before)
-            {
-                return segment.source_outer_range.start;
-            }
-
-            if visible_offset == segment.visible_range.end
-                && matches!(affinity, VisibleOffsetAffinity::After)
-            {
-                if let Some(next_segment) = self.segments.get(index + 1)
-                    && next_segment.visible_range.start == visible_offset
-                {
-                    return next_segment.source_range.start;
-                }
-
-                return segment.source_outer_range.end;
-            }
-
-            return segment.source_range.start + visible_offset - segment.visible_range.start;
-        }
-
-        self.range.end
+    fn visible_to_source_caret_offset(&self, visible_offset: usize) -> usize {
+        visible_segments_to_source_caret_offset(
+            &self.segments,
+            self.range,
+            self.visible_len,
+            visible_offset,
+        )
     }
 }
 
@@ -714,6 +683,63 @@ impl From<ProjectedVisibleSegment<'_>> for LineSegmentSnapshot {
             source_outer_range: segment.source_outer_range,
         }
     }
+}
+
+fn visible_segments_to_source_caret_offset(
+    segments: &[LineSegmentSnapshot],
+    line_range: TextRange,
+    visible_len: usize,
+    visible_offset: usize,
+) -> usize {
+    let visible_offset = visible_offset.min(visible_len);
+
+    for (index, segment) in segments.iter().enumerate() {
+        if visible_offset < segment.visible_range.start {
+            return segment.source_outer_range.start;
+        }
+
+        if visible_offset > segment.visible_range.end {
+            continue;
+        }
+
+        if visible_offset == segment.visible_range.start {
+            if segment.source_range.start > segment.source_outer_range.start {
+                return segment.source_range.start;
+            }
+
+            if let Some(previous_segment) =
+                index.checked_sub(1).and_then(|index| segments.get(index))
+                && previous_segment.visible_range.end == visible_offset
+                && previous_segment.source_range.end < previous_segment.source_outer_range.end
+            {
+                return previous_segment.source_range.end;
+            }
+
+            return segment.source_range.start;
+        }
+
+        if visible_offset == segment.visible_range.end {
+            if segment.source_range.end < segment.source_outer_range.end {
+                return segment.source_range.end;
+            }
+
+            if let Some(next_segment) = segments.get(index + 1)
+                && next_segment.visible_range.start == visible_offset
+            {
+                if next_segment.source_range.start > next_segment.source_outer_range.start {
+                    return next_segment.source_range.start;
+                }
+
+                return next_segment.source_range.start;
+            }
+
+            return segment.source_range.end;
+        }
+
+        return segment.source_range.start + visible_offset - segment.visible_range.start;
+    }
+
+    line_range.end
 }
 
 struct EditorElement {
@@ -1309,6 +1335,58 @@ mod tests {
                     "Capture thought with `code`".len()
                 ),
             ]
+        );
+    }
+
+    #[test]
+    fn hidden_inline_boundaries_hit_test_to_marker_edit_edges() {
+        let document = Document::new("Capture **thought** with `code`.");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let segments: Vec<LineSegmentSnapshot> = line
+            .visible_segments()
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        let visible_len = segments
+            .last()
+            .map_or(0, |segment| segment.visible_range.end);
+
+        assert_eq!(
+            visible_segments_to_source_caret_offset(
+                &segments,
+                line.range,
+                visible_len,
+                "Capture ".len()
+            ),
+            "Capture **".len()
+        );
+        assert_eq!(
+            visible_segments_to_source_caret_offset(
+                &segments,
+                line.range,
+                visible_len,
+                "Capture thought".len()
+            ),
+            "Capture **thought".len()
+        );
+        assert_eq!(
+            visible_segments_to_source_caret_offset(
+                &segments,
+                line.range,
+                visible_len,
+                "Capture thought with ".len()
+            ),
+            "Capture **thought** with `".len()
+        );
+        assert_eq!(
+            visible_segments_to_source_caret_offset(
+                &segments,
+                line.range,
+                visible_len,
+                "Capture thought with code".len()
+            ),
+            "Capture **thought** with `code".len()
         );
     }
 }

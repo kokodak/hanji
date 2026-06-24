@@ -195,6 +195,15 @@ impl<'a> ProjectedLine<'a> {
         self.range.end
     }
 
+    pub fn visible_to_source_caret_offset(&self, visible_offset: usize) -> usize {
+        let segments = self.visible_segments();
+        let visible_len = segments
+            .last()
+            .map_or(0, |segment| segment.visible_range.end);
+
+        visible_segments_to_source_caret_offset(&segments, self.range, visible_len, visible_offset)
+    }
+
     pub fn source_visible_segments(&self) -> Vec<ProjectedSegment<'a>> {
         let mut segments = Vec::new();
 
@@ -260,6 +269,63 @@ impl<'a> ProjectedLine<'a> {
 
         segments
     }
+}
+
+fn visible_segments_to_source_caret_offset(
+    segments: &[ProjectedVisibleSegment<'_>],
+    line_range: TextRange,
+    visible_len: usize,
+    visible_offset: usize,
+) -> usize {
+    let visible_offset = visible_offset.min(visible_len);
+
+    for (index, segment) in segments.iter().enumerate() {
+        if visible_offset < segment.visible_range.start {
+            return segment.source_outer_range.start;
+        }
+
+        if visible_offset > segment.visible_range.end {
+            continue;
+        }
+
+        if visible_offset == segment.visible_range.start {
+            if segment.source_range.start > segment.source_outer_range.start {
+                return segment.source_range.start;
+            }
+
+            if let Some(previous_segment) =
+                index.checked_sub(1).and_then(|index| segments.get(index))
+                && previous_segment.visible_range.end == visible_offset
+                && previous_segment.source_range.end < previous_segment.source_outer_range.end
+            {
+                return previous_segment.source_range.end;
+            }
+
+            return segment.source_range.start;
+        }
+
+        if visible_offset == segment.visible_range.end {
+            if segment.source_range.end < segment.source_outer_range.end {
+                return segment.source_range.end;
+            }
+
+            if let Some(next_segment) = segments.get(index + 1)
+                && next_segment.visible_range.start == visible_offset
+            {
+                if next_segment.source_range.start > next_segment.source_outer_range.start {
+                    return next_segment.source_range.start;
+                }
+
+                return next_segment.source_range.start;
+            }
+
+            return segment.source_range.end;
+        }
+
+        return segment.source_range.start + visible_offset - segment.visible_range.start;
+    }
+
+    line_range.end
 }
 
 fn should_reveal_inline(inline_range: TextRange, reveal_range: TextRange) -> bool {
@@ -667,6 +733,7 @@ fn push_code_inline<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hanji_core::{EditorCommand, Selection};
 
     #[test]
     fn projects_lines_with_source_ranges_and_kinds() {
@@ -1003,6 +1070,79 @@ mod tests {
             line.visible_to_source_offset(17, VisibleOffsetAffinity::After),
             21
         );
+    }
+
+    #[test]
+    fn maps_hidden_inline_boundaries_to_editable_marker_edges() {
+        let document = Document::new("This is **bold** text");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.visible_text(), "This is bold text");
+        assert_eq!(
+            line.visible_to_source_caret_offset("This is".len()),
+            "This is".len()
+        );
+        assert_eq!(
+            line.visible_to_source_caret_offset("This is ".len()),
+            "This is **".len()
+        );
+        assert_eq!(
+            line.visible_to_source_caret_offset("This is bo".len()),
+            "This is **bo".len()
+        );
+        assert_eq!(
+            line.visible_to_source_caret_offset("This is bold".len()),
+            "This is **bold".len()
+        );
+        assert_eq!(
+            line.visible_to_source_caret_offset("This is bold ".len()),
+            "This is **bold** ".len()
+        );
+    }
+
+    #[test]
+    fn delete_backward_at_hidden_opening_boundary_edits_one_marker() {
+        let mut document = Document::new("This is **bold** and `code`");
+        let caret = {
+            let projection = project_document(&document);
+            projection.lines()[0].visible_to_source_caret_offset("This is ".len())
+        };
+
+        assert_eq!(caret, "This is **".len());
+        document.set_selection(Selection::caret(caret)).unwrap();
+        document.execute(EditorCommand::DeleteBackward).unwrap();
+
+        assert_eq!(document.text(), "This is *bold** and `code`");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.visible_text(), "This is *bold** and code");
+        assert!(line.inlines.iter().any(|inline| {
+            inline.source == "`code`" && matches!(inline.kind, MarkdownInline::Code { .. })
+        }));
+    }
+
+    #[test]
+    fn delete_forward_at_hidden_closing_boundary_edits_one_marker() {
+        let mut document = Document::new("This is **bold** and `code`");
+        let caret = {
+            let projection = project_document(&document);
+            projection.lines()[0].visible_to_source_caret_offset("This is bold".len())
+        };
+
+        assert_eq!(caret, "This is **bold".len());
+        document.set_selection(Selection::caret(caret)).unwrap();
+        document.execute(EditorCommand::DeleteForward).unwrap();
+
+        assert_eq!(document.text(), "This is **bold* and `code`");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.visible_text(), "This is **bold* and code");
+        assert!(line.inlines.iter().any(|inline| {
+            inline.source == "`code`" && matches!(inline.kind, MarkdownInline::Code { .. })
+        }));
     }
 
     #[test]

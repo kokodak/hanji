@@ -83,6 +83,8 @@ Caret reveal includes the opening and closing marker boundaries. This keeps dele
 
 Hidden markers must never be edited implicitly. Any edit that starts from visible coordinates must first resolve to a source range with explicit boundary affinity.
 
+For caret placement, the visible start of hidden inline content maps after the opening marker, and the visible end maps before the closing marker. That means clicking before `bold` in hidden `**bold**` places the caret at `**|bold**`, while clicking after `bold` places it at `**bold|**`. The next Backspace or Delete then edits visible source text one character at a time.
+
 ## Test Scenarios
 
 Projection tests should focus on behavior that can change editing meaning:
@@ -92,6 +94,8 @@ Projection tests should focus on behavior that can change editing meaning:
 - A caret on an opening or closing marker boundary reveals the span.
 - A selection that intersects hidden markers reveals the span.
 - A selection spanning multiple inline spans reveals each intersected span.
+- Hidden inline content boundaries map to editable marker edges.
+- Backspace and Delete at revealed marker boundaries remove one source character, not the whole formatting span.
 - Adjacent or malformed markers do not leak styles into unrelated spans.
 - Inline code and strong spans remain independent when one of them becomes malformed.
 
