@@ -85,7 +85,7 @@ Hidden markers must never be edited implicitly. Any edit that starts from visibl
 
 For caret placement, the visible start of hidden inline content maps after the opening marker, and the visible end maps before the closing marker. That means clicking before `bold` in hidden `**bold**` places the caret at `**|bold**`, while clicking after `bold` places it at `**bold|**`. The next Backspace or Delete then edits visible source text one character at a time.
 
-For blockquotes, the visible start of the line maps after the hidden `> ` marker. Pressing Enter in a non-empty blockquote line continues the blockquote by inserting a new `> ` marker. Pressing Enter again on an empty blockquote marker line removes that marker and leaves a clean normal line.
+For blockquotes, the visible start of the line maps after the hidden `> ` marker. Pressing Enter in a non-empty blockquote line continues the blockquote by inserting a new `> ` marker. Pressing Enter again on an empty blockquote marker line removes that marker and leaves a clean normal line. Consecutive blockquote lines should render as one visual quote block with a continuous quote bar; an unquoted line breaks the run.
 
 For selection placement, source range boundaries remain meaningful. A selection that starts outside an inline span and extends into that span should reveal and select the marker text it crosses. A selection that starts inside the inline content uses the same caret placement rule as editing, so it selects the content without implicitly adding hidden markers.
 

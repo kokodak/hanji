@@ -1259,7 +1259,8 @@ impl Element for EditorElement {
         let editor = self.editor.read(cx);
         let text_style = window.text_style();
         let mut lines = Vec::new();
-        let mut blockquote_bars = Vec::new();
+        let mut blockquote_bar_runs = Vec::new();
+        let mut blockquote_bar_run = None;
         let mut code_backgrounds = Vec::new();
         let mut top = 0.0;
 
@@ -1288,9 +1289,12 @@ impl Element for EditorElement {
                 ),
                 size(bounds.size.width, px(presentation.line_height)),
             );
-            if presentation.is_blockquote {
-                blockquote_bars.push(blockquote_bar_quad(container_bounds));
-            }
+            record_blockquote_bar_run(
+                &mut blockquote_bar_runs,
+                &mut blockquote_bar_run,
+                container_bounds,
+                presentation.is_blockquote,
+            );
             code_backgrounds.extend(code_background_quads(
                 &visible_segments,
                 &layout,
@@ -1309,6 +1313,11 @@ impl Element for EditorElement {
                 bounds: line_bounds,
             });
         }
+        flush_blockquote_bar_run(&mut blockquote_bar_runs, &mut blockquote_bar_run);
+        let blockquote_bars = blockquote_bar_runs
+            .into_iter()
+            .map(blockquote_bar_quad)
+            .collect();
 
         let cursor = if selection.is_empty() {
             caret_quad(&lines, selection.start)
@@ -1510,6 +1519,52 @@ fn blockquote_bar_quad(bounds: Bounds<Pixels>) -> PaintQuad {
         ),
         rgb(0xaeb6bf),
     )
+}
+
+fn record_blockquote_bar_run(
+    runs: &mut Vec<Bounds<Pixels>>,
+    current_run: &mut Option<Bounds<Pixels>>,
+    bounds: Bounds<Pixels>,
+    is_blockquote: bool,
+) {
+    if is_blockquote {
+        let bounds = match current_run.take() {
+            Some(run) => merge_blockquote_bar_bounds(run, bounds),
+            None => bounds,
+        };
+        *current_run = Some(bounds);
+    } else {
+        flush_blockquote_bar_run(runs, current_run);
+    }
+}
+
+fn flush_blockquote_bar_run(
+    runs: &mut Vec<Bounds<Pixels>>,
+    current_run: &mut Option<Bounds<Pixels>>,
+) {
+    if let Some(run) = current_run.take() {
+        runs.push(run);
+    }
+}
+
+fn merge_blockquote_bar_bounds(start: Bounds<Pixels>, end: Bounds<Pixels>) -> Bounds<Pixels> {
+    Bounds::from_corners(
+        point(start.left(), start.top()),
+        point(start.right(), end.bottom()),
+    )
+}
+
+#[cfg(test)]
+fn collect_blockquote_bar_bounds(lines: &[(Bounds<Pixels>, bool)]) -> Vec<Bounds<Pixels>> {
+    let mut runs = Vec::new();
+    let mut current_run = None;
+
+    for (bounds, is_blockquote) in lines {
+        record_blockquote_bar_run(&mut runs, &mut current_run, *bounds, *is_blockquote);
+    }
+
+    flush_blockquote_bar_run(&mut runs, &mut current_run);
+    runs
 }
 
 fn code_background_quads(
@@ -1765,6 +1820,36 @@ mod tests {
         assert_eq!(presentation.font_size, FONT_SIZE);
         assert_eq!(presentation.line_height, LINE_HEIGHT);
         assert!(presentation.text_indent > 0.0);
+    }
+
+    #[test]
+    fn consecutive_blockquote_lines_share_one_bar_run() {
+        let lines = [
+            (
+                Bounds::new(point(px(0.0), px(0.0)), size(px(100.0), px(24.0))),
+                true,
+            ),
+            (
+                Bounds::new(point(px(0.0), px(24.0)), size(px(100.0), px(24.0))),
+                true,
+            ),
+            (
+                Bounds::new(point(px(0.0), px(48.0)), size(px(100.0), px(24.0))),
+                false,
+            ),
+            (
+                Bounds::new(point(px(0.0), px(72.0)), size(px(100.0), px(24.0))),
+                true,
+            ),
+        ];
+
+        let runs = collect_blockquote_bar_bounds(&lines);
+
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].top(), px(0.0));
+        assert_eq!(runs[0].bottom(), px(48.0));
+        assert_eq!(runs[1].top(), px(72.0));
+        assert_eq!(runs[1].bottom(), px(96.0));
     }
 
     #[test]
