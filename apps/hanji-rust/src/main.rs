@@ -10,8 +10,8 @@ use gpui::{
 };
 use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
 use hanji_markdown::{
-    MarkdownCommand, MarkdownCommandError, MarkdownLine, ProjectedLine, ProjectedSegmentKind,
-    execute_markdown_command, project_document,
+    MarkdownCommand, MarkdownCommandError, MarkdownInline, MarkdownLine, ProjectedLine,
+    ProjectedSegmentKind, execute_markdown_command, project_document,
 };
 use hanji_storage::DocumentSession;
 
@@ -639,6 +639,7 @@ struct EditorElement {
 
 struct EditorPrepaintState {
     lines: Vec<LineSnapshot>,
+    code_backgrounds: Vec<PaintQuad>,
     cursor: Option<PaintQuad>,
     selections: Vec<PaintQuad>,
 }
@@ -705,6 +706,7 @@ impl Element for EditorElement {
         let editor = self.editor.read(cx);
         let text_style = window.text_style();
         let mut lines = Vec::new();
+        let mut code_backgrounds = Vec::new();
         let mut top = 0.0;
 
         let document = editor.session.document();
@@ -723,6 +725,7 @@ impl Element for EditorElement {
                 point(bounds.left(), bounds.top() + px(top)),
                 size(bounds.size.width, px(presentation.line_height)),
             );
+            code_backgrounds.extend(code_background_quads(line, &layout, line_bounds));
             top += presentation.line_height;
 
             lines.push(LineSnapshot {
@@ -742,6 +745,7 @@ impl Element for EditorElement {
 
         EditorPrepaintState {
             lines,
+            code_backgrounds,
             cursor,
             selections,
         }
@@ -764,15 +768,8 @@ impl Element for EditorElement {
             cx,
         );
 
-        for line in &prepaint.lines {
-            line.layout
-                .paint_background(
-                    line.bounds.origin,
-                    line.bounds.bottom() - line.bounds.top(),
-                    window,
-                    cx,
-                )
-                .ok();
+        for background in prepaint.code_backgrounds.drain(..) {
+            window.paint_quad(background);
         }
 
         for selection in prepaint.selections.drain(..) {
@@ -865,13 +862,8 @@ fn push_text_run(
         text_style.color
     };
 
-    let background_color = if matches!(style, InlineRunStyle::Code) {
-        Some(rgba(0x25231f2a).into())
-    } else {
-        None
-    };
-    let underline = if matches!(style, InlineRunStyle::Strong | InlineRunStyle::Code) {
-        Some(inline_style_run_boundary_marker(style))
+    let underline = if matches!(style, InlineRunStyle::Strong) {
+        Some(font_run_boundary_marker())
     } else {
         None
     };
@@ -880,20 +872,66 @@ fn push_text_run(
         len,
         font,
         color,
-        background_color,
+        background_color: None,
         underline,
         strikethrough: None,
     });
 }
 
-fn inline_style_run_boundary_marker(style: InlineRunStyle) -> UnderlineStyle {
-    // GPUI 0.2.2 can merge runs when only font or background changes.
-    // A zero-width transparent underline separates inline style runs without drawing.
+fn font_run_boundary_marker() -> UnderlineStyle {
+    // GPUI 0.2.2 can merge runs when only the font changes.
+    // A zero-width transparent underline separates the font run without drawing.
     UnderlineStyle {
         thickness: px(0.0),
         color: Some(rgba(0x00000000).into()),
-        wavy: matches!(style, InlineRunStyle::Code),
+        wavy: false,
     }
+}
+
+fn code_background_ranges(line: &ProjectedLine<'_>) -> Vec<TextRange> {
+    line.inlines
+        .iter()
+        .filter_map(|inline| match inline.kind {
+            MarkdownInline::Code { .. } => Some(inline.source_range),
+            MarkdownInline::Text | MarkdownInline::Strong { .. } => None,
+        })
+        .collect()
+}
+
+fn code_background_quads(
+    line: &ProjectedLine<'_>,
+    layout: &ShapedLine,
+    bounds: Bounds<Pixels>,
+) -> Vec<PaintQuad> {
+    code_background_ranges(line)
+        .into_iter()
+        .filter_map(|range| code_background_quad(line.range, layout, bounds, range))
+        .collect()
+}
+
+fn code_background_quad(
+    line_range: TextRange,
+    layout: &ShapedLine,
+    bounds: Bounds<Pixels>,
+    range: TextRange,
+) -> Option<PaintQuad> {
+    let start = range.start.max(line_range.start);
+    let end = range.end.min(line_range.end);
+
+    if start >= end {
+        return None;
+    }
+
+    let start_x = layout.x_for_index(start - line_range.start);
+    let end_x = layout.x_for_index(end - line_range.start);
+
+    Some(fill(
+        Bounds::from_corners(
+            point(bounds.left() + start_x, bounds.top()),
+            point(bounds.left() + end_x, bounds.bottom()),
+        ),
+        rgba(0x25231f2a),
+    ))
 }
 
 fn line_presentation(line: MarkdownLine) -> LinePresentation {
@@ -1033,40 +1071,40 @@ mod tests {
     use hanji_core::Document;
 
     #[test]
-    fn inline_code_runs_keep_background_boundaries_without_strong_runs() {
+    fn inline_code_background_ranges_survive_without_strong_runs() {
         let document = Document::new("Capture thought with `code`.");
         let projection = project_document(&document);
         let line = &projection.lines()[0];
-        let runs = line_text_runs(line, line_presentation(line.kind), &TextStyle::default());
 
-        let code_runs: Vec<_> = runs
-            .iter()
-            .filter(|run| run.background_color.is_some())
-            .collect();
-
-        assert_eq!(code_runs.len(), 3);
-        assert!(code_runs.iter().all(|run| run.underline.is_some()));
+        assert_eq!(
+            code_background_ranges(line),
+            vec![TextRange::new(
+                "Capture thought with ".len(),
+                "Capture thought with `code`".len()
+            )]
+        );
     }
 
     #[test]
-    fn strong_and_code_runs_use_distinct_invisible_boundaries() {
+    fn inline_code_uses_source_backed_background_instead_of_text_run_background() {
         let document = Document::new("Capture **thought** with `code`.");
         let projection = project_document(&document);
         let line = &projection.lines()[0];
         let runs = line_text_runs(line, line_presentation(line.kind), &TextStyle::default());
 
-        let strong_boundary = runs
-            .iter()
-            .find(|run| run.font.weight == FontWeight::BLACK)
-            .and_then(|run| run.underline);
-        let code_boundary = runs
-            .iter()
-            .find(|run| run.background_color.is_some())
-            .and_then(|run| run.underline);
-
-        assert!(strong_boundary.is_some());
-        assert!(code_boundary.is_some());
-        assert_ne!(strong_boundary, code_boundary);
+        assert!(runs.iter().all(|run| run.background_color.is_none()));
+        assert!(
+            runs.iter()
+                .find(|run| run.font.weight == FontWeight::BLACK)
+                .is_some_and(|run| run.underline.is_some())
+        );
+        assert_eq!(
+            code_background_ranges(line),
+            vec![TextRange::new(
+                "Capture **thought** with ".len(),
+                "Capture **thought** with `code`".len()
+            )]
+        );
     }
 }
 
