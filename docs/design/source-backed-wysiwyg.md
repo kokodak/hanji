@@ -57,7 +57,7 @@ Text:
 
 The first rendering step can keep markers visible and only apply styling to known spans. Hiding markers should come later, after caret mapping and editing behavior are trustworthy.
 
-Current inline projection starts with plain text and strong spans. Escapes, nesting, emphasis, links, inline code, and parser-grade CommonMark behavior should be added incrementally with source mapping tests.
+Current inline projection starts with plain text, strong spans, and inline code spans. Escapes, nesting, emphasis, links, and parser-grade CommonMark behavior should be added incrementally with source mapping tests.
 
 ## Marker Policy
 

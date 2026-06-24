@@ -8,12 +8,12 @@ use gpui::{
     WindowOptions, actions, div, fill, point, prelude::*, px, relative, rgb, rgba, size,
 };
 use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
-use hanji_markdown::{MarkdownInline, MarkdownLine, ProjectedLine, project_document};
+use hanji_markdown::{MarkdownLine, ProjectedLine, ProjectedSegmentKind, project_document};
 use hanji_storage::DocumentSession;
 
 const LINE_HEIGHT: f32 = 24.0;
 const FONT_SIZE: f32 = 16.0;
-const SAMPLE_DOCUMENT: &str = "# Hanji\n\nCapture the thought.";
+const SAMPLE_DOCUMENT: &str = "# Hanji\n\nCapture the **thought** with `code`.";
 
 actions!(
     hanji,
@@ -731,36 +731,38 @@ fn line_text_runs(
 ) -> Vec<TextRun> {
     let mut runs = Vec::new();
 
-    for inline in &line.inlines {
-        match inline.kind {
-            MarkdownInline::Text => {
-                push_text_run(
-                    &mut runs,
-                    inline.source.len(),
-                    false,
-                    presentation,
-                    text_style,
-                );
-            }
-            MarkdownInline::Strong { markers } => {
-                let opening_len = markers.opening.len();
-                let content_len = inline.content_range.len();
-                let closing_len = markers.closing.len();
+    for segment in line.source_visible_segments() {
+        let style = match segment.kind {
+            ProjectedSegmentKind::StrongContent => InlineRunStyle::Strong,
+            ProjectedSegmentKind::CodeContent => InlineRunStyle::Code,
+            ProjectedSegmentKind::Text
+            | ProjectedSegmentKind::StrongMarker
+            | ProjectedSegmentKind::CodeMarker => InlineRunStyle::Plain,
+        };
 
-                push_text_run(&mut runs, opening_len, false, presentation, text_style);
-                push_text_run(&mut runs, content_len, true, presentation, text_style);
-                push_text_run(&mut runs, closing_len, false, presentation, text_style);
-            }
-        }
+        push_text_run(
+            &mut runs,
+            segment.source.len(),
+            style,
+            presentation,
+            text_style,
+        );
     }
 
     runs
 }
 
+#[derive(Clone, Copy)]
+enum InlineRunStyle {
+    Plain,
+    Strong,
+    Code,
+}
+
 fn push_text_run(
     runs: &mut Vec<TextRun>,
     len: usize,
-    bold: bool,
+    style: InlineRunStyle,
     presentation: LinePresentation,
     text_style: &TextStyle,
 ) {
@@ -768,7 +770,7 @@ fn push_text_run(
         return;
     }
 
-    let font = if presentation.is_heading || bold {
+    let font = if presentation.is_heading || matches!(style, InlineRunStyle::Strong) {
         text_style.font().bold()
     } else {
         text_style.font()
@@ -779,11 +781,17 @@ fn push_text_run(
         text_style.color
     };
 
+    let background_color = if matches!(style, InlineRunStyle::Code) {
+        Some(rgba(0x25231f14).into())
+    } else {
+        None
+    };
+
     runs.push(TextRun {
         len,
         font,
         color,
-        background_color: None,
+        background_color,
         underline: None,
         strikethrough: None,
     });

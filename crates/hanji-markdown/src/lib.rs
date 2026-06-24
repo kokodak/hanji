@@ -6,5 +6,5 @@ pub use command::{MarkdownCommand, MarkdownCommandError, execute_markdown_comman
 pub use line::{MarkdownLine, classify_line, first_heading};
 pub use projection::{
     MarkdownInline, MarkdownMarkerRanges, MarkdownProjection, ProjectedInline, ProjectedLine,
-    project_document,
+    ProjectedSegment, ProjectedSegmentKind, project_document,
 };
