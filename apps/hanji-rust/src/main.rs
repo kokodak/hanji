@@ -104,6 +104,9 @@ impl Hanji {
                 .previous_grapheme_offset(range.start)
                 .ok()
                 .flatten()
+                .and_then(|offset| {
+                    self.horizontal_offset_within_current_line(range.start, offset, -1)
+                })
         } else {
             Some(range.start)
         };
@@ -123,7 +126,13 @@ impl Hanji {
         let document = self.session.document();
         let range = document.selection().primary();
         let offset = if range.is_empty() {
-            document.previous_word_offset(range.start).ok().flatten()
+            document
+                .previous_word_offset(range.start)
+                .ok()
+                .flatten()
+                .and_then(|offset| {
+                    self.horizontal_offset_within_current_line(range.start, offset, -1)
+                })
         } else {
             Some(range.start)
         };
@@ -143,7 +152,11 @@ impl Hanji {
         let document = self.session.document();
         let range = document.selection().primary();
         let offset = if range.is_empty() {
-            document.next_grapheme_offset(range.end).ok().flatten()
+            document
+                .next_grapheme_offset(range.end)
+                .ok()
+                .flatten()
+                .and_then(|offset| self.horizontal_offset_within_current_line(range.end, offset, 1))
         } else {
             Some(range.end)
         };
@@ -163,7 +176,11 @@ impl Hanji {
         let document = self.session.document();
         let range = document.selection().primary();
         let offset = if range.is_empty() {
-            document.next_word_offset(range.end).ok().flatten()
+            document
+                .next_word_offset(range.end)
+                .ok()
+                .flatten()
+                .and_then(|offset| self.horizontal_offset_within_current_line(range.end, offset, 1))
         } else {
             Some(range.end)
         };
@@ -463,7 +480,8 @@ impl Hanji {
             document.previous_grapheme_offset(head).ok().flatten()
         } else {
             document.next_grapheme_offset(head).ok().flatten()
-        };
+        }
+        .and_then(|offset| self.horizontal_offset_within_current_line(head, offset, direction));
 
         if let Some(offset) = offset {
             self.select_from_anchor_to(anchor, offset, None, cx);
@@ -506,7 +524,8 @@ impl Hanji {
             document.previous_word_offset(head).ok().flatten()
         } else {
             document.next_word_offset(head).ok().flatten()
-        };
+        }
+        .and_then(|offset| self.horizontal_offset_within_current_line(head, offset, direction));
 
         if let Some(offset) = offset {
             self.select_from_anchor_to(anchor, offset, None, cx);
@@ -607,6 +626,17 @@ impl Hanji {
         let line_index = document.line_index_at_offset(offset).ok()?;
 
         document.line_range(line_index)
+    }
+
+    fn horizontal_offset_within_current_line(
+        &self,
+        origin: usize,
+        candidate: usize,
+        direction: isize,
+    ) -> Option<usize> {
+        let line_range = self.line_range_for_offset(origin)?;
+
+        horizontal_offset_within_line(line_range, origin, candidate, direction)
     }
 
     fn index_for_mouse_position(&self, position: gpui::Point<Pixels>) -> usize {
@@ -982,6 +1012,23 @@ fn extension_points_for_selection(selection: TextRange, direction: isize) -> (us
     } else {
         (selection.start, selection.end)
     }
+}
+
+fn horizontal_offset_within_line(
+    line_range: TextRange,
+    origin: usize,
+    candidate: usize,
+    direction: isize,
+) -> Option<usize> {
+    if direction < 0 {
+        if candidate < line_range.start {
+            return (origin > line_range.start).then_some(line_range.start);
+        }
+    } else if candidate > line_range.end {
+        return (origin < line_range.end).then_some(line_range.end);
+    }
+
+    Some(candidate)
 }
 
 fn drag_distance_exceeds_threshold(
@@ -1759,6 +1806,26 @@ mod tests {
         assert_eq!(
             extension_points_for_selection(TextRange::new(8, 16), 1),
             (8, 16)
+        );
+    }
+
+    #[test]
+    fn horizontal_offsets_do_not_cross_line_boundaries() {
+        let first_line = TextRange::new(0, 5);
+        let second_line = TextRange::new(6, 10);
+
+        assert_eq!(horizontal_offset_within_line(first_line, 4, 5, 1), Some(5));
+        assert_eq!(horizontal_offset_within_line(first_line, 5, 6, 1), None);
+        assert_eq!(horizontal_offset_within_line(first_line, 4, 8, 1), Some(5));
+
+        assert_eq!(
+            horizontal_offset_within_line(second_line, 7, 6, -1),
+            Some(6)
+        );
+        assert_eq!(horizontal_offset_within_line(second_line, 6, 5, -1), None);
+        assert_eq!(
+            horizontal_offset_within_line(second_line, 7, 3, -1),
+            Some(6)
         );
     }
 
