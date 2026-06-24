@@ -11,6 +11,7 @@ GPUI should handle windows, input delivery, rendering, and platform integration.
 - Apply transactions.
 - Maintain undo and redo history.
 - Run editor commands.
+- Keep editing ranges and caret movement on user-visible text boundaries.
 - Expose document snapshots to the UI.
 
 ## Non-Responsibilities
@@ -27,11 +28,19 @@ GPUI should handle windows, input delivery, rendering, and platform integration.
 
 The text buffer stores Markdown source. It should support efficient insertions, deletions, line lookup, and source range mapping.
 
-Hanji currently uses byte ranges that must fall on UTF-8 character boundaries. This keeps source mapping direct while still rejecting invalid edits inside multi-byte characters.
+Hanji currently uses byte ranges that must fall on Unicode grapheme cluster boundaries. This keeps source mapping direct while still rejecting invalid edits inside multi-byte characters, combined emoji, and other user-visible characters made from multiple Unicode scalar values.
 
 The buffer also keeps a line index of byte offsets where each line starts. This gives the UI a cheap way to ask which line contains an offset or which source range belongs to a line, without threading GPUI layout types into the core.
 
-`TextPosition` represents a source position as a line plus a character column. The core can convert between `TextPosition` and byte offsets so UI code can talk in line-oriented terms while transactions still edit precise UTF-8 ranges.
+`TextPosition` represents a source position as a line plus a grapheme column. The core can convert between `TextPosition` and byte offsets so UI code can talk in line-oriented terms while transactions still edit precise UTF-8 ranges.
+
+### Unicode Boundaries
+
+The source text remains UTF-8 Markdown, and `TextRange` continues to store byte offsets. Those offsets are valid edit positions only when they are also Unicode grapheme cluster boundaries.
+
+The core owns this rule because every UI surface should agree on what a user-visible character is. A flag emoji such as `🇰🇷`, a combined emoji, or a character plus combining marks should move, select, and delete as one visible unit.
+
+Core APIs should expose previous, next, and nearest grapheme boundary helpers for UI adapters. Platform input APIs may report UTF-16 offsets or hit-tested byte indexes that land inside a grapheme cluster; adapters should snap those positions through the core before setting selections or applying transactions.
 
 ### Transaction
 
@@ -55,7 +64,7 @@ A command is a named editing operation such as insert text, toggle emphasis, cre
 
 Commands should operate on core state and return an outcome the UI can render.
 
-The current core command layer covers plain text insertion plus backward and forward deletion. Markdown-specific commands belong in `hanji-markdown`, where they can build core transactions without making the core depend on Markdown syntax.
+The current core command layer covers plain text insertion plus backward and forward deletion. Deletion commands operate on grapheme clusters, not Unicode scalar values. Markdown-specific commands belong in `hanji-markdown`, where they can build core transactions without making the core depend on Markdown syntax.
 
 ### Projection
 
@@ -64,3 +73,5 @@ A projection is a visual interpretation of the Markdown source. WYSIWYG editing 
 ## Boundary Rule
 
 No GPUI types should enter the editor core. If the boundary feels awkward, define a small Hanji-owned type instead.
+
+Byte offsets from UI adapters should be treated as untrusted until the core validates or snaps them to a grapheme boundary.

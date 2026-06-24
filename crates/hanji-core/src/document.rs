@@ -50,6 +50,18 @@ impl Document {
         self.buffer.offset_at_position(position)
     }
 
+    pub fn previous_grapheme_offset(&self, offset: usize) -> Result<Option<usize>, EditError> {
+        self.buffer.previous_grapheme_offset(offset)
+    }
+
+    pub fn next_grapheme_offset(&self, offset: usize) -> Result<Option<usize>, EditError> {
+        self.buffer.next_grapheme_offset(offset)
+    }
+
+    pub fn nearest_grapheme_offset(&self, offset: usize) -> Result<usize, EditError> {
+        self.buffer.nearest_grapheme_offset(offset)
+    }
+
     pub fn selection(&self) -> &Selection {
         &self.selection
     }

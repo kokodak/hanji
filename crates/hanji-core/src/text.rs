@@ -1,3 +1,5 @@
+use unicode_segmentation::UnicodeSegmentation;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextBuffer {
     text: String,
@@ -45,7 +47,7 @@ impl TextBuffer {
             .line_index
             .line_start(line)
             .ok_or(EditError::InvalidRange)?;
-        let column = self.text[line_start..offset].chars().count();
+        let column = self.text[line_start..offset].graphemes(true).count();
 
         Ok(TextPosition::new(line, column))
     }
@@ -60,13 +62,13 @@ impl TextBuffer {
             return Ok(line_range.start);
         }
 
-        for (column, (offset, _)) in line.char_indices().enumerate() {
+        for (column, (offset, _)) in line.grapheme_indices(true).enumerate() {
             if column == position.column {
                 return Ok(line_range.start + offset);
             }
         }
 
-        if position.column == line.chars().count() {
+        if position.column == line.graphemes(true).count() {
             return Ok(line_range.end);
         }
 
@@ -76,6 +78,24 @@ impl TextBuffer {
     pub fn slice(&self, range: TextRange) -> Result<&str, EditError> {
         self.validate_range(range)?;
         Ok(&self.text[range.start..range.end])
+    }
+
+    pub fn previous_grapheme_offset(&self, offset: usize) -> Result<Option<usize>, EditError> {
+        self.validate_range(TextRange::caret(offset))?;
+        Ok(previous_grapheme_offset(&self.text, offset))
+    }
+
+    pub fn next_grapheme_offset(&self, offset: usize) -> Result<Option<usize>, EditError> {
+        self.validate_range(TextRange::caret(offset))?;
+        Ok(next_grapheme_offset(&self.text, offset))
+    }
+
+    pub fn nearest_grapheme_offset(&self, offset: usize) -> Result<usize, EditError> {
+        if offset > self.text.len() {
+            return Err(EditError::InvalidRange);
+        }
+
+        Ok(nearest_grapheme_offset(&self.text, offset))
     }
 
     pub fn apply_edits(&mut self, edits: &[TextEdit]) -> Result<(), EditError> {
@@ -246,7 +266,71 @@ fn validate_range(text: &str, range: TextRange) -> Result<(), EditError> {
         return Err(EditError::InvalidBoundary);
     }
 
+    if !is_grapheme_boundary(text, range.start) || !is_grapheme_boundary(text, range.end) {
+        return Err(EditError::InvalidBoundary);
+    }
+
     Ok(())
+}
+
+fn is_grapheme_boundary(text: &str, offset: usize) -> bool {
+    offset == text.len()
+        || text
+            .grapheme_indices(true)
+            .any(|(grapheme_offset, _)| grapheme_offset == offset)
+}
+
+fn previous_grapheme_offset(text: &str, offset: usize) -> Option<usize> {
+    if offset == 0 {
+        return None;
+    }
+
+    text[..offset]
+        .grapheme_indices(true)
+        .last()
+        .map(|(offset, _)| offset)
+}
+
+fn next_grapheme_offset(text: &str, offset: usize) -> Option<usize> {
+    if offset >= text.len() {
+        return None;
+    }
+
+    text[offset..]
+        .grapheme_indices(true)
+        .nth(1)
+        .map(|(next_offset, _)| offset + next_offset)
+        .or(Some(text.len()))
+}
+
+fn nearest_grapheme_offset(text: &str, offset: usize) -> usize {
+    if offset >= text.len() {
+        return text.len();
+    }
+
+    let mut previous = 0;
+
+    for (boundary, _) in text.grapheme_indices(true) {
+        if boundary == offset {
+            return offset;
+        }
+
+        if boundary > offset {
+            return nearest_boundary(previous, boundary, offset);
+        }
+
+        previous = boundary;
+    }
+
+    nearest_boundary(previous, text.len(), offset)
+}
+
+fn nearest_boundary(previous: usize, next: usize, offset: usize) -> usize {
+    if offset - previous <= next - offset {
+        previous
+    } else {
+        next
+    }
 }
 
 #[cfg(test)]
@@ -306,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn converts_offsets_to_char_positions() {
+    fn converts_offsets_to_grapheme_positions() {
         let buffer = TextBuffer::new("안녕 abc\n\ndfg");
 
         assert_eq!(buffer.position_at_offset(0), Ok(TextPosition::new(0, 0)));
@@ -329,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    fn converts_char_positions_to_offsets() {
+    fn converts_grapheme_positions_to_offsets() {
         let buffer = TextBuffer::new("안녕 abc\n\ndfg");
 
         assert_eq!(buffer.offset_at_position(TextPosition::new(0, 0)), Ok(0));
@@ -373,6 +457,85 @@ mod tests {
             buffer.position_at_offset(1),
             Err(EditError::InvalidBoundary)
         );
+    }
+
+    #[test]
+    fn rejects_position_lookup_inside_grapheme_cluster() {
+        let buffer = TextBuffer::new("🇰🇷");
+
+        assert_eq!(
+            buffer.position_at_offset("🇰".len()),
+            Err(EditError::InvalidBoundary)
+        );
+        assert_eq!(
+            buffer.line_index_at_offset("🇰".len()),
+            Err(EditError::InvalidBoundary)
+        );
+    }
+
+    #[test]
+    fn treats_flag_emoji_as_one_text_position() {
+        let buffer = TextBuffer::new("A🇰🇷B");
+        let after_flag = "A🇰🇷".len();
+
+        assert_eq!(
+            buffer.position_at_offset(after_flag),
+            Ok(TextPosition::new(0, 2))
+        );
+        assert_eq!(
+            buffer.offset_at_position(TextPosition::new(0, 2)),
+            Ok(after_flag)
+        );
+    }
+
+    #[test]
+    fn finds_adjacent_grapheme_offsets() {
+        let buffer = TextBuffer::new("A🇰🇷B");
+        let before_flag = "A".len();
+        let after_flag = "A🇰🇷".len();
+
+        assert_eq!(
+            buffer.previous_grapheme_offset(after_flag),
+            Ok(Some(before_flag))
+        );
+        assert_eq!(
+            buffer.next_grapheme_offset(before_flag),
+            Ok(Some(after_flag))
+        );
+    }
+
+    #[test]
+    fn snaps_offsets_to_nearest_grapheme_boundary() {
+        let buffer = TextBuffer::new("A🇰🇷B");
+        let before_flag = "A".len();
+        let middle_of_flag = "A🇰".len();
+        let after_flag = "A🇰🇷".len();
+
+        assert_eq!(
+            buffer.nearest_grapheme_offset(middle_of_flag),
+            Ok(before_flag)
+        );
+        assert_eq!(
+            buffer.nearest_grapheme_offset(middle_of_flag + 1),
+            Ok(after_flag)
+        );
+        assert_eq!(
+            buffer.nearest_grapheme_offset("A🇰🇷B".len() + 1),
+            Err(EditError::InvalidRange)
+        );
+    }
+
+    #[test]
+    fn rejects_edits_inside_grapheme_cluster() {
+        let mut buffer = TextBuffer::new("A🇰🇷B");
+        let middle_of_flag = "A🇰".len();
+
+        let error = buffer
+            .apply_edits(&[TextEdit::insert(middle_of_flag, "x")])
+            .unwrap_err();
+
+        assert_eq!(error, EditError::InvalidBoundary);
+        assert_eq!(buffer.as_str(), "A🇰🇷B");
     }
 
     #[test]

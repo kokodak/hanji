@@ -55,7 +55,7 @@ impl Document {
             return Ok(true);
         }
 
-        let Some(previous_offset) = previous_char_offset(self.text(), range.start) else {
+        let Some(previous_offset) = self.previous_grapheme_offset(range.start)? else {
             return Ok(false);
         };
 
@@ -78,7 +78,7 @@ impl Document {
             return Ok(true);
         }
 
-        let Some(next_offset) = next_char_offset(self.text(), range.start) else {
+        let Some(next_offset) = self.next_grapheme_offset(range.start)? else {
             return Ok(false);
         };
 
@@ -100,29 +100,6 @@ fn single_selection_range(document: &Document) -> Result<TextRange, CommandError
     }
 
     Ok(ranges[0])
-}
-
-fn previous_char_offset(text: &str, offset: usize) -> Option<usize> {
-    if offset == 0 {
-        return None;
-    }
-
-    text[..offset]
-        .char_indices()
-        .last()
-        .map(|(offset, _)| offset)
-}
-
-fn next_char_offset(text: &str, offset: usize) -> Option<usize> {
-    if offset >= text.len() {
-        return None;
-    }
-
-    text[offset..]
-        .char_indices()
-        .nth(1)
-        .map(|(next_offset, _)| offset + next_offset)
-        .or(Some(text.len()))
 }
 
 #[cfg(test)]
@@ -173,6 +150,19 @@ mod tests {
     }
 
     #[test]
+    fn delete_backward_removes_previous_grapheme_cluster() {
+        let mut document = Document::new("A🇰🇷");
+        document
+            .set_selection(Selection::caret("A🇰🇷".len()))
+            .unwrap();
+
+        document.execute(EditorCommand::DeleteBackward).unwrap();
+
+        assert_eq!(document.text(), "A");
+        assert_eq!(document.selection().primary(), TextRange::caret("A".len()));
+    }
+
+    #[test]
     fn delete_forward_removes_next_character() {
         let mut document = Document::new("한지");
         document.set_selection(Selection::caret(0)).unwrap();
@@ -180,6 +170,17 @@ mod tests {
         document.execute(EditorCommand::DeleteForward).unwrap();
 
         assert_eq!(document.text(), "지");
+        assert_eq!(document.selection().primary(), TextRange::caret(0));
+    }
+
+    #[test]
+    fn delete_forward_removes_next_grapheme_cluster() {
+        let mut document = Document::new("🇰🇷B");
+        document.set_selection(Selection::caret(0)).unwrap();
+
+        document.execute(EditorCommand::DeleteForward).unwrap();
+
+        assert_eq!(document.text(), "B");
         assert_eq!(document.selection().primary(), TextRange::caret(0));
     }
 

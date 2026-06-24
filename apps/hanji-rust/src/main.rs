@@ -58,9 +58,13 @@ impl Hanji {
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
-        let range = self.session.document().selection().primary();
+        let document = self.session.document();
+        let range = document.selection().primary();
         let offset = if range.is_empty() {
-            previous_char_offset(self.session.document().text(), range.start)
+            document
+                .previous_grapheme_offset(range.start)
+                .ok()
+                .flatten()
         } else {
             Some(range.start)
         };
@@ -72,9 +76,10 @@ impl Hanji {
 
     fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
-        let range = self.session.document().selection().primary();
+        let document = self.session.document();
+        let range = document.selection().primary();
         let offset = if range.is_empty() {
-            next_char_offset(self.session.document().text(), range.end)
+            document.next_grapheme_offset(range.end).ok().flatten()
         } else {
             Some(range.end)
         };
@@ -165,6 +170,11 @@ impl Hanji {
 
     fn move_caret(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.preferred_column = None;
+        let offset = self
+            .session
+            .document()
+            .nearest_grapheme_offset(offset)
+            .unwrap_or(offset);
 
         if self.session.set_selection(Selection::caret(offset)).is_ok() {
             cx.notify();
@@ -279,8 +289,12 @@ impl Hanji {
             .unwrap_or(last_line);
         let local_x = position.x - line.bounds.left();
         let local_index = line.layout.closest_index_for_x(local_x);
+        let offset = line.range.start + local_index.min(line.range.len());
 
-        line.range.start + local_index.min(line.range.len())
+        self.session
+            .document()
+            .nearest_grapheme_offset(offset)
+            .unwrap_or(offset)
     }
 
     fn byte_range_to_utf16(&self, range: &Range<usize>) -> Range<usize> {
@@ -289,11 +303,14 @@ impl Hanji {
     }
 
     fn utf16_range_to_byte(&self, range: &Range<usize>) -> Range<usize> {
-        utf16_offset_to_byte(self.session.document().text(), range.start)
-            ..utf16_offset_to_byte(self.session.document().text(), range.end)
+        let text = self.session.document().text();
+        let range = utf16_offset_to_byte(text, range.start)..utf16_offset_to_byte(text, range.end);
+
+        self.snap_byte_range(range)
     }
 
     fn bounds_for_byte_range(&self, range: Range<usize>) -> Option<Bounds<Pixels>> {
+        let range = self.snap_byte_range(range);
         let line = self.line_for_offset(range.start)?;
         let start = range
             .start
@@ -317,6 +334,18 @@ impl Hanji {
             .iter()
             .find(|line| offset >= line.range.start && offset <= line.range.end)
             .or_else(|| self.last_lines.last())
+    }
+
+    fn snap_byte_range(&self, range: Range<usize>) -> Range<usize> {
+        let document = self.session.document();
+        let start = document
+            .nearest_grapheme_offset(range.start)
+            .unwrap_or(range.start);
+        let end = document
+            .nearest_grapheme_offset(range.end)
+            .unwrap_or(range.end);
+
+        start.min(end)..start.max(end)
     }
 
     fn document_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -791,29 +820,6 @@ fn line_for_offset(lines: &[LineSnapshot], offset: usize) -> Option<&LineSnapsho
         .iter()
         .find(|line| offset >= line.range.start && offset <= line.range.end)
         .or_else(|| lines.last())
-}
-
-fn previous_char_offset(text: &str, offset: usize) -> Option<usize> {
-    if offset == 0 {
-        return None;
-    }
-
-    text[..offset]
-        .char_indices()
-        .last()
-        .map(|(offset, _)| offset)
-}
-
-fn next_char_offset(text: &str, offset: usize) -> Option<usize> {
-    if offset >= text.len() {
-        return None;
-    }
-
-    text[offset..]
-        .char_indices()
-        .nth(1)
-        .map(|(next_offset, _)| offset + next_offset)
-        .or(Some(text.len()))
 }
 
 fn byte_offset_to_utf16(text: &str, offset: usize) -> usize {
