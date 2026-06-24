@@ -9,7 +9,10 @@ use gpui::{
     relative, rgb, rgba, size,
 };
 use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
-use hanji_markdown::{MarkdownLine, ProjectedLine, ProjectedSegmentKind, project_document};
+use hanji_markdown::{
+    MarkdownCommand, MarkdownCommandError, MarkdownLine, ProjectedLine, ProjectedSegmentKind,
+    execute_markdown_command, project_document,
+};
 use hanji_storage::DocumentSession;
 
 const LINE_HEIGHT: f32 = 24.0;
@@ -19,7 +22,20 @@ const SAMPLE_DOCUMENT: &str = "# Hanji\n\nCapture the **thought** with `code`.";
 actions!(
     hanji,
     [
-        Backspace, Delete, Left, Right, Up, Down, Home, End, Newline, Undo, Redo, Save, Quit
+        Backspace,
+        Delete,
+        Left,
+        Right,
+        Up,
+        Down,
+        Home,
+        End,
+        Newline,
+        ToggleStrong,
+        Undo,
+        Redo,
+        Save,
+        Quit
     ]
 );
 
@@ -126,6 +142,29 @@ impl Hanji {
         let caret = range.start + "\n".len();
 
         self.replace_range(range, "\n", caret..caret, window, cx);
+    }
+
+    fn toggle_strong(&mut self, _: &ToggleStrong, window: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+
+        match self.session.edit_document(|document| {
+            execute_markdown_command(document, MarkdownCommand::ToggleStrong)
+        }) {
+            Ok(true) => {
+                self.preferred_column = None;
+                self.document_changed(window, cx);
+            }
+            Ok(false) => {}
+            Err(MarkdownCommandError::MultipleSelectionsUnsupported) => {
+                self.status_message =
+                    Some("Multiple selections are not supported yet.".to_string());
+                cx.notify();
+            }
+            Err(MarkdownCommandError::Edit(_)) => {
+                self.status_message = Some("Could not toggle strong text.".to_string());
+                cx.notify();
+            }
+        }
     }
 
     fn undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
@@ -509,6 +548,7 @@ impl Render for Hanji {
             .on_action(cx.listener(Self::home))
             .on_action(cx.listener(Self::end))
             .on_action(cx.listener(Self::newline))
+            .on_action(cx.listener(Self::toggle_strong))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
             .on_action(cx.listener(Self::save))
@@ -979,6 +1019,7 @@ fn main() {
             KeyBinding::new("cmd-left", Home, None),
             KeyBinding::new("cmd-right", End, None),
             KeyBinding::new("enter", Newline, None),
+            KeyBinding::new("cmd-b", ToggleStrong, None),
             KeyBinding::new("cmd-z", Undo, None),
             KeyBinding::new("cmd-shift-z", Redo, None),
             KeyBinding::new("cmd-s", Save, None),

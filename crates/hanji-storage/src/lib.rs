@@ -56,6 +56,16 @@ impl DocumentSession {
         Ok(changed)
     }
 
+    pub fn edit_document<E>(
+        &mut self,
+        edit: impl FnOnce(&mut Document) -> Result<bool, E>,
+    ) -> Result<bool, E> {
+        let before_text = self.document.text().to_owned();
+        let changed = edit(&mut self.document)?;
+        self.mark_changed_if(changed && self.document.text() != before_text);
+        Ok(changed)
+    }
+
     pub fn set_selection(&mut self, selection: Selection) -> Result<(), hanji_core::EditError> {
         self.document.set_selection(selection)
     }
@@ -258,6 +268,44 @@ mod tests {
         assert!(!changed);
         assert!(!session.is_dirty());
         assert_eq!(session.revision(), 0);
+    }
+
+    #[test]
+    fn session_tracks_dirty_state_after_external_document_edit() {
+        let directory = TestDirectory::new("session-external-edit");
+        let path = directory.path().join("note.md");
+        let mut session = DocumentSession::new(&path, "Hanji");
+
+        let changed = session
+            .edit_document(|document| document.execute(EditorCommand::insert_text(" notes")))
+            .unwrap();
+
+        assert!(changed);
+        assert!(session.is_dirty());
+        assert_eq!(session.revision(), 1);
+        assert_eq!(session.document().text(), " notesHanji");
+    }
+
+    #[test]
+    fn session_does_not_mark_selection_only_external_document_edit_dirty() {
+        let directory = TestDirectory::new("session-external-selection");
+        let path = directory.path().join("note.md");
+        let mut session = DocumentSession::new(&path, "Hanji");
+
+        let changed = session
+            .edit_document(|document| {
+                document.set_selection(Selection::caret(5))?;
+                Ok::<_, hanji_core::EditError>(true)
+            })
+            .unwrap();
+
+        assert!(changed);
+        assert!(!session.is_dirty());
+        assert_eq!(session.revision(), 0);
+        assert_eq!(
+            session.document().selection().primary(),
+            hanji_core::TextRange::caret(5)
+        );
     }
 
     #[test]
