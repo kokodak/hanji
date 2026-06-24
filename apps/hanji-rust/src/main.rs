@@ -29,10 +29,20 @@ actions!(
         Right,
         ShiftLeft,
         ShiftRight,
+        OptionLeft,
+        OptionRight,
+        ShiftOptionLeft,
+        ShiftOptionRight,
         Up,
         Down,
         ShiftUp,
         ShiftDown,
+        CmdUp,
+        CmdDown,
+        ShiftCmdLeft,
+        ShiftCmdRight,
+        ShiftCmdUp,
+        ShiftCmdDown,
         Home,
         End,
         Newline,
@@ -108,6 +118,26 @@ impl Hanji {
         self.extend_selection_horizontally(-1, cx);
     }
 
+    fn option_left(&mut self, _: &OptionLeft, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        let document = self.session.document();
+        let range = document.selection().primary();
+        let offset = if range.is_empty() {
+            document.previous_word_offset(range.start).ok().flatten()
+        } else {
+            Some(range.start)
+        };
+
+        if let Some(offset) = offset {
+            self.move_caret(offset, cx);
+        }
+    }
+
+    fn shift_option_left(&mut self, _: &ShiftOptionLeft, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        self.extend_selection_by_word(-1, cx);
+    }
+
     fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
         let document = self.session.document();
@@ -128,6 +158,26 @@ impl Hanji {
         self.extend_selection_horizontally(1, cx);
     }
 
+    fn option_right(&mut self, _: &OptionRight, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        let document = self.session.document();
+        let range = document.selection().primary();
+        let offset = if range.is_empty() {
+            document.next_word_offset(range.end).ok().flatten()
+        } else {
+            Some(range.end)
+        };
+
+        if let Some(offset) = offset {
+            self.move_caret(offset, cx);
+        }
+    }
+
+    fn shift_option_right(&mut self, _: &ShiftOptionRight, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        self.extend_selection_by_word(1, cx);
+    }
+
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
         self.move_caret_vertically(-1, cx);
@@ -146,6 +196,36 @@ impl Hanji {
     fn shift_down(&mut self, _: &ShiftDown, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
         self.extend_selection_vertically(1, cx);
+    }
+
+    fn cmd_up(&mut self, _: &CmdUp, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        self.move_caret(0, cx);
+    }
+
+    fn cmd_down(&mut self, _: &CmdDown, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        self.move_caret(self.session.document().len(), cx);
+    }
+
+    fn shift_cmd_left(&mut self, _: &ShiftCmdLeft, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        self.extend_selection_to_line_boundary(-1, cx);
+    }
+
+    fn shift_cmd_right(&mut self, _: &ShiftCmdRight, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        self.extend_selection_to_line_boundary(1, cx);
+    }
+
+    fn shift_cmd_up(&mut self, _: &ShiftCmdUp, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        self.extend_selection_to_document_boundary(-1, cx);
+    }
+
+    fn shift_cmd_down(&mut self, _: &ShiftCmdDown, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        self.extend_selection_to_document_boundary(1, cx);
     }
 
     fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
@@ -417,6 +497,45 @@ impl Hanji {
         if let Ok(target_offset) = target_offset {
             self.select_from_anchor_to(anchor, target_offset, Some(column), cx);
         }
+    }
+
+    fn extend_selection_by_word(&mut self, direction: isize, cx: &mut Context<Self>) {
+        let document = self.session.document();
+        let (anchor, head) = self.selection_extension_points(direction);
+        let offset = if direction < 0 {
+            document.previous_word_offset(head).ok().flatten()
+        } else {
+            document.next_word_offset(head).ok().flatten()
+        };
+
+        if let Some(offset) = offset {
+            self.select_from_anchor_to(anchor, offset, None, cx);
+        }
+    }
+
+    fn extend_selection_to_line_boundary(&mut self, direction: isize, cx: &mut Context<Self>) {
+        let (anchor, head) = self.selection_extension_points(direction);
+        let Some(line_range) = self.line_range_for_offset(head) else {
+            return;
+        };
+        let offset = if direction < 0 {
+            line_range.start
+        } else {
+            line_range.end
+        };
+
+        self.select_from_anchor_to(anchor, offset, None, cx);
+    }
+
+    fn extend_selection_to_document_boundary(&mut self, direction: isize, cx: &mut Context<Self>) {
+        let (anchor, _) = self.selection_extension_points(direction);
+        let offset = if direction < 0 {
+            0
+        } else {
+            self.session.document().len()
+        };
+
+        self.select_from_anchor_to(anchor, offset, None, cx);
     }
 
     fn selection_extension_points(&self, direction: isize) -> (usize, usize) {
@@ -730,10 +849,20 @@ impl Render for Hanji {
             .on_action(cx.listener(Self::right))
             .on_action(cx.listener(Self::shift_left))
             .on_action(cx.listener(Self::shift_right))
+            .on_action(cx.listener(Self::option_left))
+            .on_action(cx.listener(Self::option_right))
+            .on_action(cx.listener(Self::shift_option_left))
+            .on_action(cx.listener(Self::shift_option_right))
             .on_action(cx.listener(Self::up))
             .on_action(cx.listener(Self::down))
             .on_action(cx.listener(Self::shift_up))
             .on_action(cx.listener(Self::shift_down))
+            .on_action(cx.listener(Self::cmd_up))
+            .on_action(cx.listener(Self::cmd_down))
+            .on_action(cx.listener(Self::shift_cmd_left))
+            .on_action(cx.listener(Self::shift_cmd_right))
+            .on_action(cx.listener(Self::shift_cmd_up))
+            .on_action(cx.listener(Self::shift_cmd_down))
             .on_action(cx.listener(Self::home))
             .on_action(cx.listener(Self::end))
             .on_action(cx.listener(Self::newline))
@@ -1684,6 +1813,10 @@ fn main() {
             KeyBinding::new("right", Right, None),
             KeyBinding::new("shift-left", ShiftLeft, None),
             KeyBinding::new("shift-right", ShiftRight, None),
+            KeyBinding::new("alt-left", OptionLeft, None),
+            KeyBinding::new("alt-right", OptionRight, None),
+            KeyBinding::new("alt-shift-left", ShiftOptionLeft, None),
+            KeyBinding::new("alt-shift-right", ShiftOptionRight, None),
             KeyBinding::new("up", Up, None),
             KeyBinding::new("down", Down, None),
             KeyBinding::new("shift-up", ShiftUp, None),
@@ -1692,6 +1825,12 @@ fn main() {
             KeyBinding::new("end", End, None),
             KeyBinding::new("cmd-left", Home, None),
             KeyBinding::new("cmd-right", End, None),
+            KeyBinding::new("cmd-up", CmdUp, None),
+            KeyBinding::new("cmd-down", CmdDown, None),
+            KeyBinding::new("cmd-shift-left", ShiftCmdLeft, None),
+            KeyBinding::new("cmd-shift-right", ShiftCmdRight, None),
+            KeyBinding::new("cmd-shift-up", ShiftCmdUp, None),
+            KeyBinding::new("cmd-shift-down", ShiftCmdDown, None),
             KeyBinding::new("enter", Newline, None),
             KeyBinding::new("cmd-b", ToggleStrong, None),
             KeyBinding::new("cmd-e", ToggleCode, None),

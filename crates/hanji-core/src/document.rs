@@ -58,6 +58,14 @@ impl Document {
         self.buffer.next_grapheme_offset(offset)
     }
 
+    pub fn previous_word_offset(&self, offset: usize) -> Result<Option<usize>, EditError> {
+        self.buffer.previous_word_offset(offset)
+    }
+
+    pub fn next_word_offset(&self, offset: usize) -> Result<Option<usize>, EditError> {
+        self.buffer.next_word_offset(offset)
+    }
+
     pub fn nearest_grapheme_offset(&self, offset: usize) -> Result<usize, EditError> {
         self.buffer.nearest_grapheme_offset(offset)
     }

@@ -87,6 +87,8 @@ For caret placement, the visible start of hidden inline content maps after the o
 
 For selection placement, source range boundaries remain meaningful. A selection that starts outside an inline span and extends into that span should reveal and select the marker text it crosses. A selection that starts inside the inline content uses the same caret placement rule as editing, so it selects the content without implicitly adding hidden markers.
 
+Keyboard selection expansion uses the same source coordinate rules. `Shift+Arrow` extends by visible caret movement, `Shift+Option+Left/Right` extends to the previous or next source word boundary, and `Shift+Cmd` extends to the current line or document boundary depending on the arrow direction.
+
 ## Test Scenarios
 
 Projection tests should focus on behavior that can change editing meaning:

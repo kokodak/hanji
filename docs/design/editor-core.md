@@ -42,6 +42,8 @@ The core owns this rule because every UI surface should agree on what a user-vis
 
 Core APIs should expose previous, next, and nearest grapheme boundary helpers for UI adapters. Platform input APIs may report UTF-16 offsets or hit-tested byte indexes that land inside a grapheme cluster; adapters should snap those positions through the core before setting selections or applying transactions.
 
+Core should also expose word-boundary movement for accelerated keyboard navigation. Word movement must still return grapheme boundaries, skip punctuation and Markdown marker characters around words, and avoid splitting emoji or combined Unicode clusters.
+
 ### Transaction
 
 A transaction is one intentional edit. It can include text changes, selection changes, and metadata needed for undo.

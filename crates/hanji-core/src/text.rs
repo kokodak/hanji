@@ -90,6 +90,16 @@ impl TextBuffer {
         Ok(next_grapheme_offset(&self.text, offset))
     }
 
+    pub fn previous_word_offset(&self, offset: usize) -> Result<Option<usize>, EditError> {
+        self.validate_range(TextRange::caret(offset))?;
+        Ok(previous_word_offset(&self.text, offset))
+    }
+
+    pub fn next_word_offset(&self, offset: usize) -> Result<Option<usize>, EditError> {
+        self.validate_range(TextRange::caret(offset))?;
+        Ok(next_word_offset(&self.text, offset))
+    }
+
     pub fn nearest_grapheme_offset(&self, offset: usize) -> Result<usize, EditError> {
         if offset > self.text.len() {
             return Err(EditError::InvalidRange);
@@ -303,6 +313,69 @@ fn next_grapheme_offset(text: &str, offset: usize) -> Option<usize> {
         .or(Some(text.len()))
 }
 
+fn previous_word_offset(text: &str, offset: usize) -> Option<usize> {
+    if offset == 0 {
+        return None;
+    }
+
+    let mut cursor = offset;
+    while let Some((start, grapheme)) = previous_grapheme(text, cursor) {
+        if is_word_grapheme(grapheme) {
+            break;
+        }
+        cursor = start;
+    }
+
+    while let Some((start, grapheme)) = previous_grapheme(text, cursor) {
+        if !is_word_grapheme(grapheme) {
+            break;
+        }
+        cursor = start;
+    }
+
+    Some(cursor)
+}
+
+fn next_word_offset(text: &str, offset: usize) -> Option<usize> {
+    if offset >= text.len() {
+        return None;
+    }
+
+    let mut cursor = offset;
+    while let Some((start, grapheme)) = current_grapheme(text, cursor) {
+        if is_word_grapheme(grapheme) {
+            break;
+        }
+        cursor = start + grapheme.len();
+    }
+
+    while let Some((start, grapheme)) = current_grapheme(text, cursor) {
+        if !is_word_grapheme(grapheme) {
+            break;
+        }
+        cursor = start + grapheme.len();
+    }
+
+    Some(cursor)
+}
+
+fn previous_grapheme(text: &str, offset: usize) -> Option<(usize, &str)> {
+    text[..offset].grapheme_indices(true).last()
+}
+
+fn current_grapheme(text: &str, offset: usize) -> Option<(usize, &str)> {
+    text[offset..]
+        .grapheme_indices(true)
+        .next()
+        .map(|(relative_offset, grapheme)| (offset + relative_offset, grapheme))
+}
+
+fn is_word_grapheme(grapheme: &str) -> bool {
+    grapheme
+        .chars()
+        .any(|character| character == '_' || character.is_alphanumeric())
+}
+
 fn nearest_grapheme_offset(text: &str, offset: usize) -> usize {
     if offset >= text.len() {
         return text.len();
@@ -502,6 +575,45 @@ mod tests {
             buffer.next_grapheme_offset(before_flag),
             Ok(Some(after_flag))
         );
+    }
+
+    #[test]
+    fn finds_word_offsets_across_punctuation() {
+        let buffer = TextBuffer::new("Capture **thought** with `code`.");
+
+        assert_eq!(
+            buffer.previous_word_offset("Capture **thought**".len()),
+            Ok(Some("Capture **".len()))
+        );
+        assert_eq!(
+            buffer.previous_word_offset("Capture **thought** with".len()),
+            Ok(Some("Capture **thought** ".len()))
+        );
+        assert_eq!(
+            buffer.next_word_offset("Capture ".len()),
+            Ok(Some("Capture **thought".len()))
+        );
+        assert_eq!(
+            buffer.next_word_offset("Capture **thought** ".len()),
+            Ok(Some("Capture **thought** with".len()))
+        );
+        assert_eq!(
+            buffer.next_word_offset("Capture **thought** with `".len()),
+            Ok(Some("Capture **thought** with `code".len()))
+        );
+    }
+
+    #[test]
+    fn finds_word_offsets_without_splitting_graphemes() {
+        let buffer = TextBuffer::new("A🇰🇷B");
+        let after_a = "A".len();
+        let after_flag = "A🇰🇷".len();
+        let end = "A🇰🇷B".len();
+
+        assert_eq!(buffer.next_word_offset(0), Ok(Some(after_a)));
+        assert_eq!(buffer.next_word_offset(after_a), Ok(Some(end)));
+        assert_eq!(buffer.previous_word_offset(end), Ok(Some(after_flag)));
+        assert_eq!(buffer.previous_word_offset(after_flag), Ok(Some(0)));
     }
 
     #[test]
