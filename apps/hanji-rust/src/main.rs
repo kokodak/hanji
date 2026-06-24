@@ -870,8 +870,8 @@ fn push_text_run(
     } else {
         None
     };
-    let underline = if matches!(style, InlineRunStyle::Strong) {
-        Some(font_run_boundary_marker())
+    let underline = if matches!(style, InlineRunStyle::Strong | InlineRunStyle::Code) {
+        Some(inline_style_run_boundary_marker(style))
     } else {
         None
     };
@@ -886,13 +886,13 @@ fn push_text_run(
     });
 }
 
-fn font_run_boundary_marker() -> UnderlineStyle {
-    // GPUI 0.2.2 only starts a new font run when a decoration changes.
-    // A zero-width transparent underline separates the font run without drawing.
+fn inline_style_run_boundary_marker(style: InlineRunStyle) -> UnderlineStyle {
+    // GPUI 0.2.2 can merge runs when only font or background changes.
+    // A zero-width transparent underline separates inline style runs without drawing.
     UnderlineStyle {
         thickness: px(0.0),
         color: Some(rgba(0x00000000).into()),
-        wavy: false,
+        wavy: matches!(style, InlineRunStyle::Code),
     }
 }
 
@@ -1025,6 +1025,49 @@ fn open_initial_session() -> io::Result<DocumentSession> {
 
 fn scratch_document_path() -> PathBuf {
     env::temp_dir().join("hanji-scratch.md")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hanji_core::Document;
+
+    #[test]
+    fn inline_code_runs_keep_background_boundaries_without_strong_runs() {
+        let document = Document::new("Capture thought with `code`.");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let runs = line_text_runs(line, line_presentation(line.kind), &TextStyle::default());
+
+        let code_runs: Vec<_> = runs
+            .iter()
+            .filter(|run| run.background_color.is_some())
+            .collect();
+
+        assert_eq!(code_runs.len(), 3);
+        assert!(code_runs.iter().all(|run| run.underline.is_some()));
+    }
+
+    #[test]
+    fn strong_and_code_runs_use_distinct_invisible_boundaries() {
+        let document = Document::new("Capture **thought** with `code`.");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let runs = line_text_runs(line, line_presentation(line.kind), &TextStyle::default());
+
+        let strong_boundary = runs
+            .iter()
+            .find(|run| run.font.weight == FontWeight::BLACK)
+            .and_then(|run| run.underline);
+        let code_boundary = runs
+            .iter()
+            .find(|run| run.background_color.is_some())
+            .and_then(|run| run.underline);
+
+        assert!(strong_boundary.is_some());
+        assert!(code_boundary.is_some());
+        assert_ne!(strong_boundary, code_boundary);
+    }
 }
 
 fn main() {
