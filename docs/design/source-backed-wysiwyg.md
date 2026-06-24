@@ -15,6 +15,10 @@ Source coordinates are the durable coordinate space. Editing commands, selection
 
 Visible coordinates are temporary. They exist to render, hit test, and present the document in a friendlier form.
 
+Inline projection exposes visible line coordinates before marker hiding is rendered in the app. A visible line offset is a byte offset into the line text after hidden markers are omitted. A projected visible segment stores both the visible range and the source range that produced it; styled segments also keep an outer source range that includes hidden markers.
+
+Visible-to-source mapping needs an explicit boundary affinity because a single visible caret position can represent two valid source positions around hidden markers. For example, the visible position before `bold` in `**bold**` can map either before the opening marker or inside the strong content. Hit testing, keyboard movement, and editing commands should choose that affinity intentionally instead of guessing inside renderer code.
+
 ## Projection
 
 A projection derives visible structure from source text.

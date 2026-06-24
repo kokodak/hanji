@@ -8,5 +8,6 @@ pub use command::{
 pub use line::{MarkdownLine, classify_line, first_heading};
 pub use projection::{
     MarkdownInline, MarkdownMarkerRanges, MarkdownProjection, ProjectedInline, ProjectedLine,
-    ProjectedSegment, ProjectedSegmentKind, project_document,
+    ProjectedSegment, ProjectedSegmentKind, ProjectedVisibleSegment, VisibleOffsetAffinity,
+    project_document,
 };

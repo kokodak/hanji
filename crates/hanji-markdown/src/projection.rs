@@ -30,6 +30,21 @@ pub struct ProjectedSegment<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisibleOffsetAffinity {
+    Before,
+    After,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectedVisibleSegment<'a> {
+    pub visible_range: TextRange,
+    pub source_range: TextRange,
+    pub source_outer_range: TextRange,
+    pub source: &'a str,
+    pub kind: ProjectedSegmentKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarkdownInline {
     Text,
     Strong { markers: MarkdownMarkerRanges },
@@ -60,6 +75,113 @@ pub struct ProjectedLine<'a> {
 }
 
 impl<'a> ProjectedLine<'a> {
+    pub fn visible_text(&self) -> String {
+        let mut text = String::new();
+
+        for segment in self.visible_segments() {
+            text.push_str(segment.source);
+        }
+
+        text
+    }
+
+    pub fn visible_len(&self) -> usize {
+        self.visible_segments()
+            .last()
+            .map_or(0, |segment| segment.visible_range.end)
+    }
+
+    pub fn visible_segments(&self) -> Vec<ProjectedVisibleSegment<'a>> {
+        let mut segments = Vec::new();
+        let mut visible_start = 0;
+
+        for inline in &self.inlines {
+            let kind = match inline.kind {
+                MarkdownInline::Text => ProjectedSegmentKind::Text,
+                MarkdownInline::Strong { .. } => ProjectedSegmentKind::StrongContent,
+                MarkdownInline::Code { .. } => ProjectedSegmentKind::CodeContent,
+            };
+
+            push_visible_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                &mut visible_start,
+                inline.source_range,
+                inline.content_range,
+                kind,
+            );
+        }
+
+        segments
+    }
+
+    pub fn source_to_visible_offset(&self, source_offset: usize) -> usize {
+        let source_offset = source_offset.clamp(self.range.start, self.range.end);
+
+        for segment in self.visible_segments() {
+            if source_offset < segment.source_outer_range.start {
+                return segment.visible_range.start;
+            }
+
+            if source_offset <= segment.source_outer_range.end {
+                if source_offset < segment.source_range.start {
+                    return segment.visible_range.start;
+                }
+
+                if source_offset <= segment.source_range.end {
+                    return segment.visible_range.start + source_offset
+                        - segment.source_range.start;
+                }
+
+                return segment.visible_range.end;
+            }
+        }
+
+        self.visible_len()
+    }
+
+    pub fn visible_to_source_offset(
+        &self,
+        visible_offset: usize,
+        affinity: VisibleOffsetAffinity,
+    ) -> usize {
+        let visible_offset = visible_offset.min(self.visible_len());
+        let segments = self.visible_segments();
+
+        for (index, segment) in segments.iter().enumerate() {
+            if visible_offset < segment.visible_range.start {
+                return segment.source_outer_range.start;
+            }
+
+            if visible_offset > segment.visible_range.end {
+                continue;
+            }
+
+            if visible_offset == segment.visible_range.start
+                && matches!(affinity, VisibleOffsetAffinity::Before)
+            {
+                return segment.source_outer_range.start;
+            }
+
+            if visible_offset == segment.visible_range.end
+                && matches!(affinity, VisibleOffsetAffinity::After)
+            {
+                if let Some(next_segment) = segments.get(index + 1)
+                    && next_segment.visible_range.start == visible_offset
+                {
+                    return next_segment.source_range.start;
+                }
+
+                return segment.source_outer_range.end;
+            }
+
+            return segment.source_range.start + visible_offset - segment.visible_range.start;
+        }
+
+        self.range.end
+    }
+
     pub fn source_visible_segments(&self) -> Vec<ProjectedSegment<'a>> {
         let mut segments = Vec::new();
 
@@ -168,6 +290,34 @@ fn push_segment<'a>(
     });
 }
 
+fn push_visible_segment<'a>(
+    segments: &mut Vec<ProjectedVisibleSegment<'a>>,
+    line_source: &'a str,
+    line_start: usize,
+    visible_start: &mut usize,
+    source_outer_range: TextRange,
+    source_range: TextRange,
+    kind: ProjectedSegmentKind,
+) {
+    if source_range.is_empty() {
+        return;
+    }
+
+    let start = source_range.start - line_start;
+    let end = source_range.end - line_start;
+    let len = source_range.len();
+
+    segments.push(ProjectedVisibleSegment {
+        visible_range: TextRange::new(*visible_start, *visible_start + len),
+        source_range,
+        source_outer_range,
+        source: &line_source[start..end],
+        kind,
+    });
+
+    *visible_start += len;
+}
+
 fn project_inlines(source: &str, source_start: usize) -> Vec<ProjectedInline<'_>> {
     let mut inlines = Vec::new();
     let mut text_start = 0;
@@ -272,7 +422,7 @@ fn find_exact_strong_marker(source: &str, search_start: usize, end: usize) -> Op
     while cursor + 2 <= end {
         if bytes[cursor] == b'*' && bytes[cursor + 1] == b'*' {
             let starts_run = cursor == 0 || bytes[cursor - 1] != b'*';
-            let ends_run = cursor + 2 >= source.len() || bytes[cursor + 2] != b'*';
+            let ends_run = cursor + 2 >= end || bytes[cursor + 2] != b'*';
 
             if starts_run && ends_run {
                 return Some(cursor);
@@ -497,6 +647,116 @@ mod tests {
     }
 
     #[test]
+    fn projects_visible_text_without_markers() {
+        let document = Document::new("This is **bold** and `code`");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.visible_text(), "This is bold and code");
+        assert_eq!(line.visible_len(), "This is bold and code".len());
+    }
+
+    #[test]
+    fn exposes_visible_segments_with_source_mapping() {
+        let document = Document::new("This is **bold** text");
+        let projection = project_document(&document);
+        let segments = projection.lines()[0].visible_segments();
+
+        assert_eq!(
+            segments,
+            vec![
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(0, 8),
+                    source_range: TextRange::new(0, 8),
+                    source_outer_range: TextRange::new(0, 8),
+                    source: "This is ",
+                    kind: ProjectedSegmentKind::Text,
+                },
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(8, 12),
+                    source_range: TextRange::new(10, 14),
+                    source_outer_range: TextRange::new(8, 16),
+                    source: "bold",
+                    kind: ProjectedSegmentKind::StrongContent,
+                },
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(12, 17),
+                    source_range: TextRange::new(16, 21),
+                    source_outer_range: TextRange::new(16, 21),
+                    source: " text",
+                    kind: ProjectedSegmentKind::Text,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn maps_source_offsets_inside_hidden_markers_to_visible_boundaries() {
+        let document = Document::new("This is **bold** text");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.source_to_visible_offset(0), 0);
+        assert_eq!(line.source_to_visible_offset(8), 8);
+        assert_eq!(line.source_to_visible_offset(9), 8);
+        assert_eq!(line.source_to_visible_offset(10), 8);
+        assert_eq!(line.source_to_visible_offset(12), 10);
+        assert_eq!(line.source_to_visible_offset(14), 12);
+        assert_eq!(line.source_to_visible_offset(15), 12);
+        assert_eq!(line.source_to_visible_offset(16), 12);
+        assert_eq!(line.source_to_visible_offset(21), 17);
+    }
+
+    #[test]
+    fn maps_visible_offsets_back_to_source_with_boundary_affinity() {
+        let document = Document::new("This is **bold** text");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(
+            line.visible_to_source_offset(8, VisibleOffsetAffinity::Before),
+            8
+        );
+        assert_eq!(
+            line.visible_to_source_offset(8, VisibleOffsetAffinity::After),
+            10
+        );
+        assert_eq!(
+            line.visible_to_source_offset(10, VisibleOffsetAffinity::Before),
+            12
+        );
+        assert_eq!(
+            line.visible_to_source_offset(12, VisibleOffsetAffinity::Before),
+            14
+        );
+        assert_eq!(
+            line.visible_to_source_offset(12, VisibleOffsetAffinity::After),
+            16
+        );
+        assert_eq!(
+            line.visible_to_source_offset(17, VisibleOffsetAffinity::After),
+            21
+        );
+    }
+
+    #[test]
+    fn maps_multibyte_visible_offsets_to_source_offsets() {
+        let document = Document::new("한지 **노트**");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.visible_text(), "한지 노트");
+        assert_eq!(
+            line.source_to_visible_offset("한지 **노".len()),
+            "한지 노".len()
+        );
+        assert_eq!(
+            line.visible_to_source_offset("한지 노".len(), VisibleOffsetAffinity::Before),
+            "한지 **노".len()
+        );
+    }
+
+    #[test]
     fn leaves_unmatched_strong_markers_as_text() {
         let document = Document::new("This is **not closed");
         let projection = project_document(&document);
@@ -657,6 +917,60 @@ mod tests {
                     kind: ProjectedSegmentKind::Text,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn maps_code_visible_segments_without_projecting_nested_strong() {
+        let document = Document::new("Use `**code**` here");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let segments = line.visible_segments();
+
+        assert_eq!(line.visible_text(), "Use **code** here");
+        assert_eq!(
+            segments,
+            vec![
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(0, 4),
+                    source_range: TextRange::new(0, 4),
+                    source_outer_range: TextRange::new(0, 4),
+                    source: "Use ",
+                    kind: ProjectedSegmentKind::Text,
+                },
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(4, 12),
+                    source_range: TextRange::new(5, 13),
+                    source_outer_range: TextRange::new(4, 14),
+                    source: "**code**",
+                    kind: ProjectedSegmentKind::CodeContent,
+                },
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(12, 17),
+                    source_range: TextRange::new(14, 19),
+                    source_outer_range: TextRange::new(14, 19),
+                    source: " here",
+                    kind: ProjectedSegmentKind::Text,
+                },
+            ]
+        );
+        assert_eq!(line.source_to_visible_offset(4), 4);
+        assert_eq!(line.source_to_visible_offset(5), 4);
+        assert_eq!(
+            line.visible_to_source_offset(4, VisibleOffsetAffinity::Before),
+            4
+        );
+        assert_eq!(
+            line.visible_to_source_offset(4, VisibleOffsetAffinity::After),
+            5
+        );
+        assert_eq!(
+            line.visible_to_source_offset(12, VisibleOffsetAffinity::Before),
+            13
+        );
+        assert_eq!(
+            line.visible_to_source_offset(12, VisibleOffsetAffinity::After),
+            14
         );
     }
 
