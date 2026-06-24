@@ -57,7 +57,7 @@ Text:
 
 The first rendering step can keep markers visible and only apply styling to known spans. Hiding markers should come later, after caret mapping and editing behavior are trustworthy.
 
-Current inline projection starts with plain text, strong spans, and inline code spans. Escapes, nesting, emphasis, links, and parser-grade CommonMark behavior should be added incrementally with source mapping tests.
+Current inline projection starts with plain text, strong spans, and inline code spans. The GPUI app keeps source markers visible: strong content uses a heavier font weight, and inline code markers plus content share the code background. GPUI 0.2.2 does not split line layout font runs for font-only changes, so strong rendering currently forces an invisible decoration boundary in the app renderer. Escapes, nesting, emphasis, links, and parser-grade CommonMark behavior should be added incrementally with source mapping tests.
 
 ## Marker Policy
 

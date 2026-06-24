@@ -2,10 +2,11 @@ use std::{env, io, ops::Range, path::PathBuf, process};
 
 use gpui::{
     App, Application, Bounds, Context, CursorStyle, Element, ElementId, ElementInputHandler,
-    Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId, InspectorElementId,
-    IntoElement, KeyBinding, LayoutId, MouseButton, MouseDownEvent, PaintQuad, Pixels, Render,
-    ShapedLine, SharedString, Style, TextRun, TextStyle, UTF16Selection, Window, WindowBounds,
-    WindowOptions, actions, div, fill, point, prelude::*, px, relative, rgb, rgba, size,
+    Entity, EntityInputHandler, FocusHandle, Focusable, FontWeight, GlobalElementId,
+    InspectorElementId, IntoElement, KeyBinding, LayoutId, MouseButton, MouseDownEvent, PaintQuad,
+    Pixels, Render, ShapedLine, SharedString, Style, TextRun, TextStyle, UTF16Selection,
+    UnderlineStyle, Window, WindowBounds, WindowOptions, actions, div, fill, point, prelude::*, px,
+    relative, rgb, rgba, size,
 };
 use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
 use hanji_markdown::{MarkdownLine, ProjectedLine, ProjectedSegmentKind, project_document};
@@ -696,6 +697,17 @@ impl Element for EditorElement {
             cx,
         );
 
+        for line in &prepaint.lines {
+            line.layout
+                .paint_background(
+                    line.bounds.origin,
+                    line.bounds.bottom() - line.bounds.top(),
+                    window,
+                    cx,
+                )
+                .ok();
+        }
+
         for selection in prepaint.selections.drain(..) {
             window.paint_quad(selection);
         }
@@ -734,10 +746,12 @@ fn line_text_runs(
     for segment in line.source_visible_segments() {
         let style = match segment.kind {
             ProjectedSegmentKind::StrongContent => InlineRunStyle::Strong,
-            ProjectedSegmentKind::CodeContent => InlineRunStyle::Code,
-            ProjectedSegmentKind::Text
-            | ProjectedSegmentKind::StrongMarker
-            | ProjectedSegmentKind::CodeMarker => InlineRunStyle::Plain,
+            ProjectedSegmentKind::CodeMarker | ProjectedSegmentKind::CodeContent => {
+                InlineRunStyle::Code
+            }
+            ProjectedSegmentKind::Text | ProjectedSegmentKind::StrongMarker => {
+                InlineRunStyle::Plain
+            }
         };
 
         push_text_run(
@@ -770,11 +784,14 @@ fn push_text_run(
         return;
     }
 
-    let font = if presentation.is_heading || matches!(style, InlineRunStyle::Strong) {
-        text_style.font().bold()
-    } else {
-        text_style.font()
-    };
+    let mut font = text_style.font();
+    if presentation.is_heading || matches!(style, InlineRunStyle::Strong) {
+        font.weight = if matches!(style, InlineRunStyle::Strong) {
+            FontWeight::BLACK
+        } else {
+            FontWeight::BOLD
+        };
+    }
     let color = if presentation.is_heading {
         rgb(0x1f3f5b).into()
     } else {
@@ -782,7 +799,12 @@ fn push_text_run(
     };
 
     let background_color = if matches!(style, InlineRunStyle::Code) {
-        Some(rgba(0x25231f14).into())
+        Some(rgba(0x25231f2a).into())
+    } else {
+        None
+    };
+    let underline = if matches!(style, InlineRunStyle::Strong) {
+        Some(font_run_boundary_marker())
     } else {
         None
     };
@@ -792,9 +814,19 @@ fn push_text_run(
         font,
         color,
         background_color,
-        underline: None,
+        underline,
         strikethrough: None,
     });
+}
+
+fn font_run_boundary_marker() -> UnderlineStyle {
+    // GPUI 0.2.2 only starts a new font run when a decoration changes.
+    // A zero-width transparent underline separates the font run without drawing.
+    UnderlineStyle {
+        thickness: px(0.0),
+        color: Some(rgba(0x00000000).into()),
+        wavy: false,
+    }
 }
 
 fn line_presentation(line: MarkdownLine) -> LinePresentation {
