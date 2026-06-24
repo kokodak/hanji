@@ -8,6 +8,7 @@ use gpui::{
     actions, div, fill, point, prelude::*, px, relative, rgb, rgba, size,
 };
 use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
+use hanji_markdown::{MarkdownLine, project_document};
 use hanji_storage::DocumentSession;
 
 const LINE_HEIGHT: f32 = 24.0;
@@ -545,6 +546,13 @@ struct EditorPrepaintState {
     selections: Vec<PaintQuad>,
 }
 
+#[derive(Clone, Copy)]
+struct LinePresentation {
+    font_size: f32,
+    line_height: f32,
+    is_heading: bool,
+}
+
 impl IntoElement for EditorElement {
     type Element = Self;
 
@@ -572,10 +580,18 @@ impl Element for EditorElement {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let line_count = self.editor.read(cx).session.document().line_count().max(1);
+        let editor = self.editor.read(cx);
+        let document = editor.session.document();
+        let projection = project_document(document);
+        let mut height = 0.0;
+
+        for line in projection.lines() {
+            height += line_presentation(line.kind).line_height;
+        }
+
         let mut style = Style::default();
         style.size.width = relative(1.0).into();
-        style.size.height = (window.line_height() * line_count).into();
+        style.size.height = px(height.max(LINE_HEIGHT)).into();
 
         (window.request_layout(style, [], cx), ())
     }
@@ -591,41 +607,51 @@ impl Element for EditorElement {
     ) -> Self::PrepaintState {
         let editor = self.editor.read(cx);
         let text_style = window.text_style();
-        let font_size = text_style.font_size.to_pixels(window.rem_size());
-        let line_height = window.line_height();
         let mut lines = Vec::new();
+        let mut top = 0.0;
 
         let document = editor.session.document();
 
-        for line_index in 0..document.line_count() {
-            let range = editor
-                .session
-                .document()
-                .line_range(line_index)
-                .unwrap_or_else(|| TextRange::caret(document.len()));
-            let line_text: SharedString = document.text()[range.start..range.end].to_owned().into();
+        let projection = project_document(document);
+
+        for line in projection.lines() {
+            let presentation = line_presentation(line.kind);
+            let line_text: SharedString = line.source.to_owned().into();
             let runs = if line_text.is_empty() {
                 Vec::new()
             } else {
+                let font = if presentation.is_heading {
+                    text_style.font().bold()
+                } else {
+                    text_style.font()
+                };
+                let color = if presentation.is_heading {
+                    rgb(0x1f3f5b).into()
+                } else {
+                    text_style.color
+                };
+
                 vec![TextRun {
                     len: line_text.len(),
-                    font: text_style.font(),
-                    color: text_style.color,
+                    font,
+                    color,
                     background_color: None,
                     underline: None,
                     strikethrough: None,
                 }]
             };
-            let layout = window
-                .text_system()
-                .shape_line(line_text, font_size, &runs, None);
+            let layout =
+                window
+                    .text_system()
+                    .shape_line(line_text, px(presentation.font_size), &runs, None);
             let line_bounds = Bounds::new(
-                point(bounds.left(), bounds.top() + line_height * line_index),
-                size(bounds.size.width, line_height),
+                point(bounds.left(), bounds.top() + px(top)),
+                size(bounds.size.width, px(presentation.line_height)),
             );
+            top += presentation.line_height;
 
             lines.push(LineSnapshot {
-                range,
+                range: line.range,
                 layout,
                 bounds: line_bounds,
             });
@@ -669,7 +695,12 @@ impl Element for EditorElement {
 
         for line in &prepaint.lines {
             line.layout
-                .paint(line.bounds.origin, window.line_height(), window, cx)
+                .paint(
+                    line.bounds.origin,
+                    line.bounds.bottom() - line.bounds.top(),
+                    window,
+                    cx,
+                )
                 .ok();
         }
 
@@ -683,6 +714,30 @@ impl Element for EditorElement {
         self.editor.update(cx, |editor, _cx| {
             editor.last_lines = lines;
         });
+    }
+}
+
+fn line_presentation(line: MarkdownLine) -> LinePresentation {
+    match line {
+        MarkdownLine::Heading { level } => {
+            let font_size = match level {
+                1 => 24.0,
+                2 => 21.0,
+                3 => 19.0,
+                _ => 17.0,
+            };
+
+            LinePresentation {
+                font_size,
+                line_height: font_size + 12.0,
+                is_heading: true,
+            }
+        }
+        MarkdownLine::Blank | MarkdownLine::Paragraph => LinePresentation {
+            font_size: FONT_SIZE,
+            line_height: LINE_HEIGHT,
+            is_heading: false,
+        },
     }
 }
 

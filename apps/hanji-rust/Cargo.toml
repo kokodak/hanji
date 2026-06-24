@@ -8,4 +8,5 @@ authors.workspace = true
 [dependencies]
 gpui.workspace = true
 hanji-core.workspace = true
+hanji-markdown.workspace = true
 hanji-storage.workspace = true
