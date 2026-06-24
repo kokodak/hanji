@@ -85,6 +85,8 @@ Hidden markers must never be edited implicitly. Any edit that starts from visibl
 
 For caret placement, the visible start of hidden inline content maps after the opening marker, and the visible end maps before the closing marker. That means clicking before `bold` in hidden `**bold**` places the caret at `**|bold**`, while clicking after `bold` places it at `**bold|**`. The next Backspace or Delete then edits visible source text one character at a time.
 
+For selection placement, source range boundaries remain meaningful. A selection that starts outside an inline span and extends into that span should reveal and select the marker text it crosses. A selection that starts inside the inline content uses the same caret placement rule as editing, so it selects the content without implicitly adding hidden markers.
+
 ## Test Scenarios
 
 Projection tests should focus on behavior that can change editing meaning:
@@ -94,6 +96,8 @@ Projection tests should focus on behavior that can change editing meaning:
 - A caret on an opening or closing marker boundary reveals the span.
 - A selection that intersects hidden markers reveals the span.
 - A selection spanning multiple inline spans reveals each intersected span.
+- A selection starting outside an inline span includes crossed marker text.
+- A selection starting inside inline content excludes hidden markers unless the user explicitly extends into them.
 - Hidden inline content boundaries map to editable marker edges.
 - Backspace and Delete at revealed marker boundaries remove one source character, not the whole formatting span.
 - Adjacent or malformed markers do not leak styles into unrelated spans.

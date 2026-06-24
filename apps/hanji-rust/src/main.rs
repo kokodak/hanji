@@ -3,10 +3,10 @@ use std::{env, io, ops::Range, path::PathBuf, process};
 use gpui::{
     App, Application, Bounds, Context, CursorStyle, Element, ElementId, ElementInputHandler,
     Entity, EntityInputHandler, FocusHandle, Focusable, FontWeight, GlobalElementId,
-    InspectorElementId, IntoElement, KeyBinding, LayoutId, MouseButton, MouseDownEvent, PaintQuad,
-    Pixels, Render, ShapedLine, SharedString, Style, TextRun, TextStyle, UTF16Selection,
-    UnderlineStyle, Window, WindowBounds, WindowOptions, actions, div, fill, point, prelude::*, px,
-    relative, rgb, rgba, size,
+    InspectorElementId, IntoElement, KeyBinding, LayoutId, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Render, ShapedLine, SharedString, Style,
+    TextRun, TextStyle, UTF16Selection, UnderlineStyle, Window, WindowBounds, WindowOptions,
+    actions, div, fill, point, prelude::*, px, relative, rgb, rgba, size,
 };
 use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
 use hanji_markdown::{
@@ -26,8 +26,12 @@ actions!(
         Delete,
         Left,
         Right,
+        ShiftLeft,
+        ShiftRight,
         Up,
         Down,
+        ShiftUp,
+        ShiftDown,
         Home,
         End,
         Newline,
@@ -46,12 +50,16 @@ struct Hanji {
     marked_range: Option<Range<usize>>,
     last_lines: Vec<LineSnapshot>,
     preferred_column: Option<usize>,
+    selection_anchor: Option<usize>,
+    selection_head: Option<usize>,
+    is_selecting: bool,
     status_message: Option<String>,
 }
 
 impl Hanji {
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
+        self.clear_selection_tracking();
         let changed = self
             .session
             .execute(EditorCommand::DeleteBackward)
@@ -64,6 +72,7 @@ impl Hanji {
 
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
+        self.clear_selection_tracking();
         let changed = self
             .session
             .execute(EditorCommand::DeleteForward)
@@ -92,6 +101,11 @@ impl Hanji {
         }
     }
 
+    fn shift_left(&mut self, _: &ShiftLeft, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        self.extend_selection_horizontally(-1, cx);
+    }
+
     fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
         let document = self.session.document();
@@ -107,14 +121,29 @@ impl Hanji {
         }
     }
 
+    fn shift_right(&mut self, _: &ShiftRight, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        self.extend_selection_horizontally(1, cx);
+    }
+
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
         self.move_caret_vertically(-1, cx);
     }
 
+    fn shift_up(&mut self, _: &ShiftUp, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        self.extend_selection_vertically(-1, cx);
+    }
+
     fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
         self.move_caret_vertically(1, cx);
+    }
+
+    fn shift_down(&mut self, _: &ShiftDown, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        self.extend_selection_vertically(1, cx);
     }
 
     fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
@@ -139,6 +168,7 @@ impl Hanji {
 
     fn newline(&mut self, _: &Newline, window: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
+        self.clear_selection_tracking();
         let range = self.selected_range();
         let caret = range.start + "\n".len();
 
@@ -171,6 +201,7 @@ impl Hanji {
         cx: &mut Context<Self>,
     ) {
         self.marked_range = None;
+        self.clear_selection_tracking();
 
         match self
             .session
@@ -195,6 +226,7 @@ impl Hanji {
 
     fn undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
+        self.clear_selection_tracking();
 
         if self.session.undo().is_some() {
             self.document_changed(window, cx);
@@ -203,6 +235,7 @@ impl Hanji {
 
     fn redo(&mut self, _: &Redo, window: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
+        self.clear_selection_tracking();
 
         if self.session.redo().is_some() {
             self.document_changed(window, cx);
@@ -231,11 +264,40 @@ impl Hanji {
     ) {
         window.focus(&self.focus_handle);
         self.marked_range = None;
-        self.move_caret(self.index_for_mouse_position(event.position), cx);
+        let offset = self.index_for_mouse_position(event.position);
+
+        self.is_selecting = true;
+        if event.modifiers.shift {
+            let (anchor, _) = self.selection_extension_points(1);
+            self.select_from_anchor_to(anchor, offset, None, cx);
+        } else {
+            self.select_from_anchor_to(offset, offset, None, cx);
+        }
+    }
+
+    fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.is_selecting || event.pressed_button != Some(MouseButton::Left) {
+            return;
+        }
+
+        let anchor = self
+            .selection_anchor
+            .unwrap_or_else(|| self.session.document().selection().primary().start);
+        self.select_from_anchor_to(
+            anchor,
+            self.index_for_mouse_position(event.position),
+            None,
+            cx,
+        );
+    }
+
+    fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+        self.is_selecting = false;
     }
 
     fn move_caret(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.preferred_column = None;
+        self.clear_selection_tracking();
         let offset = self
             .session
             .document()
@@ -253,6 +315,8 @@ impl Hanji {
         column: usize,
         cx: &mut Context<Self>,
     ) {
+        self.clear_selection_tracking();
+
         if self.session.set_selection(Selection::caret(offset)).is_ok() {
             self.preferred_column = Some(column);
             cx.notify();
@@ -296,6 +360,83 @@ impl Hanji {
         }
     }
 
+    fn extend_selection_horizontally(&mut self, direction: isize, cx: &mut Context<Self>) {
+        let document = self.session.document();
+        let (anchor, head) = self.selection_extension_points(direction);
+        let offset = if direction < 0 {
+            document.previous_grapheme_offset(head).ok().flatten()
+        } else {
+            document.next_grapheme_offset(head).ok().flatten()
+        };
+
+        if let Some(offset) = offset {
+            self.select_from_anchor_to(anchor, offset, None, cx);
+        }
+    }
+
+    fn extend_selection_vertically(&mut self, direction: isize, cx: &mut Context<Self>) {
+        let document = self.session.document();
+        let (anchor, head) = self.selection_extension_points(direction);
+        let Ok(position) = document.position_at_offset(head) else {
+            return;
+        };
+        let Some(target_line) = position.line.checked_add_signed(direction) else {
+            return;
+        };
+
+        if target_line >= document.line_count() {
+            return;
+        }
+
+        let column = self.preferred_column.unwrap_or(position.column);
+        let target_offset = document
+            .offset_at_position(TextPosition::new(target_line, column))
+            .or_else(|_| {
+                document
+                    .line_range(target_line)
+                    .map(|range| range.end)
+                    .ok_or(hanji_core::EditError::InvalidRange)
+            });
+
+        if let Ok(target_offset) = target_offset {
+            self.select_from_anchor_to(anchor, target_offset, Some(column), cx);
+        }
+    }
+
+    fn selection_extension_points(&self, direction: isize) -> (usize, usize) {
+        if let (Some(anchor), Some(head)) = (self.selection_anchor, self.selection_head) {
+            return (anchor, head);
+        }
+
+        extension_points_for_selection(self.session.document().selection().primary(), direction)
+    }
+
+    fn select_from_anchor_to(
+        &mut self,
+        anchor: usize,
+        head: usize,
+        preferred_column: Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
+        let document = self.session.document();
+        let anchor = document.nearest_grapheme_offset(anchor).unwrap_or(anchor);
+        let head = document.nearest_grapheme_offset(head).unwrap_or(head);
+        let range = selection_range_from_anchor_and_head(anchor, head);
+
+        if self.session.set_selection(Selection::single(range)).is_ok() {
+            self.selection_anchor = Some(anchor);
+            self.selection_head = Some(head);
+            self.preferred_column = preferred_column;
+            cx.notify();
+        }
+    }
+
+    fn clear_selection_tracking(&mut self) {
+        self.selection_anchor = None;
+        self.selection_head = None;
+        self.is_selecting = false;
+    }
+
     fn selected_range(&self) -> Range<usize> {
         let range = self.session.document().selection().primary();
         range.start..range.end
@@ -320,6 +461,7 @@ impl Hanji {
         }
 
         self.preferred_column = None;
+        self.clear_selection_tracking();
         self.document_changed(window, cx);
         true
     }
@@ -459,7 +601,10 @@ impl EntityInputHandler for Hanji {
     ) -> Option<UTF16Selection> {
         Some(UTF16Selection {
             range: self.byte_range_to_utf16(&self.selected_range()),
-            reversed: false,
+            reversed: self
+                .selection_anchor
+                .zip(self.selection_head)
+                .is_some_and(|(anchor, head)| selection_is_reversed(anchor, head)),
         })
     }
 
@@ -566,8 +711,12 @@ impl Render for Hanji {
             .on_action(cx.listener(Self::delete))
             .on_action(cx.listener(Self::left))
             .on_action(cx.listener(Self::right))
+            .on_action(cx.listener(Self::shift_left))
+            .on_action(cx.listener(Self::shift_right))
             .on_action(cx.listener(Self::up))
             .on_action(cx.listener(Self::down))
+            .on_action(cx.listener(Self::shift_up))
+            .on_action(cx.listener(Self::shift_down))
             .on_action(cx.listener(Self::home))
             .on_action(cx.listener(Self::end))
             .on_action(cx.listener(Self::newline))
@@ -616,6 +765,8 @@ impl Render for Hanji {
                     .font_family("Menlo")
                     .cursor(CursorStyle::IBeam)
                     .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+                    .on_mouse_move(cx.listener(Self::on_mouse_move))
+                    .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
                     .child(EditorElement {
                         editor: cx.entity(),
                     }),
@@ -634,28 +785,12 @@ struct LineSnapshot {
 
 impl LineSnapshot {
     fn source_to_visible_offset(&self, source_offset: usize) -> usize {
-        let source_offset = source_offset.clamp(self.range.start, self.range.end);
-
-        for segment in &self.segments {
-            if source_offset < segment.source_outer_range.start {
-                return segment.visible_range.start;
-            }
-
-            if source_offset <= segment.source_outer_range.end {
-                if source_offset < segment.source_range.start {
-                    return segment.visible_range.start;
-                }
-
-                if source_offset <= segment.source_range.end {
-                    return segment.visible_range.start + source_offset
-                        - segment.source_range.start;
-                }
-
-                return segment.visible_range.end;
-            }
-        }
-
-        self.visible_len
+        source_to_visible_offset_in_segments(
+            &self.segments,
+            self.range,
+            self.visible_len,
+            source_offset,
+        )
     }
 
     fn visible_to_source_caret_offset(&self, visible_offset: usize) -> usize {
@@ -683,6 +818,53 @@ impl From<ProjectedVisibleSegment<'_>> for LineSegmentSnapshot {
             source_outer_range: segment.source_outer_range,
         }
     }
+}
+
+fn selection_range_from_anchor_and_head(anchor: usize, head: usize) -> TextRange {
+    TextRange::new(anchor.min(head), anchor.max(head))
+}
+
+fn selection_is_reversed(anchor: usize, head: usize) -> bool {
+    head < anchor
+}
+
+fn extension_points_for_selection(selection: TextRange, direction: isize) -> (usize, usize) {
+    if selection.is_empty() {
+        (selection.start, selection.start)
+    } else if direction < 0 {
+        (selection.end, selection.start)
+    } else {
+        (selection.start, selection.end)
+    }
+}
+
+fn source_to_visible_offset_in_segments(
+    segments: &[LineSegmentSnapshot],
+    line_range: TextRange,
+    visible_len: usize,
+    source_offset: usize,
+) -> usize {
+    let source_offset = source_offset.clamp(line_range.start, line_range.end);
+
+    for segment in segments {
+        if source_offset < segment.source_outer_range.start {
+            return segment.visible_range.start;
+        }
+
+        if source_offset <= segment.source_outer_range.end {
+            if source_offset < segment.source_range.start {
+                return segment.visible_range.start;
+            }
+
+            if source_offset <= segment.source_range.end {
+                return segment.visible_range.start + source_offset - segment.source_range.start;
+            }
+
+            return segment.visible_range.end;
+        }
+    }
+
+    visible_len
 }
 
 fn visible_segments_to_source_caret_offset(
@@ -1389,6 +1571,65 @@ mod tests {
             "Capture **thought** with `code".len()
         );
     }
+
+    #[test]
+    fn source_selection_from_outside_inline_includes_markers() {
+        let selection = TextRange::new("Capture ".len(), "Capture **thought".len());
+
+        assert_eq!(
+            visible_selection_text("Capture **thought** with `code`.", selection),
+            "**thought"
+        );
+    }
+
+    #[test]
+    fn source_selection_from_inside_inline_excludes_markers() {
+        let selection = TextRange::new("Capture **".len(), "Capture **thought".len());
+
+        assert_eq!(
+            visible_selection_text("Capture **thought** with `code`.", selection),
+            "thought"
+        );
+    }
+
+    #[test]
+    fn selection_helpers_keep_anchor_direction_separate_from_range_order() {
+        assert_eq!(
+            selection_range_from_anchor_and_head(16, 8),
+            TextRange::new(8, 16)
+        );
+        assert!(selection_is_reversed(16, 8));
+        assert_eq!(
+            extension_points_for_selection(TextRange::new(8, 16), -1),
+            (16, 8)
+        );
+        assert_eq!(
+            extension_points_for_selection(TextRange::new(8, 16), 1),
+            (8, 16)
+        );
+    }
+
+    fn visible_selection_text(source: &str, selection: TextRange) -> String {
+        let document = Document::new(source);
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let segments = line.visible_segments_revealing_source_in(Some(selection));
+        let visible_text = visible_text_from_segments(&segments);
+        let segments: Vec<LineSegmentSnapshot> = segments.into_iter().map(Into::into).collect();
+        let visible_len = segments
+            .last()
+            .map_or(0, |segment| segment.visible_range.end);
+        let visible_start = source_to_visible_offset_in_segments(
+            &segments,
+            line.range,
+            visible_len,
+            selection.start,
+        );
+        let visible_end =
+            source_to_visible_offset_in_segments(&segments, line.range, visible_len, selection.end);
+
+        visible_text[visible_start..visible_end].to_string()
+    }
 }
 
 fn main() {
@@ -1403,8 +1644,12 @@ fn main() {
             KeyBinding::new("delete", Delete, None),
             KeyBinding::new("left", Left, None),
             KeyBinding::new("right", Right, None),
+            KeyBinding::new("shift-left", ShiftLeft, None),
+            KeyBinding::new("shift-right", ShiftRight, None),
             KeyBinding::new("up", Up, None),
             KeyBinding::new("down", Down, None),
+            KeyBinding::new("shift-up", ShiftUp, None),
+            KeyBinding::new("shift-down", ShiftDown, None),
             KeyBinding::new("home", Home, None),
             KeyBinding::new("end", End, None),
             KeyBinding::new("cmd-left", Home, None),
@@ -1435,6 +1680,9 @@ fn main() {
                             marked_range: None,
                             last_lines: Vec::new(),
                             preferred_column: None,
+                            selection_anchor: None,
+                            selection_head: None,
+                            is_selecting: false,
                             status_message: None,
                         };
                         editor.update_window_title(window);
