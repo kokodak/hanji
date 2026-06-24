@@ -178,7 +178,8 @@ fn project_inlines(source: &str, source_start: usize) -> Vec<ProjectedInline<'_>
             InlineMarker::Strong { start } => {
                 let content_start = start + 2;
                 let Some(closing_start) = find_strong_marker(source, content_start) else {
-                    break;
+                    search_start = content_start;
+                    continue;
                 };
 
                 if closing_start == content_start {
@@ -202,7 +203,8 @@ fn project_inlines(source: &str, source_start: usize) -> Vec<ProjectedInline<'_>
             InlineMarker::Code { start } => {
                 let content_start = start + 1;
                 let Some(closing_start) = find_code_marker(source, content_start) else {
-                    break;
+                    search_start = content_start;
+                    continue;
                 };
 
                 if closing_start == content_start {
@@ -453,6 +455,32 @@ mod tests {
     }
 
     #[test]
+    fn keeps_scanning_after_unmatched_strong_marker() {
+        let document = Document::new("This is **not closed with `code`");
+        let projection = project_document(&document);
+        let inlines = &projection.lines()[0].inlines;
+
+        assert_eq!(inlines.len(), 2);
+        assert_eq!(inlines[0].source, "This is **not closed with ");
+        assert_eq!(inlines[0].kind, MarkdownInline::Text);
+        assert_eq!(inlines[1].source, "`code`");
+        assert!(matches!(inlines[1].kind, MarkdownInline::Code { .. }));
+    }
+
+    #[test]
+    fn keeps_scanning_after_broken_closing_strong_marker() {
+        let document = Document::new("This is **bold* with `code`");
+        let projection = project_document(&document);
+        let inlines = &projection.lines()[0].inlines;
+
+        assert_eq!(inlines.len(), 2);
+        assert_eq!(inlines[0].source, "This is **bold* with ");
+        assert_eq!(inlines[0].kind, MarkdownInline::Text);
+        assert_eq!(inlines[1].source, "`code`");
+        assert!(matches!(inlines[1].kind, MarkdownInline::Code { .. }));
+    }
+
+    #[test]
     fn projects_multiple_strong_spans() {
         let document = Document::new("**one** and **two**");
         let projection = project_document(&document);
@@ -540,6 +568,19 @@ mod tests {
         assert_eq!(inlines.len(), 1);
         assert_eq!(inlines[0].source, "Use `not closed");
         assert_eq!(inlines[0].kind, MarkdownInline::Text);
+    }
+
+    #[test]
+    fn keeps_scanning_after_unmatched_code_marker() {
+        let document = Document::new("Use `not closed with **strong**");
+        let projection = project_document(&document);
+        let inlines = &projection.lines()[0].inlines;
+
+        assert_eq!(inlines.len(), 2);
+        assert_eq!(inlines[0].source, "Use `not closed with ");
+        assert_eq!(inlines[0].kind, MarkdownInline::Text);
+        assert_eq!(inlines[1].source, "**strong**");
+        assert!(matches!(inlines[1].kind, MarkdownInline::Strong { .. }));
     }
 
     #[test]

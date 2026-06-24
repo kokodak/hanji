@@ -1106,6 +1106,21 @@ mod tests {
             )]
         );
     }
+
+    #[test]
+    fn inline_code_background_survives_broken_strong_marker() {
+        let document = Document::new("Capture **thought* with `code`.");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(
+            code_background_ranges(line),
+            vec![TextRange::new(
+                "Capture **thought* with ".len(),
+                "Capture **thought* with `code`".len()
+            )]
+        );
+    }
 }
 
 fn main() {
