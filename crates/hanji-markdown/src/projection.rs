@@ -1,6 +1,6 @@
 use hanji_core::{Document, TextRange};
 
-use crate::{MarkdownLine, classify_line};
+use crate::{MarkdownLine, blockquote_content_start, classify_line};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarkdownProjection<'a> {
@@ -16,6 +16,7 @@ impl<'a> MarkdownProjection<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectedSegmentKind {
     Text,
+    BlockquoteMarker,
     StrongMarker,
     StrongContent,
     EmphasisMarker,
@@ -72,6 +73,7 @@ pub struct ProjectedInline<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectedLine<'a> {
     pub range: TextRange,
+    pub marker_range: Option<TextRange>,
     pub source: &'a str,
     pub kind: MarkdownLine,
     pub inlines: Vec<ProjectedInline<'a>>,
@@ -109,7 +111,7 @@ impl<'a> ProjectedLine<'a> {
         let mut segments = Vec::new();
         let mut visible_start = 0;
 
-        for inline in &self.inlines {
+        for (index, inline) in self.inlines.iter().enumerate() {
             if reveal_range.is_some_and(|range| should_reveal_inline(inline.source_range, range)) {
                 push_source_visible_segments(
                     &mut segments,
@@ -125,6 +127,7 @@ impl<'a> ProjectedLine<'a> {
                     self.range.start,
                     &mut visible_start,
                     inline,
+                    self.hidden_source_outer_range(index, inline),
                 );
             }
         }
@@ -209,6 +212,16 @@ impl<'a> ProjectedLine<'a> {
 
     pub fn source_visible_segments(&self) -> Vec<ProjectedSegment<'a>> {
         let mut segments = Vec::new();
+
+        if let Some(marker_range) = self.marker_range {
+            push_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                marker_range,
+                ProjectedSegmentKind::BlockquoteMarker,
+            );
+        }
 
         for inline in &self.inlines {
             match inline.kind {
@@ -295,6 +308,20 @@ impl<'a> ProjectedLine<'a> {
 
         segments
     }
+
+    fn hidden_source_outer_range(
+        &self,
+        inline_index: usize,
+        inline: &ProjectedInline<'_>,
+    ) -> TextRange {
+        if inline_index == 0
+            && let Some(marker_range) = self.marker_range
+        {
+            return TextRange::new(marker_range.start, inline.source_range.end);
+        }
+
+        inline.source_range
+    }
 }
 
 fn visible_segments_to_source_caret_offset(
@@ -370,12 +397,20 @@ pub fn project_document(document: &Document) -> MarkdownProjection<'_> {
             .line_range(line_index)
             .unwrap_or_else(|| TextRange::caret(document.len()));
         let source = &document.text()[range.start..range.end];
+        let kind = classify_line(source);
+        let content_start = match kind {
+            MarkdownLine::Blockquote => blockquote_content_start(source).unwrap_or(0),
+            MarkdownLine::Blank | MarkdownLine::Paragraph | MarkdownLine::Heading { .. } => 0,
+        };
+        let marker_range =
+            (content_start > 0).then_some(TextRange::new(range.start, range.start + content_start));
 
         lines.push(ProjectedLine {
             range,
+            marker_range,
             source,
-            kind: classify_line(source),
-            inlines: project_inlines(source, range.start),
+            kind,
+            inlines: project_inlines(&source[content_start..], range.start + content_start),
         });
     }
 
@@ -437,6 +472,7 @@ fn push_hidden_visible_segment<'a>(
     line_start: usize,
     visible_start: &mut usize,
     inline: &ProjectedInline<'a>,
+    source_outer_range: TextRange,
 ) {
     let kind = match inline.kind {
         MarkdownInline::Text => ProjectedSegmentKind::Text,
@@ -450,7 +486,7 @@ fn push_hidden_visible_segment<'a>(
         line_source,
         line_start,
         visible_start,
-        inline.source_range,
+        source_outer_range,
         inline.content_range,
         kind,
     );
@@ -897,11 +933,55 @@ mod tests {
         assert_eq!(lines[2].range, TextRange::new(9, 16));
         assert_eq!(lines[2].source, "> Quote");
         assert_eq!(lines[2].kind, MarkdownLine::Blockquote);
+        assert_eq!(lines[2].marker_range, Some(TextRange::new(9, 11)));
         assert_eq!(lines[2].inlines.len(), 1);
+        assert_eq!(lines[2].inlines[0].source, "Quote");
         assert_eq!(lines[3].range, TextRange::new(17, 22));
         assert_eq!(lines[3].source, "Notes");
         assert_eq!(lines[3].kind, MarkdownLine::Paragraph);
         assert_eq!(lines[3].inlines.len(), 1);
+    }
+
+    #[test]
+    fn hides_blockquote_markers_from_visible_text() {
+        let document = Document::new("> Quote");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.visible_text(), "Quote");
+        assert_eq!(line.visible_len(), "Quote".len());
+        assert_eq!(
+            line.source_visible_segments()[0],
+            ProjectedSegment {
+                range: TextRange::new(0, 2),
+                source: "> ",
+                kind: ProjectedSegmentKind::BlockquoteMarker,
+            }
+        );
+        assert_eq!(
+            line.visible_segments(),
+            vec![ProjectedVisibleSegment {
+                visible_range: TextRange::new(0, 5),
+                source_range: TextRange::new(2, 7),
+                source_outer_range: TextRange::new(0, 7),
+                source: "Quote",
+                kind: ProjectedSegmentKind::Text,
+            }]
+        );
+        assert_eq!(line.visible_to_source_caret_offset(0), 2);
+        assert_eq!(line.source_to_visible_offset(0), 0);
+        assert_eq!(line.source_to_visible_offset(2), 0);
+    }
+
+    #[test]
+    fn hides_indented_blockquote_markers_from_visible_text() {
+        let document = Document::new("   > Quote");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.visible_text(), "Quote");
+        assert_eq!(line.marker_range, Some(TextRange::new(0, 5)));
+        assert_eq!(line.visible_to_source_caret_offset(0), 5);
     }
 
     #[test]

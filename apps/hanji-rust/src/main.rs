@@ -11,7 +11,7 @@ use gpui::{
 use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
 use hanji_markdown::{
     MarkdownCommand, MarkdownCommandError, MarkdownLine, ProjectedSegmentKind,
-    ProjectedVisibleSegment, execute_markdown_command, project_document,
+    ProjectedVisibleSegment, blockquote_content_start, execute_markdown_command, project_document,
 };
 use hanji_storage::DocumentSession;
 
@@ -270,8 +270,13 @@ impl Hanji {
         self.marked_range = None;
         self.clear_selection_tracking();
         let range = self.selected_range();
-        let caret = range.start + "\n".len();
 
+        if let Some((range, replacement, selection_after)) = self.blockquote_newline_edit(&range) {
+            self.replace_range(range, &replacement, selection_after, window, cx);
+            return;
+        }
+
+        let caret = range.start + "\n".len();
         self.replace_range(range, "\n", caret..caret, window, cx);
     }
 
@@ -629,6 +634,21 @@ impl Hanji {
         self.clear_selection_tracking();
         self.document_changed(window, cx);
         true
+    }
+
+    fn blockquote_newline_edit(
+        &self,
+        range: &Range<usize>,
+    ) -> Option<(Range<usize>, String, Range<usize>)> {
+        if range.start != range.end {
+            return None;
+        }
+
+        let document = self.session.document();
+        let line_range = self.line_range_for_offset(range.start)?;
+        let line_source = &document.text()[line_range.start..line_range.end];
+
+        blockquote_newline_edit_for_line(line_source, line_range, range)
     }
 
     fn line_range_for_offset(&self, offset: usize) -> Option<TextRange> {
@@ -1042,6 +1062,34 @@ fn horizontal_offset_within_line(
     Some(candidate)
 }
 
+fn blockquote_newline_edit_for_line(
+    line_source: &str,
+    line_range: TextRange,
+    range: &Range<usize>,
+) -> Option<(Range<usize>, String, Range<usize>)> {
+    if range.start != range.end {
+        return None;
+    }
+
+    let content_start = blockquote_content_start(line_source)?;
+    let marker = &line_source[..content_start];
+    let content = &line_source[content_start..];
+
+    if content.trim().is_empty() {
+        let caret = line_range.start;
+        return Some((
+            line_range.start..line_range.end,
+            String::new(),
+            caret..caret,
+        ));
+    }
+
+    let replacement = format!("\n{marker}");
+    let caret = range.start + replacement.len();
+
+    Some((range.clone(), replacement, caret..caret))
+}
+
 fn drag_distance_exceeds_threshold(
     origin: gpui::Point<Pixels>,
     position: gpui::Point<Pixels>,
@@ -1356,6 +1404,7 @@ fn line_text_runs(
                 InlineRunStyle::Code
             }
             ProjectedSegmentKind::Text
+            | ProjectedSegmentKind::BlockquoteMarker
             | ProjectedSegmentKind::StrongMarker
             | ProjectedSegmentKind::EmphasisMarker => InlineRunStyle::Plain,
         };
@@ -1444,6 +1493,7 @@ fn code_background_ranges(segments: &[ProjectedVisibleSegment<'_>]) -> Vec<TextR
                 Some(segment.visible_range)
             }
             ProjectedSegmentKind::Text
+            | ProjectedSegmentKind::BlockquoteMarker
             | ProjectedSegmentKind::StrongMarker
             | ProjectedSegmentKind::StrongContent
             | ProjectedSegmentKind::EmphasisMarker
@@ -1903,6 +1953,46 @@ mod tests {
         assert_eq!(
             horizontal_offset_within_line(second_line, 7, 3, -1),
             Some(6)
+        );
+    }
+
+    #[test]
+    fn blockquote_newline_continues_marker() {
+        assert_eq!(
+            blockquote_newline_edit_for_line("> Quote", TextRange::new(0, 7), &(7..7)),
+            Some((7..7, "\n> ".to_string(), 10..10))
+        );
+    }
+
+    #[test]
+    fn blockquote_newline_preserves_indented_marker() {
+        assert_eq!(
+            blockquote_newline_edit_for_line("   > Quote", TextRange::new(0, 10), &(10..10)),
+            Some((10..10, "\n   > ".to_string(), 16..16))
+        );
+    }
+
+    #[test]
+    fn blockquote_newline_exits_empty_quote_line() {
+        assert_eq!(
+            blockquote_newline_edit_for_line("> ", TextRange::new(8, 10), &(10..10)),
+            Some((8..10, String::new(), 8..8))
+        );
+        assert_eq!(
+            blockquote_newline_edit_for_line(">    ", TextRange::new(0, 5), &(5..5)),
+            Some((0..5, String::new(), 0..0))
+        );
+    }
+
+    #[test]
+    fn blockquote_newline_ignores_plain_lines_and_selections() {
+        assert_eq!(
+            blockquote_newline_edit_for_line("Quote", TextRange::new(0, 5), &(5..5)),
+            None
+        );
+        assert_eq!(
+            blockquote_newline_edit_for_line("> Quote", TextRange::new(0, 7), &(2..7)),
+            None
         );
     }
 

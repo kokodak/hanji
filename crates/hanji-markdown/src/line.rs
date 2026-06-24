@@ -24,6 +24,32 @@ pub fn classify_line(line: &str) -> MarkdownLine {
         return MarkdownLine::Blank;
     }
 
+    if blockquote_content_start(line).is_some() {
+        return MarkdownLine::Blockquote;
+    }
+
+    classify_non_blockquote_line(line)
+}
+
+pub fn blockquote_content_start(line: &str) -> Option<usize> {
+    let indent = line
+        .bytes()
+        .take_while(|byte| *byte == b' ')
+        .take(4)
+        .count();
+    if indent >= 4 {
+        return None;
+    }
+
+    let content = &line[indent..];
+    if content.starts_with("> ") {
+        Some(indent + "> ".len())
+    } else {
+        None
+    }
+}
+
+fn classify_non_blockquote_line(line: &str) -> MarkdownLine {
     let indent = line
         .bytes()
         .take_while(|byte| *byte == b' ')
@@ -34,9 +60,6 @@ pub fn classify_line(line: &str) -> MarkdownLine {
     }
 
     let content = &line[indent..];
-    if content.starts_with("> ") {
-        return MarkdownLine::Blockquote;
-    }
 
     let level = content.bytes().take_while(|byte| *byte == b'#').count();
     if !(1..=6).contains(&level) {
@@ -82,6 +105,15 @@ mod tests {
         assert_eq!(classify_line("> Quote"), MarkdownLine::Blockquote);
         assert_eq!(classify_line("   > Indented"), MarkdownLine::Blockquote);
         assert_eq!(classify_line("    > Code"), MarkdownLine::Paragraph);
+    }
+
+    #[test]
+    fn finds_blockquote_content_start() {
+        assert_eq!(blockquote_content_start("> "), Some(2));
+        assert_eq!(blockquote_content_start("> Quote"), Some(2));
+        assert_eq!(blockquote_content_start("   > Indented"), Some(5));
+        assert_eq!(blockquote_content_start(">Quote"), None);
+        assert_eq!(blockquote_content_start("    > Code"), None);
     }
 
     #[test]

@@ -61,7 +61,7 @@ Text:
 
 The first rendering step kept markers visible and only applied styling to known spans. Marker hiding now depends on explicit visible-to-source mapping.
 
-Current inline projection starts with plain text, emphasis spans, strong spans, and inline code spans. Current line projection recognizes headings and blockquotes once a `>` marker is followed by a space. The GPUI app hides inactive inline markers, styles emphasis content with italic text, styles strong content with a heavier font weight, draws inline code backgrounds from source-backed visible ranges, and renders blockquote lines with a quote bar and indentation. GPUI 0.2.2 can merge line layout runs when only font changes, so emphasis and strong text currently force an invisible decoration boundary in the app renderer. Emphasis projection recognizes exact single-asterisk delimiter runs, and strong projection recognizes exact two-asterisk delimiter runs; longer or malformed asterisk runs remain text. Malformed markers should not stop projection of later valid spans. Escapes, nesting, links, line marker hiding, and parser-grade CommonMark behavior should be added incrementally with source mapping tests.
+Current inline projection starts with plain text, emphasis spans, strong spans, and inline code spans. Current line projection recognizes headings and blockquotes once a `>` marker is followed by a space. The GPUI app hides inactive inline markers, hides blockquote line markers, styles emphasis content with italic text, styles strong content with a heavier font weight, draws inline code backgrounds from source-backed visible ranges, and renders blockquote lines with a quote bar and indentation. GPUI 0.2.2 can merge line layout runs when only font changes, so emphasis and strong text currently force an invisible decoration boundary in the app renderer. Emphasis projection recognizes exact single-asterisk delimiter runs, and strong projection recognizes exact two-asterisk delimiter runs; longer or malformed asterisk runs remain text. Malformed markers should not stop projection of later valid spans. Escapes, nesting, links, other line marker hiding, and parser-grade CommonMark behavior should be added incrementally with source mapping tests.
 
 ## Marker Policy
 
@@ -85,6 +85,8 @@ Hidden markers must never be edited implicitly. Any edit that starts from visibl
 
 For caret placement, the visible start of hidden inline content maps after the opening marker, and the visible end maps before the closing marker. That means clicking before `bold` in hidden `**bold**` places the caret at `**|bold**`, while clicking after `bold` places it at `**bold|**`. The next Backspace or Delete then edits visible source text one character at a time.
 
+For blockquotes, the visible start of the line maps after the hidden `> ` marker. Pressing Enter in a non-empty blockquote line continues the blockquote by inserting a new `> ` marker. Pressing Enter again on an empty blockquote marker line removes that marker and leaves a clean normal line.
+
 For selection placement, source range boundaries remain meaningful. A selection that starts outside an inline span and extends into that span should reveal and select the marker text it crosses. A selection that starts inside the inline content uses the same caret placement rule as editing, so it selects the content without implicitly adding hidden markers.
 
 Keyboard selection expansion uses the same source coordinate rules. `Shift+Arrow` extends by visible caret movement, `Shift+Option+Left/Right` extends to the previous or next source word boundary within the current line, and `Shift+Cmd` extends to the current line or document boundary depending on the arrow direction. Left and right movement shortcuts should not cross line boundaries; moving between lines belongs to up and down movement.
@@ -101,6 +103,8 @@ Projection tests should focus on behavior that can change editing meaning:
 - A selection starting outside an inline span includes crossed marker text.
 - A selection starting inside inline content excludes hidden markers unless the user explicitly extends into them.
 - Hidden inline content boundaries map to editable marker edges.
+- Hidden blockquote markers are omitted from visible text while visible line starts map after the marker.
+- Enter continues non-empty blockquote lines and exits from empty blockquote marker lines.
 - Backspace and Delete at revealed marker boundaries remove one source character, not the whole formatting span.
 - Adjacent or malformed markers do not leak styles into unrelated spans.
 - Inline code and strong spans remain independent when one of them becomes malformed.
