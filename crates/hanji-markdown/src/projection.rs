@@ -18,6 +18,8 @@ pub enum ProjectedSegmentKind {
     Text,
     StrongMarker,
     StrongContent,
+    EmphasisMarker,
+    EmphasisContent,
     CodeMarker,
     CodeContent,
 }
@@ -48,6 +50,7 @@ pub struct ProjectedVisibleSegment<'a> {
 pub enum MarkdownInline {
     Text,
     Strong { markers: MarkdownMarkerRanges },
+    Emphasis { markers: MarkdownMarkerRanges },
     Code { markers: MarkdownMarkerRanges },
 }
 
@@ -241,6 +244,29 @@ impl<'a> ProjectedLine<'a> {
                         ProjectedSegmentKind::StrongMarker,
                     );
                 }
+                MarkdownInline::Emphasis { markers } => {
+                    push_segment(
+                        &mut segments,
+                        self.source,
+                        self.range.start,
+                        markers.opening,
+                        ProjectedSegmentKind::EmphasisMarker,
+                    );
+                    push_segment(
+                        &mut segments,
+                        self.source,
+                        self.range.start,
+                        inline.content_range,
+                        ProjectedSegmentKind::EmphasisContent,
+                    );
+                    push_segment(
+                        &mut segments,
+                        self.source,
+                        self.range.start,
+                        markers.closing,
+                        ProjectedSegmentKind::EmphasisMarker,
+                    );
+                }
                 MarkdownInline::Code { markers } => {
                     push_segment(
                         &mut segments,
@@ -415,6 +441,7 @@ fn push_hidden_visible_segment<'a>(
     let kind = match inline.kind {
         MarkdownInline::Text => ProjectedSegmentKind::Text,
         MarkdownInline::Strong { .. } => ProjectedSegmentKind::StrongContent,
+        MarkdownInline::Emphasis { .. } => ProjectedSegmentKind::EmphasisContent,
         MarkdownInline::Code { .. } => ProjectedSegmentKind::CodeContent,
     };
 
@@ -477,6 +504,35 @@ fn push_source_visible_segments<'a>(
                 ProjectedSegmentKind::StrongMarker,
             );
         }
+        MarkdownInline::Emphasis { markers } => {
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                markers.opening,
+                markers.opening,
+                ProjectedSegmentKind::EmphasisMarker,
+            );
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                inline.content_range,
+                inline.content_range,
+                ProjectedSegmentKind::EmphasisContent,
+            );
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                markers.closing,
+                markers.closing,
+                ProjectedSegmentKind::EmphasisMarker,
+            );
+        }
         MarkdownInline::Code { markers } => {
             push_visible_segment(
                 segments,
@@ -526,7 +582,7 @@ fn project_inlines(source: &str, source_start: usize) -> Vec<ProjectedInline<'_>
             continue;
         }
 
-        push_text_with_strong_inlines(
+        push_text_with_emphasis_inlines(
             &mut inlines,
             source,
             source_start,
@@ -546,12 +602,12 @@ fn project_inlines(source: &str, source_start: usize) -> Vec<ProjectedInline<'_>
         text_start = search_start;
     }
 
-    push_text_with_strong_inlines(&mut inlines, source, source_start, text_start, source.len());
+    push_text_with_emphasis_inlines(&mut inlines, source, source_start, text_start, source.len());
 
     inlines
 }
 
-fn push_text_with_strong_inlines<'a>(
+fn push_text_with_emphasis_inlines<'a>(
     inlines: &mut Vec<ProjectedInline<'a>>,
     source: &'a str,
     source_start: usize,
@@ -560,82 +616,170 @@ fn push_text_with_strong_inlines<'a>(
 ) {
     let mut text_start = start;
 
-    for (opening_start, closing_start) in strong_pairs(source, start, end) {
+    for pair in emphasis_pairs(source, start, end) {
+        let opening_start = pair.opening_start;
         if opening_start < text_start {
             continue;
         }
 
         push_text_inline(inlines, source, source_start, text_start, opening_start);
-        push_strong_inline(
-            inlines,
-            source,
-            source_start,
-            opening_start,
-            opening_start + 2,
-            closing_start,
-        );
+        push_delimited_inline(inlines, source, source_start, pair);
 
-        text_start = closing_start + 2;
+        text_start = pair.closing_start + pair.kind.marker_len();
     }
 
     push_text_inline(inlines, source, source_start, text_start, end);
 }
 
-fn strong_pairs(source: &str, start: usize, end: usize) -> Vec<(usize, usize)> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EmphasisPair {
+    kind: EmphasisDelimiterKind,
+    opening_start: usize,
+    closing_start: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmphasisDelimiterKind {
+    Emphasis,
+    Strong,
+}
+
+impl EmphasisDelimiterKind {
+    fn marker_len(self) -> usize {
+        match self {
+            Self::Emphasis => 1,
+            Self::Strong => 2,
+        }
+    }
+}
+
+fn emphasis_pairs(source: &str, start: usize, end: usize) -> Vec<EmphasisPair> {
     let mut pairs = Vec::new();
-    let mut pending_opening = None;
+    let mut pending_emphasis = None;
+    let mut pending_strong = None;
     let mut search_start = start;
 
-    while let Some(marker_start) = find_exact_strong_marker(source, search_start, end) {
-        let can_close = can_close_strong(source, marker_start);
-        let can_open = can_open_strong(source, marker_start, end);
+    while let Some((marker_start, kind)) = find_exact_emphasis_marker(source, search_start, end) {
+        let marker_len = kind.marker_len();
+        let can_close = can_close_emphasis(source, marker_start);
+        let can_open = can_open_emphasis(source, marker_start, marker_len, end);
+        let pending_opening = match kind {
+            EmphasisDelimiterKind::Emphasis => &mut pending_emphasis,
+            EmphasisDelimiterKind::Strong => &mut pending_strong,
+        };
 
-        if let Some(opening_start) = pending_opening
+        if let Some(opening_start) = *pending_opening
             && can_close
-            && opening_start + 2 < marker_start
+            && opening_start + marker_len < marker_start
         {
-            pairs.push((opening_start, marker_start));
-            pending_opening = None;
+            pairs.push(EmphasisPair {
+                kind,
+                opening_start,
+                closing_start: marker_start,
+            });
+            *pending_opening = None;
         } else if can_open {
-            pending_opening = Some(marker_start);
+            *pending_opening = Some(marker_start);
         }
 
-        search_start = marker_start + 2;
+        search_start = marker_start + marker_len;
     }
 
+    pairs.sort_by_key(|pair| pair.opening_start);
     pairs
 }
 
-fn find_exact_strong_marker(source: &str, search_start: usize, end: usize) -> Option<usize> {
+fn find_exact_emphasis_marker(
+    source: &str,
+    search_start: usize,
+    end: usize,
+) -> Option<(usize, EmphasisDelimiterKind)> {
     let bytes = source.as_bytes();
     let mut cursor = search_start;
 
-    while cursor + 2 <= end {
-        if bytes[cursor] == b'*' && bytes[cursor + 1] == b'*' {
-            let starts_run = cursor == 0 || bytes[cursor - 1] != b'*';
-            let ends_run = cursor + 2 >= end || bytes[cursor + 2] != b'*';
-
-            if starts_run && ends_run {
-                return Some(cursor);
-            }
+    while cursor < end {
+        if bytes[cursor] == b'*' {
+            let marker_start = cursor;
 
             while cursor < end && bytes[cursor] == b'*' {
                 cursor += 1;
             }
-        } else {
-            cursor += 1;
+
+            return match cursor - marker_start {
+                1 => Some((marker_start, EmphasisDelimiterKind::Emphasis)),
+                2 => Some((marker_start, EmphasisDelimiterKind::Strong)),
+                _ => continue,
+            };
         }
+
+        cursor += 1;
     }
 
     None
 }
 
-fn can_open_strong(source: &str, marker_start: usize, end: usize) -> bool {
-    next_char(source, marker_start + 2, end).is_some_and(|character| !character.is_whitespace())
+fn can_open_emphasis(source: &str, marker_start: usize, marker_len: usize, end: usize) -> bool {
+    next_char(source, marker_start + marker_len, end)
+        .is_some_and(|character| !character.is_whitespace() && !matches!(character, '*' | '`'))
 }
 
-fn can_close_strong(source: &str, marker_start: usize) -> bool {
-    previous_char(source, marker_start).is_some_and(|character| !character.is_whitespace())
+fn can_close_emphasis(source: &str, marker_start: usize) -> bool {
+    previous_char(source, marker_start)
+        .is_some_and(|character| !character.is_whitespace() && !matches!(character, '*' | '`'))
+}
+
+fn push_delimited_inline<'a>(
+    inlines: &mut Vec<ProjectedInline<'a>>,
+    source: &'a str,
+    source_start: usize,
+    pair: EmphasisPair,
+) {
+    match pair.kind {
+        EmphasisDelimiterKind::Emphasis => {
+            push_emphasis_inline(
+                inlines,
+                source,
+                source_start,
+                pair.opening_start,
+                pair.opening_start + pair.kind.marker_len(),
+                pair.closing_start,
+            );
+        }
+        EmphasisDelimiterKind::Strong => {
+            push_strong_inline(
+                inlines,
+                source,
+                source_start,
+                pair.opening_start,
+                pair.opening_start + pair.kind.marker_len(),
+                pair.closing_start,
+            );
+        }
+    }
+}
+
+fn push_emphasis_inline<'a>(
+    inlines: &mut Vec<ProjectedInline<'a>>,
+    source: &'a str,
+    source_start: usize,
+    opening_start: usize,
+    content_start: usize,
+    closing_start: usize,
+) {
+    let closing_end = closing_start + 1;
+
+    inlines.push(ProjectedInline {
+        source_range: TextRange::new(source_start + opening_start, source_start + closing_end),
+        content_range: TextRange::new(source_start + content_start, source_start + closing_start),
+        source: &source[opening_start..closing_end],
+        content: &source[content_start..closing_start],
+        kind: MarkdownInline::Emphasis {
+            markers: MarkdownMarkerRanges {
+                opening: TextRange::new(source_start + opening_start, source_start + content_start),
+                closing: TextRange::new(source_start + closing_start, source_start + closing_end),
+            },
+        },
+    });
 }
 
 fn next_char(source: &str, start: usize, end: usize) -> Option<char> {
@@ -843,13 +987,75 @@ mod tests {
     }
 
     #[test]
+    fn projects_emphasis_inline_spans_with_source_ranges() {
+        let document = Document::new("This is *soft* text");
+        let projection = project_document(&document);
+        let inlines = &projection.lines()[0].inlines;
+
+        assert_eq!(inlines.len(), 3);
+        assert_eq!(
+            inlines[1],
+            ProjectedInline {
+                source_range: TextRange::new(8, 14),
+                content_range: TextRange::new(9, 13),
+                source: "*soft*",
+                content: "soft",
+                kind: MarkdownInline::Emphasis {
+                    markers: MarkdownMarkerRanges {
+                        opening: TextRange::new(8, 9),
+                        closing: TextRange::new(13, 14),
+                    },
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn exposes_source_visible_segments_for_emphasis_spans() {
+        let document = Document::new("This is *soft* text");
+        let projection = project_document(&document);
+        let segments = projection.lines()[0].source_visible_segments();
+
+        assert_eq!(
+            segments,
+            vec![
+                ProjectedSegment {
+                    range: TextRange::new(0, 8),
+                    source: "This is ",
+                    kind: ProjectedSegmentKind::Text,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(8, 9),
+                    source: "*",
+                    kind: ProjectedSegmentKind::EmphasisMarker,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(9, 13),
+                    source: "soft",
+                    kind: ProjectedSegmentKind::EmphasisContent,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(13, 14),
+                    source: "*",
+                    kind: ProjectedSegmentKind::EmphasisMarker,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(14, 19),
+                    source: " text",
+                    kind: ProjectedSegmentKind::Text,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn projects_visible_text_without_markers() {
-        let document = Document::new("This is **bold** and `code`");
+        let document = Document::new("This is *soft*, **bold**, and `code`");
         let projection = project_document(&document);
         let line = &projection.lines()[0];
 
-        assert_eq!(line.visible_text(), "This is bold and code");
-        assert_eq!(line.visible_len(), "This is bold and code".len());
+        assert_eq!(line.visible_text(), "This is soft, bold, and code");
+        assert_eq!(line.visible_len(), "This is soft, bold, and code".len());
     }
 
     #[test]
@@ -1178,14 +1384,16 @@ mod tests {
     }
 
     #[test]
-    fn does_not_project_single_asterisk_emphasis_as_strong() {
-        let document = Document::new("This is *not strong*");
+    fn projects_single_asterisk_emphasis_without_strong_runs() {
+        let document = Document::new("This is *soft*");
         let projection = project_document(&document);
         let inlines = &projection.lines()[0].inlines;
 
-        assert_eq!(inlines.len(), 1);
-        assert_eq!(inlines[0].source, "This is *not strong*");
+        assert_eq!(inlines.len(), 2);
+        assert_eq!(inlines[0].source, "This is ");
         assert_eq!(inlines[0].kind, MarkdownInline::Text);
+        assert_eq!(inlines[1].source, "*soft*");
+        assert!(matches!(inlines[1].kind, MarkdownInline::Emphasis { .. }));
     }
 
     #[test]
@@ -1200,16 +1408,20 @@ mod tests {
     }
 
     #[test]
-    fn does_not_project_strong_from_partially_deleted_adjacent_markers() {
+    fn projects_emphasis_before_strong_without_style_leakage() {
         let document = Document::new("This is *abc* before **bold**");
         let projection = project_document(&document);
         let inlines = &projection.lines()[0].inlines;
 
-        assert_eq!(inlines.len(), 2);
-        assert_eq!(inlines[0].source, "This is *abc* before ");
+        assert_eq!(inlines.len(), 4);
+        assert_eq!(inlines[0].source, "This is ");
         assert_eq!(inlines[0].kind, MarkdownInline::Text);
-        assert_eq!(inlines[1].source, "**bold**");
-        assert!(matches!(inlines[1].kind, MarkdownInline::Strong { .. }));
+        assert_eq!(inlines[1].source, "*abc*");
+        assert!(matches!(inlines[1].kind, MarkdownInline::Emphasis { .. }));
+        assert_eq!(inlines[2].source, " before ");
+        assert_eq!(inlines[2].kind, MarkdownInline::Text);
+        assert_eq!(inlines[3].source, "**bold**");
+        assert!(matches!(inlines[3].kind, MarkdownInline::Strong { .. }));
     }
 
     #[test]

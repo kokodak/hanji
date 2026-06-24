@@ -47,6 +47,7 @@ actions!(
         End,
         Newline,
         ToggleStrong,
+        ToggleItalic,
         ToggleCode,
         Undo,
         Redo,
@@ -278,6 +279,15 @@ impl Hanji {
         self.apply_markdown_command(
             MarkdownCommand::ToggleStrong,
             "Could not toggle strong text.",
+            window,
+            cx,
+        );
+    }
+
+    fn toggle_italic(&mut self, _: &ToggleItalic, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_markdown_command(
+            MarkdownCommand::ToggleEmphasis,
+            "Could not toggle italic text.",
             window,
             cx,
         );
@@ -897,6 +907,7 @@ impl Render for Hanji {
             .on_action(cx.listener(Self::end))
             .on_action(cx.listener(Self::newline))
             .on_action(cx.listener(Self::toggle_strong))
+            .on_action(cx.listener(Self::toggle_italic))
             .on_action(cx.listener(Self::toggle_code))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
@@ -1340,12 +1351,13 @@ fn line_text_runs(
     for segment in segments {
         let style = match segment.kind {
             ProjectedSegmentKind::StrongContent => InlineRunStyle::Strong,
+            ProjectedSegmentKind::EmphasisContent => InlineRunStyle::Emphasis,
             ProjectedSegmentKind::CodeMarker | ProjectedSegmentKind::CodeContent => {
                 InlineRunStyle::Code
             }
-            ProjectedSegmentKind::Text | ProjectedSegmentKind::StrongMarker => {
-                InlineRunStyle::Plain
-            }
+            ProjectedSegmentKind::Text
+            | ProjectedSegmentKind::StrongMarker
+            | ProjectedSegmentKind::EmphasisMarker => InlineRunStyle::Plain,
         };
 
         push_text_run(
@@ -1364,6 +1376,7 @@ fn line_text_runs(
 enum InlineRunStyle {
     Plain,
     Strong,
+    Emphasis,
     Code,
 }
 
@@ -1386,6 +1399,9 @@ fn push_text_run(
             FontWeight::BOLD
         };
     }
+    if matches!(style, InlineRunStyle::Emphasis) {
+        font = font.italic();
+    }
     let color = if presentation.is_heading {
         rgb(0x1f3f5b).into()
     } else if presentation.is_blockquote {
@@ -1394,7 +1410,7 @@ fn push_text_run(
         text_style.color
     };
 
-    let underline = if matches!(style, InlineRunStyle::Strong) {
+    let underline = if matches!(style, InlineRunStyle::Strong | InlineRunStyle::Emphasis) {
         Some(font_run_boundary_marker())
     } else {
         None
@@ -1429,7 +1445,9 @@ fn code_background_ranges(segments: &[ProjectedVisibleSegment<'_>]) -> Vec<TextR
             }
             ProjectedSegmentKind::Text
             | ProjectedSegmentKind::StrongMarker
-            | ProjectedSegmentKind::StrongContent => None,
+            | ProjectedSegmentKind::StrongContent
+            | ProjectedSegmentKind::EmphasisMarker
+            | ProjectedSegmentKind::EmphasisContent => None,
         })
         .collect()
 }
@@ -1626,6 +1644,7 @@ fn scratch_document_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::FontStyle;
     use hanji_core::Document;
 
     #[test]
@@ -1699,7 +1718,7 @@ mod tests {
     }
 
     #[test]
-    fn single_asterisk_emphasis_does_not_create_strong_runs() {
+    fn single_asterisk_emphasis_uses_italic_runs() {
         let document = Document::new("Capture *thought* with `code`.");
         let projection = project_document(&document);
         let line = &projection.lines()[0];
@@ -1710,12 +1729,17 @@ mod tests {
             &TextStyle::default(),
         );
 
+        assert!(
+            runs.iter()
+                .find(|run| run.font.style == FontStyle::Italic)
+                .is_some_and(|run| run.underline.is_some())
+        );
         assert!(runs.iter().all(|run| run.font.weight != FontWeight::BLACK));
         assert_eq!(
             code_background_ranges(&segments),
             vec![TextRange::new(
-                "Capture *thought* with ".len(),
-                "Capture *thought* with code".len()
+                "Capture thought with ".len(),
+                "Capture thought with code".len()
             )]
         );
     }
@@ -1953,6 +1977,7 @@ fn main() {
             KeyBinding::new("cmd-shift-down", ShiftCmdDown, None),
             KeyBinding::new("enter", Newline, None),
             KeyBinding::new("cmd-b", ToggleStrong, None),
+            KeyBinding::new("cmd-i", ToggleItalic, None),
             KeyBinding::new("cmd-e", ToggleCode, None),
             KeyBinding::new("cmd-z", Undo, None),
             KeyBinding::new("cmd-shift-z", Redo, None),

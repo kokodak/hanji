@@ -3,6 +3,7 @@ use hanji_core::{Document, EditError, Selection, TextEdit, TextRange, Transactio
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarkdownCommand {
     ToggleStrong,
+    ToggleEmphasis,
     ToggleCode,
 }
 
@@ -24,12 +25,17 @@ pub fn execute_markdown_command(
 ) -> Result<bool, MarkdownCommandError> {
     match command {
         MarkdownCommand::ToggleStrong => toggle_strong(document),
+        MarkdownCommand::ToggleEmphasis => toggle_emphasis(document),
         MarkdownCommand::ToggleCode => toggle_code(document),
     }
 }
 
 pub fn toggle_strong(document: &mut Document) -> Result<bool, MarkdownCommandError> {
     toggle_delimited(document, "**")
+}
+
+pub fn toggle_emphasis(document: &mut Document) -> Result<bool, MarkdownCommandError> {
+    toggle_delimited(document, "*")
 }
 
 pub fn toggle_code(document: &mut Document) -> Result<bool, MarkdownCommandError> {
@@ -194,6 +200,57 @@ mod tests {
         execute_markdown_command(&mut document, MarkdownCommand::ToggleStrong).unwrap();
 
         assert_eq!(document.text(), "Hanji **notes**");
+    }
+
+    #[test]
+    fn toggle_emphasis_wraps_selection() {
+        let mut document = Document::new("Hanji notes");
+        document
+            .set_selection(Selection::single(TextRange::new(6, 11)))
+            .unwrap();
+
+        toggle_emphasis(&mut document).unwrap();
+
+        assert_eq!(document.text(), "Hanji *notes*");
+        assert_eq!(document.selection().primary(), TextRange::new(7, 12));
+    }
+
+    #[test]
+    fn toggle_emphasis_unwraps_when_selection_is_inside_markers() {
+        let mut document = Document::new("Hanji *notes*");
+        document
+            .set_selection(Selection::single(TextRange::new(7, 12)))
+            .unwrap();
+
+        toggle_emphasis(&mut document).unwrap();
+
+        assert_eq!(document.text(), "Hanji notes");
+        assert_eq!(document.selection().primary(), TextRange::new(6, 11));
+    }
+
+    #[test]
+    fn toggle_emphasis_unwraps_when_selection_includes_markers() {
+        let mut document = Document::new("Hanji *notes*");
+        document
+            .set_selection(Selection::single(TextRange::new(6, 13)))
+            .unwrap();
+
+        toggle_emphasis(&mut document).unwrap();
+
+        assert_eq!(document.text(), "Hanji notes");
+        assert_eq!(document.selection().primary(), TextRange::new(6, 11));
+    }
+
+    #[test]
+    fn execute_markdown_command_dispatches_toggle_emphasis() {
+        let mut document = Document::new("Hanji notes");
+        document
+            .set_selection(Selection::single(TextRange::new(6, 11)))
+            .unwrap();
+
+        execute_markdown_command(&mut document, MarkdownCommand::ToggleEmphasis).unwrap();
+
+        assert_eq!(document.text(), "Hanji *notes*");
     }
 
     #[test]
