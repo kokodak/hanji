@@ -23,7 +23,8 @@ cargo test --workspace --exclude hanji-rust
 GPUI desktop app:
 
 ```sh
-cargo run -p hanji-rust
+make app
+make app FILE=/path/to/note.md
 ```
 
 Current TypeScript desktop app:

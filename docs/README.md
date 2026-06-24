@@ -29,15 +29,15 @@ cargo test --workspace --exclude hanji-rust
 The GPUI app requires a macOS toolchain that can compile Metal shaders:
 
 ```sh
-cargo run -p hanji-rust
+make app
+make app FILE=/path/to/note.md
 ```
 
-If Xcode reports a missing Metal Toolchain, install it and run Cargo with the installed toolchain identifier:
+If Xcode reports a missing Metal Toolchain, install it and run the app through Make:
 
 ```sh
-xcodebuild -downloadComponent metalToolchain -exportPath /private/tmp/HanjiMetalToolchain
-xcodebuild -showComponent MetalToolchain
-TOOLCHAINS=<Toolchain Identifier> cargo run -p hanji-rust
+make metal
+make app
 ```
 
 ## Writing Rule
