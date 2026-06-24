@@ -8,7 +8,8 @@ pub use command::{
 };
 pub use line::{
     MarkdownLine, MarkdownListItem, MarkdownListMarker, MarkdownTaskState, OrderedListDelimiter,
-    blockquote_content_start, classify_line, first_heading, list_item, list_item_content_start,
+    blockquote_content_start, classify_line, first_heading, heading_content_start, list_item,
+    list_item_content_start,
 };
 pub use projection::{
     MarkdownInline, MarkdownMarkerRanges, MarkdownProjection, ProjectedInline, ProjectedLine,

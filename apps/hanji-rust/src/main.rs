@@ -27,6 +27,7 @@ const CHECKBOX_MARKER_FONT_SIZE: f32 = 22.0;
 const CHECKBOX_BOX_SIZE: f32 = 16.0;
 const CHECKBOX_CHECK_FONT_SIZE: f32 = 17.0;
 const CHECKBOX_CONTENT_GAP: f32 = 5.0;
+const MARKDOWN_MARKER_COLOR: u32 = 0x238636;
 const DRAG_SELECTION_THRESHOLD: f64 = 2.0;
 const SAMPLE_DOCUMENT: &str = "# Hanji\n\nCapture the **thought** with `code`.";
 
@@ -1985,7 +1986,8 @@ fn line_text_runs(
             ProjectedSegmentKind::StrongContent => InlineRunStyle::Strong,
             ProjectedSegmentKind::EmphasisContent => InlineRunStyle::Emphasis,
             ProjectedSegmentKind::CodeContent => InlineRunStyle::Code,
-            ProjectedSegmentKind::BlockquoteMarker
+            ProjectedSegmentKind::HeadingMarker
+            | ProjectedSegmentKind::BlockquoteMarker
             | ProjectedSegmentKind::ListMarker
             | ProjectedSegmentKind::StrongMarker
             | ProjectedSegmentKind::EmphasisMarker
@@ -2036,8 +2038,10 @@ fn push_text_run(
     if matches!(style, InlineRunStyle::Emphasis) {
         font = font.italic();
     }
-    let color = if presentation.is_heading {
-        rgb(0x1f3f5b).into()
+    let color = if matches!(style, InlineRunStyle::Marker) {
+        rgb(MARKDOWN_MARKER_COLOR).into()
+    } else if presentation.is_heading {
+        rgb(0x25231f).into()
     } else if presentation.is_blockquote {
         rgb(0x5f6267).into()
     } else if presentation.is_checked_task && !matches!(style, InlineRunStyle::Marker) {
@@ -2080,6 +2084,7 @@ fn code_background_ranges(segments: &[ProjectedVisibleSegment<'_>]) -> Vec<TextR
                 Some(segment.visible_range)
             }
             ProjectedSegmentKind::Text
+            | ProjectedSegmentKind::HeadingMarker
             | ProjectedSegmentKind::BlockquoteMarker
             | ProjectedSegmentKind::ListMarker
             | ProjectedSegmentKind::StrongMarker
@@ -2453,6 +2458,89 @@ mod tests {
         assert!(presentation.is_checked_task);
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].color, rgb(0x8f8a82).into());
+    }
+
+    #[test]
+    fn heading_preview_hides_hash_marker_outside_caret() {
+        let document = Document::new("# Hanji");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let presentation = line_presentation(line.kind);
+        let runs = line_text_runs(
+            &line.visible_segments(),
+            presentation,
+            &TextStyle::default(),
+        );
+
+        assert!(presentation.is_heading);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].font.weight, FontWeight::BOLD);
+        assert_eq!(runs[0].color, rgb(0x25231f).into());
+    }
+
+    #[test]
+    fn heading_source_uses_heading_weight_with_green_hash_marker() {
+        let document = Document::new("# Hanji");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let presentation = line_presentation(line.kind);
+        let runs = line_text_runs(
+            &line.visible_segments_revealing_source_in(Some(TextRange::caret(3))),
+            presentation,
+            &TextStyle::default(),
+        );
+
+        assert!(presentation.is_heading);
+        assert_eq!(runs.len(), 3);
+        assert!(runs.iter().all(|run| run.font.weight == FontWeight::BOLD));
+        assert_eq!(runs[0].color, rgb(MARKDOWN_MARKER_COLOR).into());
+        assert_eq!(runs[1].color, rgb(0x25231f).into());
+        assert_eq!(runs[2].color, rgb(0x25231f).into());
+    }
+
+    #[test]
+    fn empty_heading_source_colors_only_hash_as_marker() {
+        let document = Document::new("# ");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let presentation = line_presentation(line.kind);
+        let runs = line_text_runs(
+            &line.visible_segments_revealing_source_in(Some(TextRange::caret(2))),
+            presentation,
+            &TextStyle::default(),
+        );
+
+        assert!(presentation.is_heading);
+        assert_eq!(runs.len(), 2);
+        assert!(runs.iter().all(|run| run.font.weight == FontWeight::BOLD));
+        assert_eq!(runs[0].color, rgb(MARKDOWN_MARKER_COLOR).into());
+        assert_eq!(runs[1].color, rgb(0x25231f).into());
+    }
+
+    #[test]
+    fn revealed_inline_markers_use_green() {
+        let source = "This is **bold** and `code`";
+        let document = Document::new(source);
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let segments = line.visible_segments_revealing_source_in(Some(TextRange::new(
+            "This is ".len(),
+            source.len(),
+        )));
+        let runs = line_text_runs(
+            &segments,
+            line_presentation(line.kind),
+            &TextStyle::default(),
+        );
+
+        for (segment, run) in segments.iter().zip(runs.iter()) {
+            if matches!(
+                segment.kind,
+                ProjectedSegmentKind::StrongMarker | ProjectedSegmentKind::CodeMarker
+            ) {
+                assert_eq!(run.color, rgb(MARKDOWN_MARKER_COLOR).into());
+            }
+        }
     }
 
     #[test]

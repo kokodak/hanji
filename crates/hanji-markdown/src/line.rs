@@ -92,6 +92,10 @@ pub fn blockquote_content_start(line: &str) -> Option<usize> {
     }
 }
 
+pub fn heading_content_start(line: &str) -> Option<usize> {
+    heading_level_and_content_start(line).map(|(_, content_start)| content_start)
+}
+
 pub fn list_item_content_start(line: &str) -> Option<usize> {
     list_item(line).map(|list_item| list_item.content_start)
 }
@@ -216,25 +220,40 @@ fn task_marker(source: &str, start: usize) -> Option<(MarkdownTaskState, usize)>
 }
 
 fn classify_non_blockquote_line(line: &str) -> MarkdownLine {
+    if let Some((level, _)) = heading_level_and_content_start(line) {
+        return MarkdownLine::Heading { level };
+    }
+
+    MarkdownLine::Paragraph
+}
+
+fn heading_level_and_content_start(line: &str) -> Option<(u8, usize)> {
     let indent = line
         .bytes()
         .take_while(|byte| *byte == b' ')
         .take(4)
         .count();
     if indent >= 4 {
-        return MarkdownLine::Paragraph;
+        return None;
     }
 
     let content = &line[indent..];
 
     let level = content.bytes().take_while(|byte| *byte == b'#').count();
     if !(1..=6).contains(&level) {
-        return MarkdownLine::Paragraph;
+        return None;
     }
 
     match content.as_bytes().get(level) {
-        None | Some(b' ' | b'\t') => MarkdownLine::Heading { level: level as u8 },
-        _ => MarkdownLine::Paragraph,
+        Some(b' ' | b'\t') => {
+            let padding = content.as_bytes()[level..]
+                .iter()
+                .take_while(|byte| matches!(byte, b' ' | b'\t'))
+                .count();
+
+            Some((level as u8, indent + level + padding))
+        }
+        None | Some(_) => None,
     }
 }
 
@@ -261,6 +280,22 @@ mod tests {
             classify_line("   ## Indented"),
             MarkdownLine::Heading { level: 2 }
         );
+        assert_eq!(classify_line("# "), MarkdownLine::Heading { level: 1 });
+        assert_eq!(classify_line("#"), MarkdownLine::Paragraph);
+        assert_eq!(classify_line("###"), MarkdownLine::Paragraph);
+    }
+
+    #[test]
+    fn finds_heading_content_start() {
+        assert_eq!(heading_content_start("# Hanji"), Some(2));
+        assert_eq!(heading_content_start("###   Notes"), Some(6));
+        assert_eq!(heading_content_start("   ## Indented"), Some(6));
+        assert_eq!(heading_content_start("# "), Some(2));
+        assert_eq!(heading_content_start("#"), None);
+        assert_eq!(heading_content_start("###"), None);
+        assert_eq!(heading_content_start("#Hanji"), None);
+        assert_eq!(heading_content_start("####### Hanji"), None);
+        assert_eq!(heading_content_start("    # Code"), None);
     }
 
     #[test]

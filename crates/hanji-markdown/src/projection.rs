@@ -1,6 +1,9 @@
 use hanji_core::{Document, TextRange};
 
-use crate::{MarkdownLine, blockquote_content_start, classify_line, list_item_content_start};
+use crate::{
+    MarkdownLine, blockquote_content_start, classify_line, heading_content_start,
+    list_item_content_start,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarkdownProjection<'a> {
@@ -16,6 +19,7 @@ impl<'a> MarkdownProjection<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectedSegmentKind {
     Text,
+    HeadingMarker,
     BlockquoteMarker,
     ListMarker,
     StrongMarker,
@@ -109,6 +113,10 @@ impl<'a> ProjectedLine<'a> {
         &self,
         reveal_range: Option<TextRange>,
     ) -> Vec<ProjectedVisibleSegment<'a>> {
+        if matches!(self.kind, MarkdownLine::Heading { .. }) {
+            return self.heading_visible_segments_revealing_source_in(reveal_range);
+        }
+
         let mut segments = Vec::new();
         let mut visible_start = 0;
         let reveal_marker = self.should_reveal_marker(reveal_range);
@@ -225,6 +233,10 @@ impl<'a> ProjectedLine<'a> {
     }
 
     pub fn source_visible_segments(&self) -> Vec<ProjectedSegment<'a>> {
+        if matches!(self.kind, MarkdownLine::Heading { .. }) {
+            return self.heading_source_visible_segments();
+        }
+
         let mut segments = Vec::new();
 
         if let Some(marker_range) = self.marker_range {
@@ -237,88 +249,131 @@ impl<'a> ProjectedLine<'a> {
             );
         }
 
+        push_inline_source_segments(&mut segments, self.source, self.range.start, &self.inlines);
+
+        segments
+    }
+
+    fn heading_visible_segments_revealing_source_in(
+        &self,
+        reveal_range: Option<TextRange>,
+    ) -> Vec<ProjectedVisibleSegment<'a>> {
+        let mut segments = Vec::new();
+        let mut visible_start = 0;
+        let content_start = self
+            .inlines
+            .first()
+            .map_or(self.range.end, |inline| inline.source_range.start);
+        let reveal_heading_source =
+            reveal_range.is_some_and(|range| should_reveal_line_source(self.range, range));
+
+        if !reveal_heading_source {
+            for (index, inline) in self.inlines.iter().enumerate() {
+                let source_outer_range = if index == 0 {
+                    TextRange::new(self.range.start, inline.source_range.end)
+                } else {
+                    inline.source_range
+                };
+
+                push_hidden_visible_segment(
+                    &mut segments,
+                    self.source,
+                    self.range.start,
+                    &mut visible_start,
+                    inline,
+                    source_outer_range,
+                );
+            }
+
+            return segments;
+        }
+
+        if let Some(marker_range) = self.marker_range {
+            push_visible_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                &mut visible_start,
+                TextRange::new(self.range.start, marker_range.start),
+                TextRange::new(self.range.start, marker_range.start),
+                ProjectedSegmentKind::Text,
+            );
+            push_visible_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                &mut visible_start,
+                marker_range,
+                marker_range,
+                ProjectedSegmentKind::HeadingMarker,
+            );
+            push_visible_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                &mut visible_start,
+                TextRange::new(marker_range.end, content_start),
+                TextRange::new(marker_range.end, content_start),
+                ProjectedSegmentKind::Text,
+            );
+        }
+
         for inline in &self.inlines {
-            match inline.kind {
-                MarkdownInline::Text => {
-                    push_segment(
-                        &mut segments,
-                        self.source,
-                        self.range.start,
-                        inline.source_range,
-                        ProjectedSegmentKind::Text,
-                    );
-                }
-                MarkdownInline::Strong { markers } => {
-                    push_segment(
-                        &mut segments,
-                        self.source,
-                        self.range.start,
-                        markers.opening,
-                        ProjectedSegmentKind::StrongMarker,
-                    );
-                    push_segment(
-                        &mut segments,
-                        self.source,
-                        self.range.start,
-                        inline.content_range,
-                        ProjectedSegmentKind::StrongContent,
-                    );
-                    push_segment(
-                        &mut segments,
-                        self.source,
-                        self.range.start,
-                        markers.closing,
-                        ProjectedSegmentKind::StrongMarker,
-                    );
-                }
-                MarkdownInline::Emphasis { markers } => {
-                    push_segment(
-                        &mut segments,
-                        self.source,
-                        self.range.start,
-                        markers.opening,
-                        ProjectedSegmentKind::EmphasisMarker,
-                    );
-                    push_segment(
-                        &mut segments,
-                        self.source,
-                        self.range.start,
-                        inline.content_range,
-                        ProjectedSegmentKind::EmphasisContent,
-                    );
-                    push_segment(
-                        &mut segments,
-                        self.source,
-                        self.range.start,
-                        markers.closing,
-                        ProjectedSegmentKind::EmphasisMarker,
-                    );
-                }
-                MarkdownInline::Code { markers } => {
-                    push_segment(
-                        &mut segments,
-                        self.source,
-                        self.range.start,
-                        markers.opening,
-                        ProjectedSegmentKind::CodeMarker,
-                    );
-                    push_segment(
-                        &mut segments,
-                        self.source,
-                        self.range.start,
-                        inline.content_range,
-                        ProjectedSegmentKind::CodeContent,
-                    );
-                    push_segment(
-                        &mut segments,
-                        self.source,
-                        self.range.start,
-                        markers.closing,
-                        ProjectedSegmentKind::CodeMarker,
-                    );
-                }
+            if reveal_range.is_some_and(|range| should_reveal_inline(inline.source_range, range)) {
+                push_source_visible_segments(
+                    &mut segments,
+                    self.source,
+                    self.range.start,
+                    &mut visible_start,
+                    inline,
+                );
+            } else {
+                push_hidden_visible_segment(
+                    &mut segments,
+                    self.source,
+                    self.range.start,
+                    &mut visible_start,
+                    inline,
+                    inline.source_range,
+                );
             }
         }
+
+        segments
+    }
+
+    fn heading_source_visible_segments(&self) -> Vec<ProjectedSegment<'a>> {
+        let mut segments = Vec::new();
+        let content_start = self
+            .inlines
+            .first()
+            .map_or(self.range.end, |inline| inline.source_range.start);
+
+        if let Some(marker_range) = self.marker_range {
+            push_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                TextRange::new(self.range.start, marker_range.start),
+                ProjectedSegmentKind::Text,
+            );
+            push_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                marker_range,
+                ProjectedSegmentKind::HeadingMarker,
+            );
+            push_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                TextRange::new(marker_range.end, content_start),
+                ProjectedSegmentKind::Text,
+            );
+        }
+
+        push_inline_source_segments(&mut segments, self.source, self.range.start, &self.inlines);
 
         segments
     }
@@ -421,6 +476,14 @@ fn should_reveal_line_marker(marker_range: TextRange, reveal_range: TextRange) -
     }
 }
 
+fn should_reveal_line_source(line_range: TextRange, reveal_range: TextRange) -> bool {
+    if reveal_range.is_empty() {
+        reveal_range.start >= line_range.start && reveal_range.start <= line_range.end
+    } else {
+        reveal_range.start < line_range.end && reveal_range.end > line_range.start
+    }
+}
+
 pub fn project_document(document: &Document) -> MarkdownProjection<'_> {
     let mut lines = Vec::new();
 
@@ -431,12 +494,17 @@ pub fn project_document(document: &Document) -> MarkdownProjection<'_> {
         let source = &document.text()[range.start..range.end];
         let kind = classify_line(source);
         let content_start = match kind {
+            MarkdownLine::Heading { .. } => heading_content_start(source).unwrap_or(0),
             MarkdownLine::Blockquote => blockquote_content_start(source).unwrap_or(0),
             MarkdownLine::ListItem { .. } => list_item_content_start(source).unwrap_or(0),
-            MarkdownLine::Blank | MarkdownLine::Paragraph | MarkdownLine::Heading { .. } => 0,
+            MarkdownLine::Blank | MarkdownLine::Paragraph => 0,
         };
-        let marker_range =
-            (content_start > 0).then_some(TextRange::new(range.start, range.start + content_start));
+        let marker_range = match kind {
+            MarkdownLine::Heading { .. } => heading_marker_range(source, range.start),
+            MarkdownLine::Blockquote | MarkdownLine::ListItem { .. } => (content_start > 0)
+                .then_some(TextRange::new(range.start, range.start + content_start)),
+            MarkdownLine::Blank | MarkdownLine::Paragraph => None,
+        };
 
         lines.push(ProjectedLine {
             range,
@@ -452,12 +520,30 @@ pub fn project_document(document: &Document) -> MarkdownProjection<'_> {
 
 fn block_marker_kind(kind: MarkdownLine) -> ProjectedSegmentKind {
     match kind {
+        MarkdownLine::Heading { .. } => ProjectedSegmentKind::HeadingMarker,
         MarkdownLine::Blockquote => ProjectedSegmentKind::BlockquoteMarker,
         MarkdownLine::ListItem { .. } => ProjectedSegmentKind::ListMarker,
-        MarkdownLine::Blank | MarkdownLine::Paragraph | MarkdownLine::Heading { .. } => {
-            ProjectedSegmentKind::Text
-        }
+        MarkdownLine::Blank | MarkdownLine::Paragraph => ProjectedSegmentKind::Text,
     }
+}
+
+fn heading_marker_range(source: &str, line_start: usize) -> Option<TextRange> {
+    let indent = source
+        .bytes()
+        .take_while(|byte| *byte == b' ')
+        .take(4)
+        .count();
+    let content = &source[indent..];
+    let level = content.bytes().take_while(|byte| *byte == b'#').count();
+
+    if !(1..=6).contains(&level) || !matches!(content.as_bytes().get(level), Some(b' ' | b'\t')) {
+        return None;
+    }
+
+    Some(TextRange::new(
+        line_start + indent,
+        line_start + indent + level,
+    ))
 }
 
 fn push_segment<'a>(
@@ -479,6 +565,96 @@ fn push_segment<'a>(
         source: &line_source[start..end],
         kind,
     });
+}
+
+fn push_inline_source_segments<'a>(
+    segments: &mut Vec<ProjectedSegment<'a>>,
+    line_source: &'a str,
+    line_start: usize,
+    inlines: &[ProjectedInline<'a>],
+) {
+    for inline in inlines {
+        match inline.kind {
+            MarkdownInline::Text => {
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    inline.source_range,
+                    ProjectedSegmentKind::Text,
+                );
+            }
+            MarkdownInline::Strong { markers } => {
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    markers.opening,
+                    ProjectedSegmentKind::StrongMarker,
+                );
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    inline.content_range,
+                    ProjectedSegmentKind::StrongContent,
+                );
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    markers.closing,
+                    ProjectedSegmentKind::StrongMarker,
+                );
+            }
+            MarkdownInline::Emphasis { markers } => {
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    markers.opening,
+                    ProjectedSegmentKind::EmphasisMarker,
+                );
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    inline.content_range,
+                    ProjectedSegmentKind::EmphasisContent,
+                );
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    markers.closing,
+                    ProjectedSegmentKind::EmphasisMarker,
+                );
+            }
+            MarkdownInline::Code { markers } => {
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    markers.opening,
+                    ProjectedSegmentKind::CodeMarker,
+                );
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    inline.content_range,
+                    ProjectedSegmentKind::CodeContent,
+                );
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    markers.closing,
+                    ProjectedSegmentKind::CodeMarker,
+                );
+            }
+        }
+    }
 }
 
 fn push_visible_segment<'a>(
@@ -968,7 +1144,9 @@ mod tests {
         assert_eq!(lines[0].range, TextRange::new(0, 7));
         assert_eq!(lines[0].source, "# Hanji");
         assert_eq!(lines[0].kind, MarkdownLine::Heading { level: 1 });
+        assert_eq!(lines[0].marker_range, Some(TextRange::new(0, 1)));
         assert_eq!(lines[0].inlines.len(), 1);
+        assert_eq!(lines[0].inlines[0].source, "Hanji");
         assert_eq!(lines[1].range, TextRange::new(8, 8));
         assert_eq!(lines[1].source, "");
         assert_eq!(lines[1].kind, MarkdownLine::Blank);
@@ -983,6 +1161,145 @@ mod tests {
         assert_eq!(lines[3].source, "Notes");
         assert_eq!(lines[3].kind, MarkdownLine::Paragraph);
         assert_eq!(lines[3].inlines.len(), 1);
+    }
+
+    #[test]
+    fn hides_heading_marker_in_preview() {
+        let document = Document::new("# Hanji");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.visible_text(), "Hanji");
+        assert_eq!(line.visible_len(), "Hanji".len());
+        assert_eq!(
+            line.source_visible_segments()[0],
+            ProjectedSegment {
+                range: TextRange::new(0, 1),
+                source: "#",
+                kind: ProjectedSegmentKind::HeadingMarker,
+            }
+        );
+        assert_eq!(
+            line.visible_segments(),
+            vec![ProjectedVisibleSegment {
+                visible_range: TextRange::new(0, 5),
+                source_range: TextRange::new(2, 7),
+                source_outer_range: TextRange::new(0, 7),
+                source: "Hanji",
+                kind: ProjectedSegmentKind::Text,
+            }]
+        );
+        assert_eq!(line.visible_to_source_caret_offset(0), 2);
+        assert_eq!(line.source_to_visible_offset(0), 0);
+        assert_eq!(line.source_to_visible_offset(2), 0);
+    }
+
+    #[test]
+    fn caret_inside_heading_marker_keeps_source_visible() {
+        let document = Document::new("# Hanji");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::caret(1))),
+            "# Hanji"
+        );
+        assert_eq!(
+            line.visible_segments_revealing_source_in(Some(TextRange::caret(1)))[0],
+            ProjectedVisibleSegment {
+                visible_range: TextRange::new(0, 1),
+                source_range: TextRange::new(0, 1),
+                source_outer_range: TextRange::new(0, 1),
+                source: "#",
+                kind: ProjectedSegmentKind::HeadingMarker,
+            }
+        );
+    }
+
+    #[test]
+    fn caret_inside_heading_content_keeps_source_visible() {
+        let document = Document::new("# Hanji");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::caret(4))),
+            "# Hanji"
+        );
+    }
+
+    #[test]
+    fn selection_over_heading_marker_keeps_source_visible() {
+        let document = Document::new("# Hanji");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::new(1, 4))),
+            "# Hanji"
+        );
+    }
+
+    #[test]
+    fn hides_indented_heading_marker_in_preview() {
+        let document = Document::new("   ## Hanji");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.visible_text(), "Hanji");
+        assert_eq!(line.marker_range, Some(TextRange::new(3, 5)));
+        assert_eq!(line.visible_to_source_caret_offset(0), 6);
+        assert_eq!(line.source_to_visible_offset(0), 0);
+        assert_eq!(line.source_to_visible_offset(6), 0);
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::caret(8))),
+            "   ## Hanji"
+        );
+    }
+
+    #[test]
+    fn keeps_pending_heading_marker_source_visible_until_padding() {
+        let document = Document::new("#");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.kind, MarkdownLine::Paragraph);
+        assert_eq!(line.marker_range, None);
+        assert_eq!(line.visible_text(), "#");
+    }
+
+    #[test]
+    fn hides_empty_heading_source_until_caret_enters_line() {
+        let document = Document::new("# ");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.kind, MarkdownLine::Heading { level: 1 });
+        assert_eq!(line.marker_range, Some(TextRange::new(0, 1)));
+        assert_eq!(line.visible_text(), "");
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::caret(2))),
+            "# "
+        );
+        assert_eq!(
+            line.visible_segments_revealing_source_in(Some(TextRange::caret(2))),
+            vec![
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(0, 1),
+                    source_range: TextRange::new(0, 1),
+                    source_outer_range: TextRange::new(0, 1),
+                    source: "#",
+                    kind: ProjectedSegmentKind::HeadingMarker,
+                },
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(1, 2),
+                    source_range: TextRange::new(1, 2),
+                    source_outer_range: TextRange::new(1, 2),
+                    source: " ",
+                    kind: ProjectedSegmentKind::Text,
+                },
+            ]
+        );
     }
 
     #[test]
