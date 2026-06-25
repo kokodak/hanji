@@ -22,12 +22,16 @@ pub enum ProjectedSegmentKind {
     HeadingMarker,
     BlockquoteMarker,
     ListMarker,
+    EscapeMarker,
     StrongMarker,
     StrongContent,
     EmphasisMarker,
     EmphasisContent,
     CodeMarker,
     CodeContent,
+    LinkMarker,
+    LinkText,
+    LinkDestination,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,14 +59,24 @@ pub struct ProjectedVisibleSegment<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarkdownInline {
     Text,
+    Escape { marker: TextRange },
     Strong { markers: MarkdownMarkerRanges },
     Emphasis { markers: MarkdownMarkerRanges },
     Code { markers: MarkdownMarkerRanges },
+    Link { markers: MarkdownLinkRanges },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MarkdownMarkerRanges {
     pub opening: TextRange,
+    pub closing: TextRange,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MarkdownLinkRanges {
+    pub opening: TextRange,
+    pub separator: TextRange,
+    pub destination: TextRange,
     pub closing: TextRange,
 }
 
@@ -134,7 +148,7 @@ impl<'a> ProjectedLine<'a> {
         }
 
         for (index, inline) in self.inlines.iter().enumerate() {
-            if reveal_range.is_some_and(|range| should_reveal_inline(inline.source_range, range)) {
+            if reveal_range.is_some_and(|range| self.should_reveal_inline_source(inline, range)) {
                 push_source_visible_segments(
                     &mut segments,
                     self.source,
@@ -319,7 +333,7 @@ impl<'a> ProjectedLine<'a> {
         }
 
         for inline in &self.inlines {
-            if reveal_range.is_some_and(|range| should_reveal_inline(inline.source_range, range)) {
+            if reveal_range.is_some_and(|range| self.should_reveal_inline_source(inline, range)) {
                 push_source_visible_segments(
                     &mut segments,
                     self.source,
@@ -400,6 +414,27 @@ impl<'a> ProjectedLine<'a> {
         };
 
         reveal_range.is_some_and(|range| should_reveal_line_marker(marker_range, range))
+    }
+
+    fn should_reveal_inline_source(
+        &self,
+        inline: &ProjectedInline<'_>,
+        reveal_range: TextRange,
+    ) -> bool {
+        if should_reveal_inline(inline.source_range, reveal_range) {
+            return true;
+        }
+
+        if !matches!(inline.kind, MarkdownInline::Escape { .. }) {
+            return false;
+        }
+
+        should_reveal_escape_marker(
+            self.source,
+            self.range.start,
+            inline.source_range,
+            reveal_range,
+        )
     }
 }
 
@@ -482,6 +517,47 @@ fn should_reveal_line_source(line_range: TextRange, reveal_range: TextRange) -> 
     } else {
         reveal_range.start < line_range.end && reveal_range.end > line_range.start
     }
+}
+
+fn should_reveal_escape_marker(
+    line_source: &str,
+    line_start: usize,
+    escape_range: TextRange,
+    reveal_range: TextRange,
+) -> bool {
+    let token_range = escaped_token_range(line_source, line_start, escape_range);
+
+    should_reveal_inline(token_range, reveal_range)
+}
+
+fn escaped_token_range(line_source: &str, line_start: usize, escape_range: TextRange) -> TextRange {
+    let mut start = escape_range.start.saturating_sub(line_start);
+    let mut end = escape_range.end.saturating_sub(line_start);
+
+    while let Some((previous_start, character)) = previous_char_with_start(line_source, start) {
+        if character.is_whitespace() {
+            break;
+        }
+
+        start = previous_start;
+    }
+
+    while end < line_source.len() {
+        let Some(character) = line_source[end..].chars().next() else {
+            break;
+        };
+        if character.is_whitespace() {
+            break;
+        }
+
+        end += character.len_utf8();
+    }
+
+    TextRange::new(line_start + start, line_start + end)
+}
+
+fn previous_char_with_start(source: &str, end: usize) -> Option<(usize, char)> {
+    source[..end].char_indices().next_back()
 }
 
 pub fn project_document(document: &Document) -> MarkdownProjection<'_> {
@@ -584,6 +660,22 @@ fn push_inline_source_segments<'a>(
                     ProjectedSegmentKind::Text,
                 );
             }
+            MarkdownInline::Escape { marker } => {
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    marker,
+                    ProjectedSegmentKind::EscapeMarker,
+                );
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    inline.content_range,
+                    ProjectedSegmentKind::Text,
+                );
+            }
             MarkdownInline::Strong { markers } => {
                 push_segment(
                     segments,
@@ -653,6 +745,43 @@ fn push_inline_source_segments<'a>(
                     ProjectedSegmentKind::CodeMarker,
                 );
             }
+            MarkdownInline::Link { markers } => {
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    markers.opening,
+                    ProjectedSegmentKind::LinkMarker,
+                );
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    inline.content_range,
+                    ProjectedSegmentKind::LinkText,
+                );
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    markers.separator,
+                    ProjectedSegmentKind::LinkMarker,
+                );
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    markers.destination,
+                    ProjectedSegmentKind::LinkDestination,
+                );
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    markers.closing,
+                    ProjectedSegmentKind::LinkMarker,
+                );
+            }
         }
     }
 }
@@ -695,9 +824,11 @@ fn push_hidden_visible_segment<'a>(
 ) {
     let kind = match inline.kind {
         MarkdownInline::Text => ProjectedSegmentKind::Text,
+        MarkdownInline::Escape { .. } => ProjectedSegmentKind::Text,
         MarkdownInline::Strong { .. } => ProjectedSegmentKind::StrongContent,
         MarkdownInline::Emphasis { .. } => ProjectedSegmentKind::EmphasisContent,
         MarkdownInline::Code { .. } => ProjectedSegmentKind::CodeContent,
+        MarkdownInline::Link { .. } => ProjectedSegmentKind::LinkText,
     };
 
     push_visible_segment(
@@ -727,6 +858,26 @@ fn push_source_visible_segments<'a>(
                 visible_start,
                 inline.source_range,
                 inline.source_range,
+                ProjectedSegmentKind::Text,
+            );
+        }
+        MarkdownInline::Escape { marker } => {
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                marker,
+                marker,
+                ProjectedSegmentKind::EscapeMarker,
+            );
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                inline.content_range,
+                inline.content_range,
                 ProjectedSegmentKind::Text,
             );
         }
@@ -817,6 +968,53 @@ fn push_source_visible_segments<'a>(
                 ProjectedSegmentKind::CodeMarker,
             );
         }
+        MarkdownInline::Link { markers } => {
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                markers.opening,
+                markers.opening,
+                ProjectedSegmentKind::LinkMarker,
+            );
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                inline.content_range,
+                inline.content_range,
+                ProjectedSegmentKind::LinkText,
+            );
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                markers.separator,
+                markers.separator,
+                ProjectedSegmentKind::LinkMarker,
+            );
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                markers.destination,
+                markers.destination,
+                ProjectedSegmentKind::LinkDestination,
+            );
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                markers.closing,
+                markers.closing,
+                ProjectedSegmentKind::LinkMarker,
+            );
+        }
     }
 }
 
@@ -837,7 +1035,7 @@ fn project_inlines(source: &str, source_start: usize) -> Vec<ProjectedInline<'_>
             continue;
         }
 
-        push_text_with_emphasis_inlines(
+        push_text_with_projected_inlines(
             &mut inlines,
             source,
             source_start,
@@ -857,12 +1055,12 @@ fn project_inlines(source: &str, source_start: usize) -> Vec<ProjectedInline<'_>
         text_start = search_start;
     }
 
-    push_text_with_emphasis_inlines(&mut inlines, source, source_start, text_start, source.len());
+    push_text_with_projected_inlines(&mut inlines, source, source_start, text_start, source.len());
 
     inlines
 }
 
-fn push_text_with_emphasis_inlines<'a>(
+fn push_text_with_projected_inlines<'a>(
     inlines: &mut Vec<ProjectedInline<'a>>,
     source: &'a str,
     source_start: usize,
@@ -871,25 +1069,71 @@ fn push_text_with_emphasis_inlines<'a>(
 ) {
     let mut text_start = start;
 
-    for pair in emphasis_pairs(source, start, end) {
-        let opening_start = pair.opening_start;
+    for span in inline_spans(source, start, end) {
+        let opening_start = span.start();
         if opening_start < text_start {
             continue;
         }
 
         push_text_inline(inlines, source, source_start, text_start, opening_start);
-        push_delimited_inline(inlines, source, source_start, pair);
+        push_projected_inline(inlines, source, source_start, span);
 
-        text_start = pair.closing_start + pair.kind.marker_len();
+        text_start = span.end();
     }
 
     push_text_inline(inlines, source, source_start, text_start, end);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InlineSpan {
+    Escape(EscapeSpan),
+    Emphasis(EmphasisPair),
+    Link(LinkSpan),
+}
+
+impl InlineSpan {
+    fn start(self) -> usize {
+        match self {
+            Self::Escape(span) => span.start,
+            Self::Emphasis(pair) => pair.opening_start,
+            Self::Link(span) => span.opening_start,
+        }
+    }
+
+    fn end(self) -> usize {
+        match self {
+            Self::Escape(span) => span.end,
+            Self::Emphasis(pair) => pair.closing_start + pair.kind.marker_len(),
+            Self::Link(span) => span.closing_start + 1,
+        }
+    }
+
+    fn priority(self) -> u8 {
+        match self {
+            Self::Escape(_) => 0,
+            Self::Link(_) => 1,
+            Self::Emphasis(_) => 2,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EscapeSpan {
+    start: usize,
+    end: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct EmphasisPair {
     kind: EmphasisDelimiterKind,
     opening_start: usize,
+    closing_start: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LinkSpan {
+    opening_start: usize,
+    label_end: usize,
     closing_start: usize,
 }
 
@@ -906,6 +1150,127 @@ impl EmphasisDelimiterKind {
             Self::Strong => 2,
         }
     }
+}
+
+fn inline_spans(source: &str, start: usize, end: usize) -> Vec<InlineSpan> {
+    let mut candidates = Vec::new();
+
+    candidates.extend(
+        escape_spans(source, start, end)
+            .into_iter()
+            .map(InlineSpan::Escape),
+    );
+    candidates.extend(
+        link_spans(source, start, end)
+            .into_iter()
+            .map(InlineSpan::Link),
+    );
+    candidates.extend(
+        emphasis_pairs(source, start, end)
+            .into_iter()
+            .map(InlineSpan::Emphasis),
+    );
+
+    candidates.sort_by_key(|span| (span.start(), span.priority(), span.end()));
+
+    let mut spans = Vec::new();
+    let mut occupied_end = start;
+    for span in candidates {
+        if span.start() < occupied_end {
+            continue;
+        }
+
+        occupied_end = span.end();
+        spans.push(span);
+    }
+
+    spans
+}
+
+fn escape_spans(source: &str, start: usize, end: usize) -> Vec<EscapeSpan> {
+    let bytes = source.as_bytes();
+    let mut spans = Vec::new();
+    let mut cursor = start;
+
+    while cursor < end {
+        if bytes[cursor] == b'\\'
+            && !is_escaped(source, cursor)
+            && let Some(next) = next_char(source, cursor + 1, end)
+            && is_escapable_character(next)
+        {
+            spans.push(EscapeSpan {
+                start: cursor,
+                end: cursor + 1 + next.len_utf8(),
+            });
+            cursor += 1 + next.len_utf8();
+        } else {
+            cursor += 1;
+        }
+    }
+
+    spans
+}
+
+fn link_spans(source: &str, start: usize, end: usize) -> Vec<LinkSpan> {
+    let mut spans = Vec::new();
+    let mut search_start = start;
+
+    while let Some(opening_start) = find_unescaped_byte(source, b'[', search_start, end) {
+        let label_start = opening_start + 1;
+        let Some(label_end) = find_link_label_end(source, label_start, end) else {
+            search_start = label_start;
+            continue;
+        };
+        if label_end == label_start {
+            search_start = label_start;
+            continue;
+        }
+
+        let destination_start = label_end + 2;
+        let Some(closing_start) = find_link_destination_end(source, destination_start, end) else {
+            search_start = destination_start;
+            continue;
+        };
+        if closing_start == destination_start
+            || source[destination_start..closing_start]
+                .chars()
+                .any(char::is_whitespace)
+        {
+            search_start = destination_start;
+            continue;
+        }
+
+        spans.push(LinkSpan {
+            opening_start,
+            label_end,
+            closing_start,
+        });
+        search_start = closing_start + 1;
+    }
+
+    spans
+}
+
+fn find_link_label_end(source: &str, search_start: usize, end: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut cursor = search_start;
+
+    while cursor + 1 < end {
+        if bytes[cursor] == b']'
+            && !is_escaped(source, cursor)
+            && matches!(bytes.get(cursor + 1), Some(b'('))
+        {
+            return Some(cursor);
+        }
+
+        cursor += 1;
+    }
+
+    None
+}
+
+fn find_link_destination_end(source: &str, search_start: usize, end: usize) -> Option<usize> {
+    find_unescaped_byte(source, b')', search_start, end)
 }
 
 fn emphasis_pairs(source: &str, start: usize, end: usize) -> Vec<EmphasisPair> {
@@ -954,6 +1319,11 @@ fn find_exact_emphasis_marker(
 
     while cursor < end {
         if bytes[cursor] == b'*' {
+            if is_escaped(source, cursor) {
+                cursor += 1;
+                continue;
+            }
+
             let marker_start = cursor;
 
             while cursor < end && bytes[cursor] == b'*' {
@@ -983,34 +1353,60 @@ fn can_close_emphasis(source: &str, marker_start: usize) -> bool {
         .is_some_and(|character| !character.is_whitespace() && !matches!(character, '*' | '`'))
 }
 
-fn push_delimited_inline<'a>(
+fn push_projected_inline<'a>(
     inlines: &mut Vec<ProjectedInline<'a>>,
     source: &'a str,
     source_start: usize,
-    pair: EmphasisPair,
+    span: InlineSpan,
 ) {
-    match pair.kind {
-        EmphasisDelimiterKind::Emphasis => {
-            push_emphasis_inline(
-                inlines,
-                source,
-                source_start,
-                pair.opening_start,
-                pair.opening_start + pair.kind.marker_len(),
-                pair.closing_start,
-            );
+    match span {
+        InlineSpan::Escape(span) => {
+            push_escape_inline(inlines, source, source_start, span);
         }
-        EmphasisDelimiterKind::Strong => {
-            push_strong_inline(
-                inlines,
-                source,
-                source_start,
-                pair.opening_start,
-                pair.opening_start + pair.kind.marker_len(),
-                pair.closing_start,
-            );
+        InlineSpan::Emphasis(pair) => match pair.kind {
+            EmphasisDelimiterKind::Emphasis => {
+                push_emphasis_inline(
+                    inlines,
+                    source,
+                    source_start,
+                    pair.opening_start,
+                    pair.opening_start + pair.kind.marker_len(),
+                    pair.closing_start,
+                );
+            }
+            EmphasisDelimiterKind::Strong => {
+                push_strong_inline(
+                    inlines,
+                    source,
+                    source_start,
+                    pair.opening_start,
+                    pair.opening_start + pair.kind.marker_len(),
+                    pair.closing_start,
+                );
+            }
+        },
+        InlineSpan::Link(span) => {
+            push_link_inline(inlines, source, source_start, span);
         }
     }
+}
+
+fn push_escape_inline<'a>(
+    inlines: &mut Vec<ProjectedInline<'a>>,
+    source: &'a str,
+    source_start: usize,
+    span: EscapeSpan,
+) {
+    let marker = TextRange::new(source_start + span.start, source_start + span.start + 1);
+    let content_range = TextRange::new(source_start + span.start + 1, source_start + span.end);
+
+    inlines.push(ProjectedInline {
+        source_range: TextRange::new(source_start + span.start, source_start + span.end),
+        content_range,
+        source: &source[span.start..span.end],
+        content: &source[span.start + 1..span.end],
+        kind: MarkdownInline::Escape { marker },
+    });
 }
 
 fn push_emphasis_inline<'a>(
@@ -1054,9 +1450,36 @@ fn previous_char(source: &str, end: usize) -> Option<char> {
 }
 
 fn find_code_marker(source: &str, search_start: usize) -> Option<usize> {
-    source[search_start..]
-        .find('`')
-        .map(|offset| search_start + offset)
+    find_unescaped_byte(source, b'`', search_start, source.len())
+}
+
+fn find_unescaped_byte(source: &str, target: u8, search_start: usize, end: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut cursor = search_start;
+
+    while cursor < end {
+        if bytes[cursor] == target && !is_escaped(source, cursor) {
+            return Some(cursor);
+        }
+
+        cursor += 1;
+    }
+
+    None
+}
+
+fn is_escaped(source: &str, index: usize) -> bool {
+    source[..index]
+        .bytes()
+        .rev()
+        .take_while(|byte| *byte == b'\\')
+        .count()
+        % 2
+        == 1
+}
+
+fn is_escapable_character(character: char) -> bool {
+    character.is_ascii_punctuation()
 }
 
 fn push_text_inline<'a>(
@@ -1124,6 +1547,49 @@ fn push_code_inline<'a>(
             markers: MarkdownMarkerRanges {
                 opening: TextRange::new(source_start + opening_start, source_start + content_start),
                 closing: TextRange::new(source_start + closing_start, source_start + closing_end),
+            },
+        },
+    });
+}
+
+fn push_link_inline<'a>(
+    inlines: &mut Vec<ProjectedInline<'a>>,
+    source: &'a str,
+    source_start: usize,
+    span: LinkSpan,
+) {
+    let destination_start = span.label_end + 2;
+    let closing_end = span.closing_start + 1;
+
+    inlines.push(ProjectedInline {
+        source_range: TextRange::new(
+            source_start + span.opening_start,
+            source_start + closing_end,
+        ),
+        content_range: TextRange::new(
+            source_start + span.opening_start + 1,
+            source_start + span.label_end,
+        ),
+        source: &source[span.opening_start..closing_end],
+        content: &source[span.opening_start + 1..span.label_end],
+        kind: MarkdownInline::Link {
+            markers: MarkdownLinkRanges {
+                opening: TextRange::new(
+                    source_start + span.opening_start,
+                    source_start + span.opening_start + 1,
+                ),
+                separator: TextRange::new(
+                    source_start + span.label_end,
+                    source_start + destination_start,
+                ),
+                destination: TextRange::new(
+                    source_start + destination_start,
+                    source_start + span.closing_start,
+                ),
+                closing: TextRange::new(
+                    source_start + span.closing_start,
+                    source_start + closing_end,
+                ),
             },
         },
     });
@@ -1911,6 +2377,239 @@ mod tests {
         assert_eq!(
             line.visible_to_source_caret_offset("This is bold ".len()),
             "This is **bold** ".len()
+        );
+    }
+
+    #[test]
+    fn projects_link_inline_spans_with_source_ranges() {
+        let document = Document::new("Read [Hanji](https://hanji.local) now");
+        let projection = project_document(&document);
+        let inlines = &projection.lines()[0].inlines;
+
+        assert_eq!(inlines.len(), 3);
+        assert_eq!(inlines[0].source, "Read ");
+        assert_eq!(
+            inlines[1],
+            ProjectedInline {
+                source_range: TextRange::new(5, 33),
+                content_range: TextRange::new(6, 11),
+                source: "[Hanji](https://hanji.local)",
+                content: "Hanji",
+                kind: MarkdownInline::Link {
+                    markers: MarkdownLinkRanges {
+                        opening: TextRange::new(5, 6),
+                        separator: TextRange::new(11, 13),
+                        destination: TextRange::new(13, 32),
+                        closing: TextRange::new(32, 33),
+                    },
+                },
+            }
+        );
+        assert_eq!(inlines[2].source, " now");
+    }
+
+    #[test]
+    fn exposes_source_visible_segments_for_link_spans() {
+        let document = Document::new("Read [Hanji](https://hanji.local) now");
+        let projection = project_document(&document);
+        let segments = projection.lines()[0].source_visible_segments();
+
+        assert_eq!(
+            segments,
+            vec![
+                ProjectedSegment {
+                    range: TextRange::new(0, 5),
+                    source: "Read ",
+                    kind: ProjectedSegmentKind::Text,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(5, 6),
+                    source: "[",
+                    kind: ProjectedSegmentKind::LinkMarker,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(6, 11),
+                    source: "Hanji",
+                    kind: ProjectedSegmentKind::LinkText,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(11, 13),
+                    source: "](",
+                    kind: ProjectedSegmentKind::LinkMarker,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(13, 32),
+                    source: "https://hanji.local",
+                    kind: ProjectedSegmentKind::LinkDestination,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(32, 33),
+                    source: ")",
+                    kind: ProjectedSegmentKind::LinkMarker,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(33, 37),
+                    source: " now",
+                    kind: ProjectedSegmentKind::Text,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn hides_link_markers_and_destination_in_preview() {
+        let document = Document::new("Read [Hanji](https://hanji.local) now");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.visible_text(), "Read Hanji now");
+        assert_eq!(
+            line.visible_segments(),
+            vec![
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(0, 5),
+                    source_range: TextRange::new(0, 5),
+                    source_outer_range: TextRange::new(0, 5),
+                    source: "Read ",
+                    kind: ProjectedSegmentKind::Text,
+                },
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(5, 10),
+                    source_range: TextRange::new(6, 11),
+                    source_outer_range: TextRange::new(5, 33),
+                    source: "Hanji",
+                    kind: ProjectedSegmentKind::LinkText,
+                },
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(10, 14),
+                    source_range: TextRange::new(33, 37),
+                    source_outer_range: TextRange::new(33, 37),
+                    source: " now",
+                    kind: ProjectedSegmentKind::Text,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn caret_inside_link_reveals_link_source() {
+        let document = Document::new("Read [Hanji](https://hanji.local) now");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        for caret in [
+            "Read [Ha".len(),
+            "Read [Hanji](https".len(),
+            "Read [Hanji](https://hanji.local)".len(),
+        ] {
+            assert_eq!(
+                line.visible_text_revealing_source_in(Some(TextRange::caret(caret))),
+                "Read [Hanji](https://hanji.local) now"
+            );
+        }
+
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::caret("Read ".len()))),
+            "Read [Hanji](https://hanji.local) now"
+        );
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::caret("Read".len()))),
+            "Read Hanji now"
+        );
+    }
+
+    #[test]
+    fn maps_hidden_link_boundaries_to_editable_marker_edges() {
+        let document = Document::new("Read [Hanji](https://hanji.local) now");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.visible_text(), "Read Hanji now");
+        assert_eq!(line.visible_to_source_caret_offset("Read ".len()), 6);
+        assert_eq!(line.visible_to_source_caret_offset("Read Ha".len()), 8);
+        assert_eq!(line.visible_to_source_caret_offset("Read Hanji".len()), 11);
+        assert_eq!(
+            line.visible_to_source_caret_offset("Read Hanji ".len()),
+            "Read [Hanji](https://hanji.local) ".len()
+        );
+    }
+
+    #[test]
+    fn escaped_markdown_markers_remain_text() {
+        let document = Document::new("Use \\*literal\\* and \\[Hanji](url) plus \\\\ slash");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(
+            line.visible_text(),
+            "Use *literal* and [Hanji](url) plus \\ slash"
+        );
+        assert!(line.inlines.iter().all(|inline| {
+            !matches!(
+                inline.kind,
+                MarkdownInline::Strong { .. }
+                    | MarkdownInline::Emphasis { .. }
+                    | MarkdownInline::Code { .. }
+                    | MarkdownInline::Link { .. }
+            )
+        }));
+    }
+
+    #[test]
+    fn escaped_markers_reveal_backslash_at_caret() {
+        let document = Document::new("Use \\*literal");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.visible_text(), "Use *literal");
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::caret("Use \\".len()))),
+            "Use \\*literal"
+        );
+        assert_eq!(
+            line.visible_to_source_caret_offset("Use ".len()),
+            "Use \\".len()
+        );
+    }
+
+    #[test]
+    fn escaped_markers_reveal_when_caret_enters_same_token() {
+        let document = Document::new("Use \\*literal\\* here");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.visible_text(), "Use *literal* here");
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::caret("Use \\*lit".len()))),
+            "Use \\*literal\\* here"
+        );
+    }
+
+    #[test]
+    fn escaped_code_marker_does_not_start_code_span() {
+        let document = Document::new("Use \\`code\\` here");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.visible_text(), "Use `code` here");
+        assert!(
+            line.inlines
+                .iter()
+                .all(|inline| !matches!(inline.kind, MarkdownInline::Code { .. }))
+        );
+    }
+
+    #[test]
+    fn malformed_links_remain_text() {
+        let document = Document::new("Read [Hanji](https://hanji.local now");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.visible_text(), "Read [Hanji](https://hanji.local now");
+        assert!(
+            line.inlines
+                .iter()
+                .all(|inline| !matches!(inline.kind, MarkdownInline::Link { .. }))
         );
     }
 

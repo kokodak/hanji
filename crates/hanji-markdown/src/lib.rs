@@ -12,7 +12,7 @@ pub use line::{
     list_item_content_start,
 };
 pub use projection::{
-    MarkdownInline, MarkdownMarkerRanges, MarkdownProjection, ProjectedInline, ProjectedLine,
-    ProjectedSegment, ProjectedSegmentKind, ProjectedVisibleSegment, VisibleOffsetAffinity,
-    project_document,
+    MarkdownInline, MarkdownLinkRanges, MarkdownMarkerRanges, MarkdownProjection, ProjectedInline,
+    ProjectedLine, ProjectedSegment, ProjectedSegmentKind, ProjectedVisibleSegment,
+    VisibleOffsetAffinity, project_document,
 };
