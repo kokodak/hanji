@@ -37,6 +37,7 @@ pub(crate) struct EditorPrepaintState {
     blockquote_bars: Vec<PaintQuad>,
     list_markers: Vec<ListMarkerSnapshot>,
     task_marker_hitboxes: Vec<TaskMarkerHitbox>,
+    link_hitboxes: Vec<LinkHitbox>,
     code_backgrounds: Vec<PaintQuad>,
     cursor: Option<PaintQuad>,
     selections: Vec<PaintQuad>,
@@ -101,6 +102,12 @@ pub(crate) struct TaskMarkerHitbox {
     pub(crate) bounds: Bounds<Pixels>,
     pub(crate) marker_range: TextRange,
     pub(crate) state: MarkdownTaskState,
+}
+
+#[derive(Clone)]
+pub(crate) struct LinkHitbox {
+    pub(crate) bounds: Bounds<Pixels>,
+    pub(crate) url: String,
 }
 
 #[derive(Clone, Copy)]
@@ -172,6 +179,7 @@ impl Element for EditorElement {
         let mut blockquote_bar_run = None;
         let mut list_markers = Vec::new();
         let mut task_marker_hitboxes = Vec::new();
+        let mut link_hitboxes = Vec::new();
         let mut code_backgrounds = Vec::new();
         let mut top = 0.0;
 
@@ -251,6 +259,13 @@ impl Element for EditorElement {
                 &layout,
                 line_bounds,
             ));
+            link_hitboxes.extend(link_hitboxes_for_segments(
+                &visible_segments,
+                &layout,
+                line_bounds,
+                line.source,
+                line.range.start,
+            ));
             top += presentation.line_height;
             let visible_len = visible_segments
                 .last()
@@ -283,6 +298,7 @@ impl Element for EditorElement {
             blockquote_bars,
             list_markers,
             task_marker_hitboxes,
+            link_hitboxes,
             code_backgrounds,
             cursor,
             selections,
@@ -341,9 +357,11 @@ impl Element for EditorElement {
 
         let lines = prepaint.lines.clone();
         let task_markers = prepaint.task_marker_hitboxes.clone();
+        let link_hitboxes = prepaint.link_hitboxes.clone();
         self.editor.update(cx, |editor, _cx| {
             editor.last_lines = lines;
             editor.last_task_markers = task_markers;
+            editor.last_link_hitboxes = link_hitboxes;
         });
     }
 }
@@ -633,12 +651,16 @@ fn line_text_runs(
             ProjectedSegmentKind::StrongContent => InlineRunStyle::Strong,
             ProjectedSegmentKind::EmphasisContent => InlineRunStyle::Emphasis,
             ProjectedSegmentKind::CodeContent => InlineRunStyle::Code,
+            ProjectedSegmentKind::LinkText => InlineRunStyle::Link,
+            ProjectedSegmentKind::LinkDestination => InlineRunStyle::Plain,
+            ProjectedSegmentKind::EscapeMarker => InlineRunStyle::EscapeMarker,
             ProjectedSegmentKind::HeadingMarker
             | ProjectedSegmentKind::BlockquoteMarker
             | ProjectedSegmentKind::ListMarker
             | ProjectedSegmentKind::StrongMarker
             | ProjectedSegmentKind::EmphasisMarker
-            | ProjectedSegmentKind::CodeMarker => InlineRunStyle::Marker,
+            | ProjectedSegmentKind::CodeMarker
+            | ProjectedSegmentKind::LinkMarker => InlineRunStyle::Marker,
             ProjectedSegmentKind::Text => InlineRunStyle::Plain,
         };
 
@@ -661,6 +683,8 @@ enum InlineRunStyle {
     Strong,
     Emphasis,
     Code,
+    Link,
+    EscapeMarker,
 }
 
 fn push_text_run(
@@ -685,7 +709,9 @@ fn push_text_run(
     if matches!(style, InlineRunStyle::Emphasis) {
         font = font.italic();
     }
-    let color = if matches!(style, InlineRunStyle::Marker) {
+    let color = if matches!(style, InlineRunStyle::EscapeMarker) {
+        rgb(0x8f8a82).into()
+    } else if matches!(style, InlineRunStyle::Marker) {
         rgb(MARKDOWN_MARKER_COLOR).into()
     } else if presentation.is_heading {
         rgb(0x25231f).into()
@@ -697,10 +723,13 @@ fn push_text_run(
         text_style.color
     };
 
-    let underline = if matches!(style, InlineRunStyle::Strong | InlineRunStyle::Emphasis) {
-        Some(font_run_boundary_marker())
-    } else {
-        None
+    let underline = match style {
+        InlineRunStyle::Strong | InlineRunStyle::Emphasis => Some(font_run_boundary_marker()),
+        InlineRunStyle::Link => Some(link_underline()),
+        InlineRunStyle::Plain
+        | InlineRunStyle::Marker
+        | InlineRunStyle::Code
+        | InlineRunStyle::EscapeMarker => None,
     };
 
     runs.push(TextRun {
@@ -723,6 +752,14 @@ fn font_run_boundary_marker() -> UnderlineStyle {
     }
 }
 
+fn link_underline() -> UnderlineStyle {
+    UnderlineStyle {
+        thickness: px(1.0),
+        color: Some(rgb(0x25231f).into()),
+        wavy: false,
+    }
+}
+
 fn code_background_ranges(segments: &[ProjectedVisibleSegment<'_>]) -> Vec<TextRange> {
     segments
         .iter()
@@ -734,10 +771,14 @@ fn code_background_ranges(segments: &[ProjectedVisibleSegment<'_>]) -> Vec<TextR
             | ProjectedSegmentKind::HeadingMarker
             | ProjectedSegmentKind::BlockquoteMarker
             | ProjectedSegmentKind::ListMarker
+            | ProjectedSegmentKind::EscapeMarker
             | ProjectedSegmentKind::StrongMarker
             | ProjectedSegmentKind::StrongContent
             | ProjectedSegmentKind::EmphasisMarker
-            | ProjectedSegmentKind::EmphasisContent => None,
+            | ProjectedSegmentKind::EmphasisContent
+            | ProjectedSegmentKind::LinkMarker
+            | ProjectedSegmentKind::LinkText
+            | ProjectedSegmentKind::LinkDestination => None,
         })
         .collect()
 }
@@ -817,6 +858,55 @@ fn code_background_quads(
         .into_iter()
         .filter_map(|range| code_background_quad(layout, bounds, range))
         .collect()
+}
+
+fn link_hitboxes_for_segments(
+    segments: &[ProjectedVisibleSegment<'_>],
+    layout: &ShapedLine,
+    bounds: Bounds<Pixels>,
+    line_source: &str,
+    line_start: usize,
+) -> Vec<LinkHitbox> {
+    segments
+        .iter()
+        .filter_map(|segment| {
+            if !matches!(segment.kind, ProjectedSegmentKind::LinkText) {
+                return None;
+            }
+
+            let url =
+                link_destination_from_source(line_source, line_start, segment.source_outer_range)?;
+            let start_x = layout.x_for_index(segment.visible_range.start);
+            let end_x = layout
+                .x_for_index(segment.visible_range.end)
+                .max(start_x + px(2.0));
+
+            Some(LinkHitbox {
+                bounds: Bounds::from_corners(
+                    point(bounds.left() + start_x, bounds.top()),
+                    point(bounds.left() + end_x, bounds.bottom()),
+                ),
+                url: url.to_string(),
+            })
+        })
+        .collect()
+}
+
+fn link_destination_from_source<'a>(
+    line_source: &'a str,
+    line_start: usize,
+    source_outer_range: TextRange,
+) -> Option<&'a str> {
+    let start = source_outer_range.start.checked_sub(line_start)?;
+    let end = source_outer_range.end.checked_sub(line_start)?;
+    let source = line_source.get(start..end)?;
+    let separator = source.find("](")?;
+
+    source
+        .strip_prefix('[')?
+        .strip_suffix(')')
+        .and_then(|_| source.get(separator + 2..source.len() - 1))
+        .filter(|destination| !destination.is_empty())
 }
 
 fn code_background_quad(
@@ -1127,6 +1217,68 @@ mod tests {
                 assert_eq!(run.color, rgb(MARKDOWN_MARKER_COLOR).into());
             }
         }
+    }
+
+    #[test]
+    fn link_text_uses_plain_color_with_underline() {
+        let document = Document::new("Read [Hanji](https://hanji.local)");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let text_style = TextStyle::default();
+        let segments = line.visible_segments();
+        let runs = line_text_runs(&segments, line_presentation(line.kind), &text_style);
+        let link_run = segments
+            .iter()
+            .zip(runs.iter())
+            .find(|(segment, _)| matches!(segment.kind, ProjectedSegmentKind::LinkText))
+            .map(|(_, run)| run)
+            .expect("link text run");
+
+        assert_eq!(link_run.color, text_style.color);
+        assert!(link_run.underline.is_some());
+    }
+
+    #[test]
+    fn revealed_link_markers_use_green_and_escape_markers_use_muted_color() {
+        let source = "Read [Hanji](https://hanji.local) and \\*";
+        let document = Document::new(source);
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let segments = line.visible_segments_revealing_source_in(Some(TextRange::new(
+            "Read ".len(),
+            source.len(),
+        )));
+        let runs = line_text_runs(
+            &segments,
+            line_presentation(line.kind),
+            &TextStyle::default(),
+        );
+
+        for (segment, run) in segments.iter().zip(runs.iter()) {
+            match segment.kind {
+                ProjectedSegmentKind::LinkMarker => {
+                    assert_eq!(run.color, rgb(MARKDOWN_MARKER_COLOR).into());
+                }
+                ProjectedSegmentKind::EscapeMarker => {
+                    assert_eq!(run.color, rgb(0x8f8a82).into());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn extracts_link_destination_from_source_range() {
+        let source = "Read [Hanji](https://hanji.local) now";
+
+        assert_eq!(
+            link_destination_from_source(source, 0, TextRange::new(5, 33)),
+            Some("https://hanji.local")
+        );
+        assert_eq!(
+            link_destination_from_source(source, 0, TextRange::new(0, source.len())),
+            None
+        );
     }
 
     #[test]

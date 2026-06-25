@@ -1,5 +1,6 @@
 mod editing;
 mod encoding;
+mod external;
 mod renderer;
 mod session;
 mod snapshot;
@@ -25,7 +26,8 @@ use editing::{
     selection_range_from_anchor_and_head, task_marker_state_char_range,
 };
 use encoding::byte_offset_to_utf16;
-use renderer::{EditorElement, FONT_SIZE, LINE_HEIGHT, TaskMarkerHitbox};
+use external::external_url_command;
+use renderer::{EditorElement, FONT_SIZE, LINE_HEIGHT, LinkHitbox, TaskMarkerHitbox};
 use session::open_initial_session;
 use snapshot::LineSnapshot;
 
@@ -71,6 +73,7 @@ struct Hanji {
     marked_range: Option<Range<usize>>,
     last_lines: Vec<LineSnapshot>,
     last_task_markers: Vec<TaskMarkerHitbox>,
+    last_link_hitboxes: Vec<LinkHitbox>,
     preferred_column: Option<usize>,
     selection_anchor: Option<usize>,
     selection_head: Option<usize>,
@@ -396,6 +399,12 @@ impl Hanji {
         if !event.modifiers.shift
             && let Some(task_marker) = self.task_marker_at_position(event.position)
             && self.toggle_task_marker(task_marker, window, cx)
+        {
+            return;
+        }
+        if !event.modifiers.shift
+            && let Some(link) = self.link_at_position(event.position)
+            && self.open_link(link, cx)
         {
             return;
         }
@@ -768,6 +777,35 @@ impl Hanji {
             .find(|marker| bounds_contains_point(marker.bounds, position))
     }
 
+    fn link_at_position(&self, position: gpui::Point<Pixels>) -> Option<LinkHitbox> {
+        self.last_link_hitboxes
+            .iter()
+            .find(|link| bounds_contains_point(link.bounds, position))
+            .cloned()
+    }
+
+    fn open_link(&mut self, link: LinkHitbox, cx: &mut Context<Self>) -> bool {
+        let Some(command) = external_url_command(&link.url) else {
+            self.status_message = Some("Only http and https links can be opened.".to_string());
+            cx.notify();
+            return false;
+        };
+
+        match command.status() {
+            Ok(status) if status.success() => true,
+            Ok(status) => {
+                self.status_message = Some(format!("Open link failed: {status}"));
+                cx.notify();
+                false
+            }
+            Err(error) => {
+                self.status_message = Some(format!("Open link failed: {error}"));
+                cx.notify();
+                false
+            }
+        }
+    }
+
     fn toggle_task_marker(
         &mut self,
         task_marker: TaskMarkerHitbox,
@@ -1130,6 +1168,7 @@ fn main() {
                             marked_range: None,
                             last_lines: Vec::new(),
                             last_task_markers: Vec::new(),
+                            last_link_hitboxes: Vec::new(),
                             preferred_column: None,
                             selection_anchor: None,
                             selection_head: None,
