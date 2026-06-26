@@ -318,7 +318,8 @@ fn marker_wrap_selection_edit(
 ) -> Option<(Range<usize>, String, Range<usize>)> {
     match new_text {
         "**" => wrap_selection_with_marker(text, range, "**"),
-        "```" => wrap_selection_with_fence(text, range),
+        "```" => wrap_selection_with_fence(text, range, "```"),
+        "~~~" => wrap_selection_with_fence(text, range, "~~~"),
         _ => None,
     }
 }
@@ -340,10 +341,11 @@ fn wrap_selection_with_marker(
 fn wrap_selection_with_fence(
     text: &str,
     range: &Range<usize>,
+    marker: &str,
 ) -> Option<(Range<usize>, String, Range<usize>)> {
     let selected = text.get(range.clone())?;
-    let prefix = "```\n";
-    let suffix = "\n```";
+    let prefix = format!("{marker}\n");
+    let suffix = format!("\n{marker}");
     let replacement = format!("{prefix}{selected}{suffix}");
     let selection_start = range.start + prefix.len();
     let selection_end = selection_start + selected.len();
@@ -356,7 +358,7 @@ fn code_fence_autocomplete_edit(
     range: &Range<usize>,
     new_text: &str,
 ) -> Option<(Range<usize>, String, Range<usize>)> {
-    if !matches!(new_text, "`" | "```") {
+    if !matches!(new_text, "`" | "```" | "~" | "~~~") {
         return None;
     }
 
@@ -370,12 +372,15 @@ fn code_fence_autocomplete_edit(
         return None;
     }
 
-    let indent = match new_text {
-        "`" => fence_indent_for_pending_prefix(line_prefix, "``")?,
-        "```" => fence_indent_for_pending_prefix(line_prefix, "")?,
+    let (pending_prefix, closing_marker) = match new_text {
+        "`" => ("``", "```"),
+        "```" => ("", "```"),
+        "~" => ("~~", "~~~"),
+        "~~~" => ("", "~~~"),
         _ => return None,
     };
-    let replacement = format!("{new_text}\n\n{indent}```");
+    let indent = fence_indent_for_pending_prefix(line_prefix, pending_prefix)?;
+    let replacement = format!("{new_text}\n\n{indent}{closing_marker}");
     let caret = range.start + new_text.len() + "\n".len();
 
     Some((range.clone(), replacement, caret..caret))
@@ -471,22 +476,64 @@ fn has_unclosed_code_fence_before(text: &str, offset: usize) -> bool {
     let Some(prefix) = text.get(..offset) else {
         return false;
     };
-    let mut open_marker_len = None;
+    let mut open_fence: Option<CodeFence> = None;
 
     for line in prefix.split('\n') {
-        if let Some(marker_len) = open_marker_len {
-            if is_closing_backtick_fence(line, marker_len) {
-                open_marker_len = None;
+        if let Some(fence) = open_fence {
+            if is_closing_code_fence(line, fence.marker, fence.marker_len) {
+                open_fence = None;
             }
-        } else if let Some(marker_len) = opening_backtick_fence_len(line) {
-            open_marker_len = Some(marker_len);
+        } else if let Some(fence) = opening_code_fence(line) {
+            open_fence = Some(fence);
         }
     }
 
-    open_marker_len.is_some()
+    open_fence.is_some()
 }
 
-fn opening_backtick_fence_len(line: &str) -> Option<usize> {
+#[derive(Clone, Copy)]
+struct CodeFence {
+    marker: CodeFenceMarker,
+    marker_len: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CodeFenceMarker {
+    Backtick,
+    Tilde,
+}
+
+impl CodeFenceMarker {
+    fn from_byte(byte: u8) -> Option<Self> {
+        match byte {
+            b'`' => Some(Self::Backtick),
+            b'~' => Some(Self::Tilde),
+            _ => None,
+        }
+    }
+
+    fn byte(self) -> u8 {
+        match self {
+            Self::Backtick => b'`',
+            Self::Tilde => b'~',
+        }
+    }
+}
+
+fn opening_code_fence(line: &str) -> Option<CodeFence> {
+    code_fence(line, 3, false, None)
+}
+
+fn is_closing_code_fence(line: &str, marker: CodeFenceMarker, min_marker_len: usize) -> bool {
+    code_fence(line, min_marker_len, true, Some(marker)).is_some()
+}
+
+fn code_fence(
+    line: &str,
+    min_marker_len: usize,
+    require_trailing_whitespace: bool,
+    required_marker: Option<CodeFenceMarker>,
+) -> Option<CodeFence> {
     let indent = line
         .bytes()
         .take_while(|byte| *byte == b' ')
@@ -496,26 +543,31 @@ fn opening_backtick_fence_len(line: &str) -> Option<usize> {
         return None;
     }
 
-    let marker_len = line[indent..]
+    let content = &line[indent..];
+    let marker = required_marker.or_else(|| {
+        content
+            .as_bytes()
+            .first()
+            .copied()
+            .and_then(CodeFenceMarker::from_byte)
+    })?;
+    let marker_len = content
         .bytes()
-        .take_while(|byte| *byte == b'`')
+        .take_while(|byte| *byte == marker.byte())
         .count();
-    (marker_len >= 3).then_some(marker_len)
-}
+    if marker_len < min_marker_len {
+        return None;
+    }
 
-fn is_closing_backtick_fence(line: &str, min_marker_len: usize) -> bool {
-    let Some(marker_len) = opening_backtick_fence_len(line) else {
-        return false;
-    };
-    marker_len >= min_marker_len
-        && line[line
-            .bytes()
-            .take_while(|byte| *byte == b' ')
-            .take(4)
-            .count()
-            + marker_len..]
+    if require_trailing_whitespace
+        && !content[marker_len..]
             .bytes()
             .all(|byte| matches!(byte, b' ' | b'\t'))
+    {
+        return None;
+    }
+
+    Some(CodeFence { marker, marker_len })
 }
 
 fn line_bounds_for_offset(text: &str, offset: usize) -> (usize, usize) {
@@ -877,10 +929,30 @@ mod tests {
     }
 
     #[test]
+    fn third_tilde_autocompletes_fenced_code_block() {
+        assert_eq!(
+            marker_autocomplete_edit("~~", &(2..2), "~"),
+            Some((2..2, "~\n\n~~~".to_string(), 4..4))
+        );
+    }
+
+    #[test]
+    fn direct_tilde_fence_input_autocompletes_fenced_code_block() {
+        assert_eq!(
+            marker_autocomplete_edit("", &(0..0), "~~~"),
+            Some((0..0, "~~~\n\n~~~".to_string(), 4..4))
+        );
+    }
+
+    #[test]
     fn code_fence_autocomplete_preserves_closing_fence_indent() {
         assert_eq!(
             marker_autocomplete_edit("  ``", &(4..4), "`"),
             Some((4..4, "`\n\n  ```".to_string(), 6..6))
+        );
+        assert_eq!(
+            marker_autocomplete_edit("  ~~", &(4..4), "~"),
+            Some((4..4, "~\n\n  ~~~".to_string(), 6..6))
         );
     }
 
@@ -889,6 +961,9 @@ mod tests {
         assert_eq!(marker_autocomplete_edit("Note ``", &(7..7), "`"), None);
         assert_eq!(marker_autocomplete_edit("``rust", &(2..2), "`"), None);
         assert_eq!(marker_autocomplete_edit("    ``", &(6..6), "`"), None);
+        assert_eq!(marker_autocomplete_edit("Note ~~", &(7..7), "~"), None);
+        assert_eq!(marker_autocomplete_edit("~~rust", &(2..2), "~"), None);
+        assert_eq!(marker_autocomplete_edit("    ~~", &(6..6), "~"), None);
     }
 
     #[test]
@@ -905,6 +980,30 @@ mod tests {
             marker_autocomplete_edit(
                 "```\ncode\n",
                 &("```\ncode\n".len().."```\ncode\n".len()),
+                "```"
+            ),
+            None
+        );
+        assert_eq!(
+            marker_autocomplete_edit(
+                "~~~\ncode\n~~",
+                &("~~~\ncode\n~~".len().."~~~\ncode\n~~".len()),
+                "~"
+            ),
+            None
+        );
+        assert_eq!(
+            marker_autocomplete_edit(
+                "```\ncode\n",
+                &("```\ncode\n".len().."```\ncode\n".len()),
+                "~~~"
+            ),
+            None
+        );
+        assert_eq!(
+            marker_autocomplete_edit(
+                "~~~\ncode\n",
+                &("~~~\ncode\n".len().."~~~\ncode\n".len()),
                 "```"
             ),
             None
@@ -992,6 +1091,10 @@ mod tests {
         assert_eq!(
             marker_autocomplete_edit("let value = 1;", &(0..14), "```"),
             Some((0..14, "```\nlet value = 1;\n```".to_string(), 4..18))
+        );
+        assert_eq!(
+            marker_autocomplete_edit("let value = 1;", &(0..14), "~~~"),
+            Some((0..14, "~~~\nlet value = 1;\n~~~".to_string(), 4..18))
         );
     }
 

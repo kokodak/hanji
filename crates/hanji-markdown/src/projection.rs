@@ -770,8 +770,12 @@ pub fn project_document(document: &Document) -> MarkdownProjection<'_> {
         let (range, source) = document_line(document, line_index);
 
         if let Some(opening_fence) = opening_code_fence(source, range.start)
-            && let Some((closing_line_index, closing_fence)) =
-                find_closing_code_fence(document, line_index + 1, opening_fence.marker_len)
+            && let Some((closing_line_index, closing_fence)) = find_closing_code_fence(
+                document,
+                line_index + 1,
+                opening_fence.marker,
+                opening_fence.marker_len,
+            )
         {
             let code_block_range = TextRange::new(range.start, closing_fence.line_range.end);
 
@@ -886,17 +890,46 @@ fn block_marker_kind(kind: MarkdownLine) -> ProjectedSegmentKind {
 
 #[derive(Debug, Clone, Copy)]
 struct CodeFence {
+    marker: CodeFenceMarker,
     marker_len: usize,
     marker_range: TextRange,
     line_range: TextRange,
 }
 
-fn opening_code_fence(source: &str, line_start: usize) -> Option<CodeFence> {
-    code_fence(source, line_start, 3, false)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodeFenceMarker {
+    Backtick,
+    Tilde,
 }
 
-fn closing_code_fence(source: &str, line_start: usize, min_marker_len: usize) -> Option<CodeFence> {
-    code_fence(source, line_start, min_marker_len, true)
+impl CodeFenceMarker {
+    fn from_byte(byte: u8) -> Option<Self> {
+        match byte {
+            b'`' => Some(Self::Backtick),
+            b'~' => Some(Self::Tilde),
+            _ => None,
+        }
+    }
+
+    fn byte(self) -> u8 {
+        match self {
+            Self::Backtick => b'`',
+            Self::Tilde => b'~',
+        }
+    }
+}
+
+fn opening_code_fence(source: &str, line_start: usize) -> Option<CodeFence> {
+    code_fence(source, line_start, 3, false, None)
+}
+
+fn closing_code_fence(
+    source: &str,
+    line_start: usize,
+    marker: CodeFenceMarker,
+    min_marker_len: usize,
+) -> Option<CodeFence> {
+    code_fence(source, line_start, min_marker_len, true, Some(marker))
 }
 
 fn code_fence(
@@ -904,6 +937,7 @@ fn code_fence(
     line_start: usize,
     min_marker_len: usize,
     require_trailing_whitespace: bool,
+    required_marker: Option<CodeFenceMarker>,
 ) -> Option<CodeFence> {
     let indent = source
         .bytes()
@@ -915,7 +949,17 @@ fn code_fence(
     }
 
     let content = &source[indent..];
-    let marker_len = content.bytes().take_while(|byte| *byte == b'`').count();
+    let marker = required_marker.or_else(|| {
+        content
+            .as_bytes()
+            .first()
+            .copied()
+            .and_then(CodeFenceMarker::from_byte)
+    })?;
+    let marker_len = content
+        .bytes()
+        .take_while(|byte| *byte == marker.byte())
+        .count();
     if marker_len < min_marker_len {
         return None;
     }
@@ -929,6 +973,7 @@ fn code_fence(
     }
 
     Some(CodeFence {
+        marker,
         marker_len,
         marker_range: TextRange::new(line_start + indent, line_start + indent + marker_len),
         line_range: TextRange::new(line_start, line_start + source.len()),
@@ -938,11 +983,12 @@ fn code_fence(
 fn find_closing_code_fence(
     document: &Document,
     start_line_index: usize,
+    marker: CodeFenceMarker,
     marker_len: usize,
 ) -> Option<(usize, CodeFence)> {
     for line_index in start_line_index..document.line_count() {
         let (range, source) = document_line(document, line_index);
-        if let Some(fence) = closing_code_fence(source, range.start, marker_len) {
+        if let Some(fence) = closing_code_fence(source, range.start, marker, marker_len) {
             return Some((line_index, fence));
         }
     }
@@ -2418,6 +2464,38 @@ mod tests {
     }
 
     #[test]
+    fn projects_closed_tilde_fenced_code_blocks_without_inline_markdown() {
+        let document = Document::new("Before\n~~~rust\n**literal**\n~~~\nAfter");
+        let projection = project_document(&document);
+        let lines = projection.lines();
+
+        assert_eq!(lines[0].kind, MarkdownLine::Paragraph);
+        assert_eq!(
+            lines[1].kind,
+            MarkdownLine::CodeBlock {
+                role: MarkdownCodeBlockLine::OpeningFence,
+            }
+        );
+        assert_eq!(
+            lines[2].kind,
+            MarkdownLine::CodeBlock {
+                role: MarkdownCodeBlockLine::Content,
+            }
+        );
+        assert_eq!(
+            lines[3].kind,
+            MarkdownLine::CodeBlock {
+                role: MarkdownCodeBlockLine::ClosingFence,
+            }
+        );
+        assert_eq!(lines[4].kind, MarkdownLine::Paragraph);
+        assert_eq!(lines[1].visible_text(), "");
+        assert_eq!(lines[2].visible_text(), "**literal**");
+        assert_eq!(lines[3].visible_text(), "");
+        assert!(lines[2].inlines.is_empty());
+    }
+
+    #[test]
     fn reveals_fenced_code_fences_when_caret_is_inside_block() {
         let source = "```rust\nlet value = `literal`;\n```";
         let document = Document::new(source);
@@ -2446,6 +2524,34 @@ mod tests {
     }
 
     #[test]
+    fn reveals_tilde_fenced_code_fences_when_caret_is_inside_block() {
+        let source = "~~~rust\nlet value = `literal`;\n~~~";
+        let document = Document::new(source);
+        let projection = project_document(&document);
+        let lines = projection.lines();
+        let caret = TextRange::caret(source.find("value").unwrap());
+
+        assert_eq!(
+            lines[0].visible_text_revealing_source_in(Some(caret)),
+            "~~~rust"
+        );
+        assert_eq!(
+            lines[2].visible_text_revealing_source_in(Some(caret)),
+            "~~~"
+        );
+        assert_eq!(
+            lines[0].visible_segments_revealing_source_in(Some(caret))[0],
+            ProjectedVisibleSegment {
+                visible_range: TextRange::new(0, 3),
+                source_range: TextRange::new(0, 3),
+                source_outer_range: TextRange::new(0, 3),
+                source: "~~~",
+                kind: ProjectedSegmentKind::CodeBlockFence,
+            }
+        );
+    }
+
+    #[test]
     fn keeps_unclosed_fence_as_plain_source() {
         let document = Document::new("```rust\nlet value = 1;");
         let projection = project_document(&document);
@@ -2454,6 +2560,25 @@ mod tests {
         assert_eq!(lines[0].kind, MarkdownLine::Paragraph);
         assert_eq!(lines[0].visible_text(), "```rust");
         assert_eq!(lines[1].kind, MarkdownLine::Paragraph);
+    }
+
+    #[test]
+    fn code_fence_closing_marker_must_match_opening_marker() {
+        let tilde_opening = Document::new("~~~\ncode\n```");
+        let tilde_projection = project_document(&tilde_opening);
+        let tilde_lines = tilde_projection.lines();
+
+        assert_eq!(tilde_lines[0].kind, MarkdownLine::Paragraph);
+        assert_eq!(tilde_lines[1].kind, MarkdownLine::Paragraph);
+        assert_eq!(tilde_lines[2].kind, MarkdownLine::Paragraph);
+
+        let backtick_opening = Document::new("```\ncode\n~~~");
+        let backtick_projection = project_document(&backtick_opening);
+        let backtick_lines = backtick_projection.lines();
+
+        assert_eq!(backtick_lines[0].kind, MarkdownLine::Paragraph);
+        assert_eq!(backtick_lines[1].kind, MarkdownLine::Paragraph);
+        assert_eq!(backtick_lines[2].kind, MarkdownLine::Paragraph);
     }
 
     #[test]
