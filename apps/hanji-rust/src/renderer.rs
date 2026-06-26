@@ -6,8 +6,8 @@ use gpui::{
 };
 use hanji_core::TextRange;
 use hanji_markdown::{
-    MarkdownLine, MarkdownListMarker, MarkdownTaskState, ProjectedSegmentKind,
-    ProjectedVisibleSegment, project_document,
+    MarkdownLine, MarkdownListMarker, MarkdownTaskState, ProjectedInlineStyle,
+    ProjectedSegmentKind, ProjectedVisibleSegment, project_document,
 };
 
 use crate::Hanji;
@@ -27,6 +27,7 @@ const CHECKBOX_BOX_SIZE: f32 = 16.0;
 const CHECKBOX_CHECK_FONT_SIZE: f32 = 17.0;
 const CHECKBOX_CONTENT_GAP: f32 = 5.0;
 const MARKDOWN_MARKER_COLOR: u32 = 0x238636;
+const LINK_TEXT_COLOR: u32 = 0xe6c000;
 const CODE_BLOCK_BACKGROUND_COLOR: u32 = 0x25231f14;
 const CODE_BLOCK_CORNER_RADIUS: f32 = 5.0;
 const CODE_BLOCK_TEXT_INSET: f32 = 12.0;
@@ -707,14 +708,19 @@ fn line_text_runs(
 
     for segment in segments {
         let style = match segment.kind {
-            ProjectedSegmentKind::StrongContent => InlineRunStyle::Strong,
-            ProjectedSegmentKind::EmphasisContent => InlineRunStyle::Emphasis,
-            ProjectedSegmentKind::StrikethroughContent => InlineRunStyle::Strikethrough,
-            ProjectedSegmentKind::CodeContent => InlineRunStyle::Code,
-            ProjectedSegmentKind::CodeBlockContent => InlineRunStyle::CodeBlock,
-            ProjectedSegmentKind::LinkText => InlineRunStyle::Link,
-            ProjectedSegmentKind::LinkDestination => InlineRunStyle::Plain,
-            ProjectedSegmentKind::EscapeMarker => InlineRunStyle::EscapeMarker,
+            ProjectedSegmentKind::StrongContent
+            | ProjectedSegmentKind::EmphasisContent
+            | ProjectedSegmentKind::CodeContent
+            | ProjectedSegmentKind::Text => RunStyle::Inline(InlineRunStyle::from(segment.style)),
+            ProjectedSegmentKind::StrikethroughContent => {
+                RunStyle::Strikethrough(InlineRunStyle::from(segment.style).strikethrough())
+            }
+            ProjectedSegmentKind::CodeBlockContent => RunStyle::CodeBlock,
+            ProjectedSegmentKind::LinkText => {
+                RunStyle::Inline(InlineRunStyle::from(segment.style).link())
+            }
+            ProjectedSegmentKind::LinkDestination => RunStyle::Inline(InlineRunStyle::plain()),
+            ProjectedSegmentKind::EscapeMarker => RunStyle::EscapeMarker,
             ProjectedSegmentKind::HeadingMarker
             | ProjectedSegmentKind::HorizontalRuleMarker
             | ProjectedSegmentKind::BlockquoteMarker
@@ -724,8 +730,7 @@ fn line_text_runs(
             | ProjectedSegmentKind::StrikethroughMarker
             | ProjectedSegmentKind::CodeMarker
             | ProjectedSegmentKind::CodeBlockFence
-            | ProjectedSegmentKind::LinkMarker => InlineRunStyle::Marker,
-            ProjectedSegmentKind::Text => InlineRunStyle::Plain,
+            | ProjectedSegmentKind::LinkMarker => RunStyle::Marker,
         };
 
         push_text_run(
@@ -740,23 +745,52 @@ fn line_text_runs(
     runs
 }
 
+#[derive(Clone, Copy, Default)]
+struct InlineRunStyle {
+    is_strong: bool,
+    is_emphasis: bool,
+    is_strikethrough: bool,
+    is_link: bool,
+}
+
+impl InlineRunStyle {
+    fn plain() -> Self {
+        Self::default()
+    }
+
+    fn from(style: ProjectedInlineStyle) -> Self {
+        Self {
+            is_strong: style.strong,
+            is_emphasis: style.emphasis,
+            is_strikethrough: style.strikethrough,
+            is_link: false,
+        }
+    }
+
+    fn strikethrough(mut self) -> Self {
+        self.is_strikethrough = true;
+        self
+    }
+
+    fn link(mut self) -> Self {
+        self.is_link = true;
+        self
+    }
+}
+
 #[derive(Clone, Copy)]
-enum InlineRunStyle {
-    Plain,
+enum RunStyle {
     Marker,
-    Strong,
-    Emphasis,
-    Strikethrough,
-    Code,
+    Strikethrough(InlineRunStyle),
     CodeBlock,
-    Link,
     EscapeMarker,
+    Inline(InlineRunStyle),
 }
 
 fn push_text_run(
     runs: &mut Vec<TextRun>,
     len: usize,
-    style: InlineRunStyle,
+    style: RunStyle,
     presentation: LinePresentation,
     text_style: &TextStyle,
 ) {
@@ -765,41 +799,45 @@ fn push_text_run(
     }
 
     let mut font = text_style.font();
-    if presentation.is_heading || matches!(style, InlineRunStyle::Strong) {
-        font.weight = if matches!(style, InlineRunStyle::Strong) {
+    let inline = match style {
+        RunStyle::Inline(style) => style,
+        RunStyle::Strikethrough(style) => style,
+        _ => InlineRunStyle::default(),
+    };
+    if presentation.is_heading || inline.is_strong {
+        font.weight = if inline.is_strong {
             FontWeight::BLACK
         } else {
             FontWeight::BOLD
         };
     }
-    if matches!(style, InlineRunStyle::Emphasis) {
+    if inline.is_emphasis {
         font = font.italic();
     }
-    let color = if matches!(style, InlineRunStyle::EscapeMarker) {
+    let color = if matches!(style, RunStyle::EscapeMarker) {
         rgb(0x8f8a82).into()
-    } else if matches!(style, InlineRunStyle::Marker) {
+    } else if matches!(style, RunStyle::Marker) {
         rgb(MARKDOWN_MARKER_COLOR).into()
+    } else if inline.is_link {
+        rgb(LINK_TEXT_COLOR).into()
     } else if presentation.is_heading {
         rgb(0x25231f).into()
     } else if presentation.is_blockquote {
         rgb(0x5f6267).into()
-    } else if presentation.is_checked_task && !matches!(style, InlineRunStyle::Marker) {
+    } else if presentation.is_checked_task && !matches!(style, RunStyle::Marker) {
         rgb(0x8f8a82).into()
     } else {
         text_style.color
     };
 
-    let underline = match style {
-        InlineRunStyle::Strong | InlineRunStyle::Emphasis => Some(font_run_boundary_marker()),
-        InlineRunStyle::Link => Some(link_underline()),
-        InlineRunStyle::Plain
-        | InlineRunStyle::Marker
-        | InlineRunStyle::Strikethrough
-        | InlineRunStyle::Code
-        | InlineRunStyle::CodeBlock
-        | InlineRunStyle::EscapeMarker => None,
+    let underline = if inline.is_link {
+        Some(link_underline())
+    } else if inline.is_strong || inline.is_emphasis {
+        Some(font_run_boundary_marker())
+    } else {
+        None
     };
-    let strikethrough = if matches!(style, InlineRunStyle::Strikethrough) {
+    let strikethrough = if inline.is_strikethrough || matches!(style, RunStyle::Strikethrough(_)) {
         Some(strikethrough_style())
     } else {
         None
@@ -828,7 +866,7 @@ fn font_run_boundary_marker() -> UnderlineStyle {
 fn link_underline() -> UnderlineStyle {
     UnderlineStyle {
         thickness: px(1.0),
-        color: Some(rgb(0x25231f).into()),
+        color: Some(rgb(LINK_TEXT_COLOR).into()),
         wavy: false,
     }
 }
@@ -1046,6 +1084,26 @@ fn link_destination_from_source<'a>(
     let end = source_outer_range.end.checked_sub(line_start)?;
     let source = line_source.get(start..end)?;
 
+    link_destination_from_inline_source(source)
+}
+
+fn link_destination_from_inline_source(source: &str) -> Option<&str> {
+    for marker in ["***", "**", "*"] {
+        if let Some(inner) = source.strip_prefix(marker)
+            && !inner.is_empty()
+            && let Some(destination) = link_destination_from_inline_source(inner)
+        {
+            return Some(destination);
+        }
+
+        if let Some(inner) = source.strip_suffix(marker)
+            && !inner.is_empty()
+            && let Some(destination) = link_destination_from_inline_source(inner)
+        {
+            return Some(destination);
+        }
+    }
+
     if is_supported_link_destination(source) {
         return Some(source);
     }
@@ -1058,8 +1116,15 @@ fn link_destination_from_source<'a>(
         return Some(url);
     }
 
-    let separator = source.find("](")?;
+    if let Some(destination) = link_destination_from_markdown_link(source) {
+        return Some(destination);
+    }
 
+    None
+}
+
+fn link_destination_from_markdown_link(source: &str) -> Option<&str> {
+    let separator = source.find("](")?;
     source
         .strip_prefix('[')?
         .strip_suffix(')')
@@ -1519,7 +1584,7 @@ mod tests {
     }
 
     #[test]
-    fn link_text_uses_plain_color_with_underline() {
+    fn link_text_uses_yellow_color_with_underline() {
         let document = Document::new("Read [Hanji](https://hanji.local)");
         let projection = project_document(&document);
         let line = &projection.lines()[0];
@@ -1533,8 +1598,99 @@ mod tests {
             .map(|(_, run)| run)
             .expect("link text run");
 
-        assert_eq!(link_run.color, text_style.color);
-        assert!(link_run.underline.is_some());
+        assert_eq!(link_run.color, rgb(LINK_TEXT_COLOR).into());
+        assert_eq!(
+            link_run
+                .underline
+                .as_ref()
+                .and_then(|underline| underline.color),
+            Some(rgb(LINK_TEXT_COLOR).into())
+        );
+    }
+
+    #[test]
+    fn nested_link_text_combines_style_with_link_presentation() {
+        let document = Document::new("Read ***[Hanji](https://hanji.local)***");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let segments = line.visible_segments();
+        let runs = line_text_runs(
+            &segments,
+            line_presentation(line.kind),
+            &TextStyle::default(),
+        );
+        let link_run = segments
+            .iter()
+            .zip(runs.iter())
+            .find(|(segment, _)| {
+                matches!(segment.kind, ProjectedSegmentKind::LinkText)
+                    && segment.style == ProjectedInlineStyle::strong_emphasis()
+            })
+            .map(|(_, run)| run)
+            .expect("strong emphasis link text run");
+
+        assert_eq!(link_run.color, rgb(LINK_TEXT_COLOR).into());
+        assert_eq!(link_run.font.weight, FontWeight::BLACK);
+        assert_eq!(link_run.font.style, FontStyle::Italic);
+        assert_eq!(
+            link_run
+                .underline
+                .as_ref()
+                .and_then(|underline| underline.color),
+            Some(rgb(LINK_TEXT_COLOR).into())
+        );
+    }
+
+    #[test]
+    fn mixed_strong_range_combines_link_style_with_text() {
+        let document = Document::new("Read **hello [Hanji](https://hanji.local) now**");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let segments = line.visible_segments();
+        let runs = line_text_runs(
+            &segments,
+            line_presentation(line.kind),
+            &TextStyle::default(),
+        );
+        let link_run = segments
+            .iter()
+            .zip(runs.iter())
+            .find(|(segment, _)| matches!(segment.kind, ProjectedSegmentKind::LinkText))
+            .map(|(_, run)| run)
+            .expect("strong link text run");
+
+        assert_eq!(link_run.color, rgb(LINK_TEXT_COLOR).into());
+        assert_eq!(link_run.font.weight, FontWeight::BLACK);
+        assert!(runs.iter().any(|run| run.font.weight == FontWeight::BLACK));
+    }
+
+    #[test]
+    fn nested_inline_code_combines_style_with_code_background() {
+        let document = Document::new("Use ***`code`*** now");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let segments = line.visible_segments();
+        let runs = line_text_runs(
+            &segments,
+            line_presentation(line.kind),
+            &TextStyle::default(),
+        );
+        let code_run = segments
+            .iter()
+            .zip(runs.iter())
+            .find(|(segment, _)| {
+                matches!(segment.kind, ProjectedSegmentKind::CodeContent)
+                    && segment.style == ProjectedInlineStyle::strong_emphasis()
+            })
+            .map(|(_, run)| run)
+            .expect("strong emphasis code text run");
+
+        assert_eq!(code_run.font.weight, FontWeight::BLACK);
+        assert_eq!(code_run.font.style, FontStyle::Italic);
+        assert_eq!(
+            code_background_ranges(&segments),
+            vec![TextRange::new("Use ".len(), "Use code".len())]
+        );
     }
 
     #[test]
@@ -1554,6 +1710,29 @@ mod tests {
 
         assert_eq!(strike_run.color, text_style.color);
         assert!(strike_run.strikethrough.is_some());
+    }
+
+    #[test]
+    fn strikethrough_combines_with_strong_emphasis() {
+        let document = Document::new("Idea ~~***thought***~~ now");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let segments = line.visible_segments();
+        let runs = line_text_runs(
+            &segments,
+            line_presentation(line.kind),
+            &TextStyle::default(),
+        );
+        let thought_run = segments
+            .iter()
+            .zip(runs.iter())
+            .find(|(segment, _)| segment.source == "thought")
+            .map(|(_, run)| run)
+            .expect("combined strikethrough strong emphasis run");
+
+        assert_eq!(thought_run.font.weight, FontWeight::BLACK);
+        assert_eq!(thought_run.font.style, FontStyle::Italic);
+        assert!(thought_run.strikethrough.is_some());
     }
 
     #[test]
@@ -1606,6 +1785,46 @@ mod tests {
                 "Visit https://hanji.local. now",
                 0,
                 TextRange::new(6, 25)
+            ),
+            Some("https://hanji.local")
+        );
+        assert_eq!(
+            link_destination_from_source(
+                "Read ***[Hanji](https://hanji.local)*** now",
+                0,
+                TextRange::new(5, 39)
+            ),
+            Some("https://hanji.local")
+        );
+        assert_eq!(
+            link_destination_from_source(
+                "Read *<https://hanji.local>* now",
+                0,
+                TextRange::new(5, 28)
+            ),
+            Some("https://hanji.local")
+        );
+        assert_eq!(
+            link_destination_from_source(
+                "Visit **https://hanji.local** now",
+                0,
+                TextRange::new(6, 29)
+            ),
+            Some("https://hanji.local")
+        );
+        assert_eq!(
+            link_destination_from_source(
+                "Read **[Hanji](https://hanji.local) now**",
+                0,
+                TextRange::new(5, 35)
+            ),
+            Some("https://hanji.local")
+        );
+        assert_eq!(
+            link_destination_from_source(
+                "Read **now [Hanji](https://hanji.local)**",
+                0,
+                TextRange::new(11, 41)
             ),
             Some("https://hanji.local")
         );

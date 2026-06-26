@@ -13,6 +13,6 @@ pub use line::{
 };
 pub use projection::{
     MarkdownInline, MarkdownLinkRanges, MarkdownMarkerRanges, MarkdownProjection, ProjectedInline,
-    ProjectedLine, ProjectedSegment, ProjectedSegmentKind, ProjectedVisibleSegment,
-    VisibleOffsetAffinity, project_document,
+    ProjectedInlineStyle, ProjectedLine, ProjectedSegment, ProjectedSegmentKind,
+    ProjectedVisibleSegment, VisibleOffsetAffinity, project_document,
 };
