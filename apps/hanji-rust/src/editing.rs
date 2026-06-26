@@ -317,7 +317,9 @@ fn marker_wrap_selection_edit(
     new_text: &str,
 ) -> Option<(Range<usize>, String, Range<usize>)> {
     match new_text {
-        "**" => wrap_selection_with_marker(text, range, "**"),
+        "*" | "**" | "***" | "`" | "``" | "~" | "~~" => {
+            wrap_selection_with_marker(text, range, new_text)
+        }
         "```" => wrap_selection_with_fence(text, range, "```"),
         "~~~" => wrap_selection_with_fence(text, range, "~~~"),
         _ => None,
@@ -1085,8 +1087,28 @@ mod tests {
     #[test]
     fn marker_input_wraps_selected_text() {
         assert_eq!(
+            marker_autocomplete_edit("Hanji notes", &(6..11), "*"),
+            Some((6..11, "*notes*".to_string(), 7..12))
+        );
+        assert_eq!(
             marker_autocomplete_edit("Hanji notes", &(6..11), "**"),
             Some((6..11, "**notes**".to_string(), 8..13))
+        );
+        assert_eq!(
+            marker_autocomplete_edit("Hanji notes", &(6..11), "***"),
+            Some((6..11, "***notes***".to_string(), 9..14))
+        );
+        assert_eq!(
+            marker_autocomplete_edit("Hanji notes", &(6..11), "`"),
+            Some((6..11, "`notes`".to_string(), 7..12))
+        );
+        assert_eq!(
+            marker_autocomplete_edit("Hanji notes", &(6..11), "~"),
+            Some((6..11, "~notes~".to_string(), 7..12))
+        );
+        assert_eq!(
+            marker_autocomplete_edit("Hanji notes", &(6..11), "~~"),
+            Some((6..11, "~~notes~~".to_string(), 8..13))
         );
         assert_eq!(
             marker_autocomplete_edit("let value = 1;", &(0..14), "```"),
@@ -1099,9 +1121,22 @@ mod tests {
     }
 
     #[test]
-    fn marker_input_does_not_wrap_selection_with_partial_markers() {
-        assert_eq!(marker_autocomplete_edit("Hanji notes", &(6..11), "*"), None);
-        assert_eq!(marker_autocomplete_edit("Hanji notes", &(6..11), "`"), None);
+    fn repeated_single_marker_input_keeps_selection_inside_wrapped_text() {
+        assert_eq!(
+            marker_autocomplete_edit("Hanji *notes*", &(7..12), "*"),
+            Some((7..12, "*notes*".to_string(), 8..13))
+        );
+        assert_eq!(
+            marker_autocomplete_edit("Hanji ~notes~", &(7..12), "~"),
+            Some((7..12, "~notes~".to_string(), 8..13))
+        );
+    }
+
+    #[test]
+    fn plain_input_does_not_wrap_selected_text() {
+        assert_eq!(marker_autocomplete_edit("Hanji notes", &(6..11), "a"), None);
+        assert_eq!(marker_autocomplete_edit("Hanji notes", &(6..11), "."), None);
+        assert_eq!(marker_autocomplete_edit("Hanji notes", &(6..11), " "), None);
     }
 
     #[test]
