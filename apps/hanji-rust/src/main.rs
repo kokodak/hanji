@@ -22,8 +22,8 @@ use hanji_storage::DocumentSession;
 use editing::{
     MarkerHitMode, blockquote_newline_edit_for_line, bounds_contains_point,
     drag_distance_exceeds_threshold, extension_points_for_selection, horizontal_offset_within_line,
-    line_marker_hit_offset, list_newline_edit_for_line, selection_is_reversed,
-    selection_range_from_anchor_and_head, task_marker_state_char_range,
+    line_marker_hit_offset, list_newline_edit_for_line, marker_autocomplete_edit,
+    selection_is_reversed, selection_range_from_anchor_and_head, task_marker_state_char_range,
 };
 use encoding::byte_offset_to_utf16;
 use external::external_url_command;
@@ -958,9 +958,14 @@ impl EntityInputHandler for Hanji {
             .map(|range| self.utf16_range_to_byte(range))
             .or_else(|| self.marked_range.clone())
             .unwrap_or_else(|| self.selected_range());
-        let caret = range.start + new_text.len();
+        let (range, replacement, selection_after) =
+            marker_autocomplete_edit(self.session.document().text(), &range, new_text)
+                .unwrap_or_else(|| {
+                    let caret = range.start + new_text.len();
+                    (range, new_text.to_string(), caret..caret)
+                });
 
-        if self.replace_range(range, new_text, caret..caret, window, cx) {
+        if self.replace_range(range, &replacement, selection_after, window, cx) {
             self.marked_range = None;
         }
     }

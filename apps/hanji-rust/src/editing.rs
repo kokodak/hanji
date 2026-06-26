@@ -108,6 +108,118 @@ pub(crate) fn list_newline_edit_for_line(
     Some((range.clone(), replacement, caret..caret))
 }
 
+pub(crate) fn marker_autocomplete_edit(
+    text: &str,
+    range: &Range<usize>,
+    new_text: &str,
+) -> Option<(Range<usize>, String, Range<usize>)> {
+    if range.start != range.end {
+        return None;
+    }
+
+    code_fence_autocomplete_edit(text, range, new_text)
+        .or_else(|| strong_marker_autocomplete_edit(text, range, new_text))
+}
+
+fn code_fence_autocomplete_edit(
+    text: &str,
+    range: &Range<usize>,
+    new_text: &str,
+) -> Option<(Range<usize>, String, Range<usize>)> {
+    if !matches!(new_text, "`" | "```") {
+        return None;
+    }
+
+    let (line_start, line_end) = line_bounds_for_offset(text, range.start);
+    let line_prefix = text.get(line_start..range.start)?;
+    let line_suffix = text.get(range.start..line_end)?;
+    if !line_suffix.is_empty() {
+        return None;
+    }
+
+    let indent = match new_text {
+        "`" => fence_indent_for_pending_prefix(line_prefix, "``")?,
+        "```" => fence_indent_for_pending_prefix(line_prefix, "")?,
+        _ => return None,
+    };
+    let replacement = format!("{new_text}\n\n{indent}```");
+    let caret = range.start + new_text.len() + "\n".len();
+
+    Some((range.clone(), replacement, caret..caret))
+}
+
+fn fence_indent_for_pending_prefix<'a>(line_prefix: &'a str, marker: &str) -> Option<&'a str> {
+    let indent_len = line_prefix
+        .bytes()
+        .take_while(|byte| *byte == b' ')
+        .take(4)
+        .count();
+    if indent_len >= 4 {
+        return None;
+    }
+
+    let indent = &line_prefix[..indent_len];
+    (&line_prefix[indent_len..] == marker).then_some(indent)
+}
+
+fn strong_marker_autocomplete_edit(
+    text: &str,
+    range: &Range<usize>,
+    new_text: &str,
+) -> Option<(Range<usize>, String, Range<usize>)> {
+    let (replacement, caret) = match new_text {
+        "*" => {
+            if !previous_text_is_exact_marker(text, range.start, "*")
+                || following_text_starts_with(text, range.start, "*")
+            {
+                return None;
+            }
+
+            ("***".to_string(), range.start + 1)
+        }
+        "**" => {
+            if previous_text_is_exact_marker(text, range.start, "*")
+                || following_text_starts_with(text, range.start, "*")
+            {
+                return None;
+            }
+
+            ("****".to_string(), range.start + 2)
+        }
+        _ => return None,
+    };
+
+    Some((range.clone(), replacement, caret..caret))
+}
+
+fn previous_text_is_exact_marker(text: &str, offset: usize, marker: &str) -> bool {
+    let Some(marker_start) = offset.checked_sub(marker.len()) else {
+        return false;
+    };
+    if text.get(marker_start..offset) != Some(marker) {
+        return false;
+    }
+
+    marker_start
+        .checked_sub(marker.len())
+        .and_then(|previous_start| text.get(previous_start..marker_start))
+        != Some(marker)
+}
+
+fn following_text_starts_with(text: &str, offset: usize, marker: &str) -> bool {
+    text.get(offset..)
+        .is_some_and(|suffix| suffix.starts_with(marker))
+}
+
+fn line_bounds_for_offset(text: &str, offset: usize) -> (usize, usize) {
+    let line_start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
+    let line_end = text[offset..]
+        .find('\n')
+        .map_or(text.len(), |index| offset + index);
+
+    (line_start, line_end)
+}
+
 fn next_list_item_marker_text(
     marker: MarkdownListMarker,
     task: Option<MarkdownTaskState>,
@@ -338,6 +450,56 @@ mod tests {
             list_newline_edit_for_line("- Item", TextRange::new(0, 6), &(2..6)),
             None
         );
+    }
+
+    #[test]
+    fn third_backtick_autocompletes_fenced_code_block() {
+        assert_eq!(
+            marker_autocomplete_edit("``", &(2..2), "`"),
+            Some((2..2, "`\n\n```".to_string(), 4..4))
+        );
+    }
+
+    #[test]
+    fn direct_backtick_fence_input_autocompletes_fenced_code_block() {
+        assert_eq!(
+            marker_autocomplete_edit("", &(0..0), "```"),
+            Some((0..0, "```\n\n```".to_string(), 4..4))
+        );
+    }
+
+    #[test]
+    fn code_fence_autocomplete_preserves_closing_fence_indent() {
+        assert_eq!(
+            marker_autocomplete_edit("  ``", &(4..4), "`"),
+            Some((4..4, "`\n\n  ```".to_string(), 6..6))
+        );
+    }
+
+    #[test]
+    fn code_fence_autocomplete_requires_line_start_marker() {
+        assert_eq!(marker_autocomplete_edit("Note ``", &(7..7), "`"), None);
+        assert_eq!(marker_autocomplete_edit("``rust", &(2..2), "`"), None);
+        assert_eq!(marker_autocomplete_edit("    ``", &(6..6), "`"), None);
+    }
+
+    #[test]
+    fn second_asterisk_autocompletes_strong_markers() {
+        assert_eq!(
+            marker_autocomplete_edit("*", &(1..1), "*"),
+            Some((1..1, "***".to_string(), 2..2))
+        );
+        assert_eq!(
+            marker_autocomplete_edit("", &(0..0), "**"),
+            Some((0..0, "****".to_string(), 2..2))
+        );
+    }
+
+    #[test]
+    fn strong_autocomplete_ignores_existing_marker_runs() {
+        assert_eq!(marker_autocomplete_edit("**", &(2..2), "*"), None);
+        assert_eq!(marker_autocomplete_edit("*", &(1..1), "**"), None);
+        assert_eq!(marker_autocomplete_edit("**", &(1..1), "*"), None);
     }
 
     #[test]

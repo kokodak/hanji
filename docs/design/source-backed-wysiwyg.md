@@ -83,6 +83,8 @@ Caret reveal includes the opening and closing marker boundaries. This keeps dele
 
 Hidden markers must never be edited implicitly. Any edit that starts from visible coordinates must first resolve to a source range with explicit boundary affinity.
 
+Marker autocomplete is an input helper, not a separate document model. When the user completes a supported source marker at a caret, Hanji may insert the matching closing marker and place the caret inside the generated source. Typing the third backtick on an otherwise empty fence line inserts a closing backtick fence below and places the caret on the empty code content line. Typing the second asterisk of a strong marker inserts the closing strong marker and places the caret between the marker pair. Autocomplete should only fire for unambiguous caret edits; selections and malformed partial markers should remain ordinary source edits until a dedicated wrapping command handles them.
+
 For caret placement, the visible start of hidden inline content maps after the opening marker, and the visible end maps before the closing marker. That means clicking before `bold` in hidden `**bold**` places the caret at `**|bold**`, while clicking after `bold` places it at `**bold|**`. The next Backspace or Delete then edits visible source text one character at a time.
 
 For headings, ATX markers become a heading only after the hash run is followed by whitespace. A pending marker such as `#` remains a normal paragraph source. Once recognized, inactive headings render as preview text: `## Title` renders as `Title`. When the caret or active selection enters the heading line, the source is revealed as `## Title`. Only the hash run is marked as Markdown syntax and highlighted in green. The following whitespace and content remain visible with heading font size and weight.
@@ -127,6 +129,8 @@ Projection tests should focus on behavior that can change editing meaning:
 - Task list markers are hidden with the list marker while checkbox state remains available to the renderer.
 - Clicking a checkbox preview toggles only the source state character inside `[ ]`, `[x]`, or `[X]`.
 - Backspace and Delete at revealed marker boundaries remove one source character, not the whole formatting span.
+- Typing a third backtick on a valid fence-start line inserts a closing fence below and places the caret inside the code block.
+- Typing the second asterisk of a strong marker inserts the closing marker and places the caret inside the strong span.
 - Adjacent or malformed markers do not leak styles into unrelated spans.
 - Inline code and strong spans remain independent when one of them becomes malformed.
 - Simple inline links hide markers and destinations while preserving source mapping for the label.
