@@ -1121,6 +1121,42 @@ mod tests {
     }
 
     #[test]
+    fn marker_input_preserves_same_style_markers_inside_selection() {
+        let strong_source = "Capture **the** **thought** with `Hanji`.";
+        let strong_expected = format!("**{strong_source}**");
+        assert_eq!(
+            marker_autocomplete_edit(strong_source, &(0..strong_source.len()), "**"),
+            Some((
+                0..strong_source.len(),
+                strong_expected.clone(),
+                "**".len()..strong_source.len() + "**".len()
+            ))
+        );
+
+        let emphasis_source = "Capture *the* *thought* with Hanji.";
+        let emphasis_expected = format!("*{emphasis_source}*");
+        assert_eq!(
+            marker_autocomplete_edit(emphasis_source, &(0..emphasis_source.len()), "*"),
+            Some((
+                0..emphasis_source.len(),
+                emphasis_expected.clone(),
+                "*".len()..emphasis_source.len() + "*".len()
+            ))
+        );
+
+        let strike_source = "Capture ~~the~~ ~~thought~~ with Hanji.";
+        let strike_expected = format!("~~{strike_source}~~");
+        assert_eq!(
+            marker_autocomplete_edit(strike_source, &(0..strike_source.len()), "~~"),
+            Some((
+                0..strike_source.len(),
+                strike_expected.clone(),
+                "~~".len()..strike_source.len() + "~~".len()
+            ))
+        );
+    }
+
+    #[test]
     fn repeated_single_marker_input_keeps_selection_inside_wrapped_text() {
         assert_eq!(
             marker_autocomplete_edit("Hanji *notes*", &(7..12), "*"),

@@ -186,6 +186,12 @@ impl ProjectedStyleRange {
 }
 
 impl<'a> ProjectedLine<'a> {
+    pub(crate) fn style_marker_ranges(&self) -> impl Iterator<Item = MarkdownMarkerRanges> + '_ {
+        self.style_ranges
+            .iter()
+            .map(|style_range| style_range.markers)
+    }
+
     pub fn visible_text(&self) -> String {
         self.visible_text_revealing_source_in(None)
     }

@@ -1,5 +1,7 @@
 use hanji_core::{Document, EditError, Selection, TextEdit, TextRange, Transaction};
 
+use crate::projection::{MarkdownInline, MarkdownMarkerRanges, project_document};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarkdownCommand {
     ToggleStrong,
@@ -72,19 +74,114 @@ fn toggle_delimited(
             ))),
         ))?;
     } else {
+        let Some((replacement, selection_after)) =
+            wrapped_selection_replacement(document.text(), range, marker)
+        else {
+            return Ok(false);
+        };
         document.apply(Transaction::new(
-            vec![
-                TextEdit::insert(range.end, marker),
-                TextEdit::insert(range.start, marker),
-            ],
-            Some(Selection::single(TextRange::new(
-                range.start + marker_len,
-                range.end + marker_len,
-            ))),
+            vec![TextEdit::replace(range, replacement)],
+            Some(Selection::single(selection_after)),
         ))?;
     }
 
     Ok(true)
+}
+
+fn wrapped_selection_replacement(
+    text: &str,
+    range: TextRange,
+    marker: &str,
+) -> Option<(String, TextRange)> {
+    if range.is_empty() {
+        return None;
+    }
+
+    let selected = text.get(range.start..range.end)?;
+    let content = if should_flatten_inner_markers(marker) {
+        flatten_inner_markers(selected, marker)
+    } else {
+        selected.to_string()
+    };
+    let replacement = format!("{marker}{content}{marker}");
+    let selection_start = range.start + marker.len();
+    let selection_end = selection_start + content.len();
+
+    Some((replacement, TextRange::new(selection_start, selection_end)))
+}
+
+fn should_flatten_inner_markers(marker: &str) -> bool {
+    matches!(marker, "*" | "**" | "***" | "~~")
+}
+
+fn flatten_inner_markers(source: &str, marker: &str) -> String {
+    let document = Document::new(source);
+    let projection = project_document(&document);
+    let mut ranges = Vec::new();
+
+    for line in projection.lines() {
+        for markers in line.style_marker_ranges() {
+            push_matching_marker_ranges(source, marker, markers, &mut ranges);
+        }
+
+        for inline in &line.inlines {
+            if let Some(markers) = inline_marker_ranges(inline.kind, marker) {
+                push_matching_marker_ranges(source, marker, markers, &mut ranges);
+            }
+
+            if let Some(markers) = inline.style_markers {
+                push_matching_marker_ranges(source, marker, markers, &mut ranges);
+            }
+        }
+    }
+
+    remove_ranges(source, ranges)
+}
+
+fn inline_marker_ranges(kind: MarkdownInline, marker: &str) -> Option<MarkdownMarkerRanges> {
+    match (marker, kind) {
+        ("*", MarkdownInline::Emphasis { markers })
+        | ("**", MarkdownInline::Strong { markers })
+        | ("~~", MarkdownInline::Strikethrough { markers }) => Some(markers),
+        _ => None,
+    }
+}
+
+fn push_matching_marker_ranges(
+    source: &str,
+    marker: &str,
+    markers: MarkdownMarkerRanges,
+    ranges: &mut Vec<TextRange>,
+) {
+    if source.get(markers.opening.start..markers.opening.end) == Some(marker)
+        && source.get(markers.closing.start..markers.closing.end) == Some(marker)
+    {
+        ranges.push(markers.opening);
+        ranges.push(markers.closing);
+    }
+}
+
+fn remove_ranges(source: &str, mut ranges: Vec<TextRange>) -> String {
+    if ranges.is_empty() {
+        return source.to_string();
+    }
+
+    ranges.sort_by_key(|range| (range.start, range.end));
+    ranges.dedup();
+
+    let mut text = String::with_capacity(source.len());
+    let mut copied_until = 0;
+    for range in ranges {
+        if range.start < copied_until {
+            continue;
+        }
+
+        text.push_str(&source[copied_until..range.start]);
+        copied_until = range.end;
+    }
+    text.push_str(&source[copied_until..]);
+
+    text
 }
 
 fn single_selection_range(document: &Document) -> Result<TextRange, MarkdownCommandError> {
@@ -138,6 +235,42 @@ mod tests {
 
         assert_eq!(document.text(), "Hanji **notes**");
         assert_eq!(document.selection().primary(), TextRange::new(8, 13));
+    }
+
+    #[test]
+    fn toggle_strong_flattens_inner_strong_spans() {
+        let source = "Capture **the** **thought** with Hanji.";
+        let expected = "**Capture the thought with Hanji.**";
+        let mut document = Document::new(source);
+        document
+            .set_selection(Selection::single(TextRange::new(0, source.len())))
+            .unwrap();
+
+        toggle_strong(&mut document).unwrap();
+
+        assert_eq!(document.text(), expected);
+        assert_eq!(
+            document.selection().primary(),
+            TextRange::new("**".len(), expected.len() - "**".len())
+        );
+    }
+
+    #[test]
+    fn toggle_strong_flattens_inner_strong_spans_without_touching_code() {
+        let source = "Capture **the** **thought** with `Hanji` and `**literal**`.";
+        let expected = "**Capture the thought with `Hanji` and `**literal**`.**";
+        let mut document = Document::new(source);
+        document
+            .set_selection(Selection::single(TextRange::new(0, source.len())))
+            .unwrap();
+
+        toggle_strong(&mut document).unwrap();
+
+        assert_eq!(document.text(), expected);
+        assert_eq!(
+            document.selection().primary(),
+            TextRange::new("**".len(), expected.len() - "**".len())
+        );
     }
 
     #[test]
@@ -213,6 +346,24 @@ mod tests {
 
         assert_eq!(document.text(), "Hanji *notes*");
         assert_eq!(document.selection().primary(), TextRange::new(7, 12));
+    }
+
+    #[test]
+    fn toggle_emphasis_flattens_inner_emphasis_spans() {
+        let source = "Capture *the* *thought* with Hanji.";
+        let expected = "*Capture the thought with Hanji.*";
+        let mut document = Document::new(source);
+        document
+            .set_selection(Selection::single(TextRange::new(0, source.len())))
+            .unwrap();
+
+        toggle_emphasis(&mut document).unwrap();
+
+        assert_eq!(document.text(), expected);
+        assert_eq!(
+            document.selection().primary(),
+            TextRange::new("*".len(), expected.len() - "*".len())
+        );
     }
 
     #[test]
