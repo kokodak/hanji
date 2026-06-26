@@ -1046,10 +1046,14 @@ fn link_destination_from_source<'a>(
     let end = source_outer_range.end.checked_sub(line_start)?;
     let source = line_source.get(start..end)?;
 
+    if is_supported_link_destination(source) {
+        return Some(source);
+    }
+
     if let Some(url) = source
         .strip_prefix('<')
         .and_then(|source| source.strip_suffix('>'))
-        && !url.is_empty()
+        && is_supported_link_destination(url)
     {
         return Some(url);
     }
@@ -1060,7 +1064,18 @@ fn link_destination_from_source<'a>(
         .strip_prefix('[')?
         .strip_suffix(')')
         .and_then(|_| source.get(separator + 2..source.len() - 1))
-        .filter(|destination| !destination.is_empty())
+        .filter(|destination| is_supported_link_destination(destination))
+}
+
+fn is_supported_link_destination(destination: &str) -> bool {
+    if destination.chars().any(char::is_whitespace) {
+        return false;
+    }
+
+    destination
+        .strip_prefix("https://")
+        .or_else(|| destination.strip_prefix("http://"))
+        .is_some_and(|rest| !rest.is_empty())
 }
 
 fn code_background_quad(
@@ -1585,6 +1600,23 @@ mod tests {
                 TextRange::new(5, 26)
             ),
             Some("https://hanji.local")
+        );
+        assert_eq!(
+            link_destination_from_source(
+                "Visit https://hanji.local. now",
+                0,
+                TextRange::new(6, 25)
+            ),
+            Some("https://hanji.local")
+        );
+        let mailto_source = "Read [Mail](mailto:hi) now";
+        assert_eq!(
+            link_destination_from_source(
+                mailto_source,
+                0,
+                TextRange::new("Read ".len(), "Read [Mail](mailto:hi)".len())
+            ),
+            None
         );
         assert_eq!(
             link_destination_from_source(source, 0, TextRange::new(0, source.len())),

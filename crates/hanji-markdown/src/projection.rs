@@ -70,6 +70,7 @@ pub enum MarkdownInline {
     Strikethrough { markers: MarkdownMarkerRanges },
     Code { markers: MarkdownMarkerRanges },
     Autolink { markers: MarkdownMarkerRanges },
+    RawUrl,
     Link { markers: MarkdownLinkRanges },
 }
 
@@ -1188,6 +1189,15 @@ fn push_inline_source_segments<'a>(
                     ProjectedSegmentKind::LinkMarker,
                 );
             }
+            MarkdownInline::RawUrl => {
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    inline.content_range,
+                    ProjectedSegmentKind::LinkText,
+                );
+            }
             MarkdownInline::Link { markers } => {
                 push_segment(
                     segments,
@@ -1273,6 +1283,7 @@ fn push_hidden_visible_segment<'a>(
         MarkdownInline::Strikethrough { .. } => ProjectedSegmentKind::StrikethroughContent,
         MarkdownInline::Code { .. } => ProjectedSegmentKind::CodeContent,
         MarkdownInline::Autolink { .. } => ProjectedSegmentKind::LinkText,
+        MarkdownInline::RawUrl => ProjectedSegmentKind::LinkText,
         MarkdownInline::Link { .. } => ProjectedSegmentKind::LinkText,
     };
 
@@ -1471,6 +1482,17 @@ fn push_source_visible_segments<'a>(
                 ProjectedSegmentKind::LinkMarker,
             );
         }
+        MarkdownInline::RawUrl => {
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                inline.source_range,
+                inline.content_range,
+                ProjectedSegmentKind::LinkText,
+            );
+        }
         MarkdownInline::Link { markers } => {
             push_visible_segment(
                 segments,
@@ -1591,6 +1613,7 @@ fn push_text_with_projected_inlines<'a>(
 enum InlineSpan {
     Escape(EscapeSpan),
     Autolink(AutolinkSpan),
+    RawUrl(RawUrlSpan),
     Emphasis(EmphasisPair),
     Strikethrough(StrikethroughPair),
     Link(LinkSpan),
@@ -1601,6 +1624,7 @@ impl InlineSpan {
         match self {
             Self::Escape(span) => span.start,
             Self::Autolink(span) => span.opening_start,
+            Self::RawUrl(span) => span.start,
             Self::Emphasis(pair) => pair.opening_start,
             Self::Strikethrough(pair) => pair.opening_start,
             Self::Link(span) => span.opening_start,
@@ -1611,6 +1635,7 @@ impl InlineSpan {
         match self {
             Self::Escape(span) => span.end,
             Self::Autolink(span) => span.closing_start + 1,
+            Self::RawUrl(span) => span.end,
             Self::Emphasis(pair) => pair.closing_start + pair.kind.marker_len(),
             Self::Strikethrough(pair) => pair.closing_start + STRIKETHROUGH_MARKER_LEN,
             Self::Link(span) => span.closing_start + 1,
@@ -1622,8 +1647,9 @@ impl InlineSpan {
             Self::Escape(_) => 0,
             Self::Autolink(_) => 1,
             Self::Link(_) => 2,
-            Self::Strikethrough(_) => 3,
-            Self::Emphasis(_) => 4,
+            Self::RawUrl(_) => 3,
+            Self::Strikethrough(_) => 4,
+            Self::Emphasis(_) => 5,
         }
     }
 }
@@ -1640,6 +1666,12 @@ struct EscapeSpan {
 struct AutolinkSpan {
     opening_start: usize,
     closing_start: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RawUrlSpan {
+    start: usize,
+    end: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1694,6 +1726,11 @@ fn inline_spans(source: &str, start: usize, end: usize) -> Vec<InlineSpan> {
         link_spans(source, start, end)
             .into_iter()
             .map(InlineSpan::Link),
+    );
+    candidates.extend(
+        raw_url_spans(source, start, end)
+            .into_iter()
+            .map(InlineSpan::RawUrl),
     );
     candidates.extend(
         strikethrough_pairs(source, start, end)
@@ -1782,6 +1819,97 @@ fn supported_autolink_url(url: &str) -> bool {
     url.strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))
         .is_some_and(|rest| !rest.is_empty())
+}
+
+fn raw_url_spans(source: &str, start: usize, end: usize) -> Vec<RawUrlSpan> {
+    let mut spans = Vec::new();
+    let mut cursor = start;
+
+    while cursor < end {
+        let Some(prefix_len) = raw_url_prefix_len(source, cursor, end) else {
+            cursor += 1;
+            continue;
+        };
+
+        if !can_start_raw_url(source, cursor) || is_escaped(source, cursor) {
+            cursor += prefix_len;
+            continue;
+        }
+
+        let candidate_end = raw_url_candidate_end(source, cursor, end);
+        let url_end = trim_raw_url_end(source, cursor, candidate_end);
+
+        if url_end > cursor + prefix_len {
+            spans.push(RawUrlSpan {
+                start: cursor,
+                end: url_end,
+            });
+            cursor = url_end;
+        } else {
+            cursor += prefix_len;
+        }
+    }
+
+    spans
+}
+
+fn raw_url_prefix_len(source: &str, start: usize, end: usize) -> Option<usize> {
+    let remaining = source.get(start..end)?;
+
+    if remaining.starts_with("https://") {
+        Some("https://".len())
+    } else if remaining.starts_with("http://") {
+        Some("http://".len())
+    } else {
+        None
+    }
+}
+
+fn can_start_raw_url(source: &str, start: usize) -> bool {
+    previous_char(source, start)
+        .is_none_or(|character| !character.is_ascii_alphanumeric() && character != '_')
+}
+
+fn raw_url_candidate_end(source: &str, start: usize, end: usize) -> usize {
+    let mut cursor = start;
+
+    while cursor < end {
+        let Some(character) = next_char(source, cursor, end) else {
+            break;
+        };
+
+        if is_raw_url_terminator(character) {
+            break;
+        }
+
+        cursor += character.len_utf8();
+    }
+
+    cursor
+}
+
+fn is_raw_url_terminator(character: char) -> bool {
+    character.is_whitespace() || matches!(character, '<' | '>' | '"' | '\'' | '`')
+}
+
+fn trim_raw_url_end(source: &str, start: usize, mut end: usize) -> usize {
+    while end > start {
+        let Some(character) = previous_char(source, end) else {
+            break;
+        };
+
+        if !is_raw_url_trailing_punctuation(character) {
+            break;
+        }
+
+        end -= character.len_utf8();
+    }
+
+    end
+}
+
+fn is_raw_url_trailing_punctuation(character: char) -> bool {
+    matches!(character, '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']')
 }
 
 fn link_spans(source: &str, start: usize, end: usize) -> Vec<LinkSpan> {
@@ -2005,6 +2133,9 @@ fn push_projected_inline<'a>(
         InlineSpan::Autolink(span) => {
             push_autolink_inline(inlines, source, source_start, span);
         }
+        InlineSpan::RawUrl(span) => {
+            push_raw_url_inline(inlines, source, source_start, span);
+        }
         InlineSpan::Emphasis(pair) => match pair.kind {
             EmphasisDelimiterKind::Emphasis => {
                 push_emphasis_inline(
@@ -2090,6 +2221,23 @@ fn push_autolink_inline<'a>(
                 ),
             },
         },
+    });
+}
+
+fn push_raw_url_inline<'a>(
+    inlines: &mut Vec<ProjectedInline<'a>>,
+    source: &'a str,
+    source_start: usize,
+    span: RawUrlSpan,
+) {
+    let range = TextRange::new(source_start + span.start, source_start + span.end);
+
+    inlines.push(ProjectedInline {
+        source_range: range,
+        content_range: range,
+        source: &source[span.start..span.end],
+        content: &source[span.start..span.end],
+        kind: MarkdownInline::RawUrl,
     });
 }
 
@@ -3532,6 +3680,103 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn projects_raw_url_inline_spans_without_rewriting_source() {
+        let document = Document::new("Visit https://hanji.local. Now");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let inlines = &line.inlines;
+
+        assert_eq!(inlines.len(), 3);
+        assert_eq!(
+            inlines[1],
+            ProjectedInline {
+                source_range: TextRange::new(6, 25),
+                content_range: TextRange::new(6, 25),
+                source: "https://hanji.local",
+                content: "https://hanji.local",
+                kind: MarkdownInline::RawUrl,
+            }
+        );
+        assert_eq!(line.visible_text(), "Visit https://hanji.local. Now");
+        assert_eq!(
+            line.visible_segments(),
+            vec![
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(0, 6),
+                    source_range: TextRange::new(0, 6),
+                    source_outer_range: TextRange::new(0, 6),
+                    source: "Visit ",
+                    kind: ProjectedSegmentKind::Text,
+                },
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(6, 25),
+                    source_range: TextRange::new(6, 25),
+                    source_outer_range: TextRange::new(6, 25),
+                    source: "https://hanji.local",
+                    kind: ProjectedSegmentKind::LinkText,
+                },
+                ProjectedVisibleSegment {
+                    visible_range: TextRange::new(25, 30),
+                    source_range: TextRange::new(25, 30),
+                    source_outer_range: TextRange::new(25, 30),
+                    source: ". Now",
+                    kind: ProjectedSegmentKind::Text,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn raw_url_linkification_does_not_override_markdown_spans_or_code() {
+        let document = Document::new(
+            "`https://hanji.local` [Hanji](https://hanji.local) <https://hanji.local>",
+        );
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert!(
+            line.inlines
+                .iter()
+                .all(|inline| !matches!(inline.kind, MarkdownInline::RawUrl))
+        );
+        assert!(
+            line.inlines
+                .iter()
+                .any(|inline| matches!(inline.kind, MarkdownInline::Code { .. }))
+        );
+        assert!(
+            line.inlines
+                .iter()
+                .any(|inline| matches!(inline.kind, MarkdownInline::Link { .. }))
+        );
+        assert!(
+            line.inlines
+                .iter()
+                .any(|inline| matches!(inline.kind, MarkdownInline::Autolink { .. }))
+        );
+    }
+
+    #[test]
+    fn malformed_raw_urls_remain_text() {
+        for source in [
+            "Visit https://",
+            "Visit https://.",
+            "Prefixabchttps://hanji.local",
+        ] {
+            let document = Document::new(source);
+            let projection = project_document(&document);
+            let line = &projection.lines()[0];
+
+            assert_eq!(line.visible_text(), source);
+            assert!(
+                line.inlines
+                    .iter()
+                    .all(|inline| !matches!(inline.kind, MarkdownInline::RawUrl))
+            );
+        }
     }
 
     #[test]
