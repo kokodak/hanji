@@ -109,6 +109,8 @@ Keyboard selection expansion uses the same source coordinate rules. `Shift+Arrow
 
 Select all selects the full Markdown source range, including hidden markers and structural syntax. It should behave like a normal plain-text editor selection for replacement, copy, and subsequent keyboard selection changes.
 
+Clipboard operations are source-backed. Copy and cut use the selected Markdown source range, including hidden markers, escaped punctuation, destinations, fence lines, and newlines. Paste inserts clipboard text as Markdown source text and does not invoke marker autocomplete, so pasting `**` or a three-backtick fence marker keeps exactly that text instead of generating matching markers.
+
 ## Test Scenarios
 
 Projection tests should focus on behavior that can change editing meaning:
@@ -122,6 +124,7 @@ Projection tests should focus on behavior that can change editing meaning:
 - A selection starting inside inline content excludes hidden markers unless the user explicitly extends into them.
 - Double-clicking a word selects the word source range with the same boundary rules as keyboard word movement.
 - Select all covers the full Markdown source, including currently hidden syntax markers.
+- Copy, cut, and paste preserve Markdown source text, including hidden markers and newlines.
 - Hidden inline content boundaries map to editable marker edges.
 - Heading recognition starts only after the ATX hash run is followed by whitespace.
 - Inactive recognized headings hide the ATX marker and render content as preview text.

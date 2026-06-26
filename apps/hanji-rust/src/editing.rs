@@ -24,6 +24,23 @@ pub(crate) fn document_selection_range(document_len: usize) -> TextRange {
     TextRange::new(0, document_len)
 }
 
+pub(crate) fn selected_source_text(text: &str, range: &Range<usize>) -> Option<String> {
+    if range.start == range.end {
+        return None;
+    }
+
+    text.get(range.clone()).map(ToString::to_string)
+}
+
+pub(crate) fn clipboard_paste_edit(
+    range: &Range<usize>,
+    text: &str,
+) -> (Range<usize>, String, Range<usize>) {
+    let caret = range.start + text.len();
+
+    (range.clone(), text.to_string(), caret..caret)
+}
+
 pub(crate) fn selection_is_reversed(anchor: usize, head: usize) -> bool {
     head < anchor
 }
@@ -618,6 +635,40 @@ mod tests {
     fn document_selection_range_covers_entire_source() {
         assert_eq!(document_selection_range(0), TextRange::new(0, 0));
         assert_eq!(document_selection_range(12), TextRange::new(0, 12));
+    }
+
+    #[test]
+    fn selected_source_text_copies_raw_markdown_source() {
+        assert_eq!(
+            selected_source_text("A **bold** word", &(2..10)),
+            Some("**bold**".to_string())
+        );
+    }
+
+    #[test]
+    fn selected_source_text_ignores_empty_and_invalid_ranges() {
+        assert_eq!(selected_source_text("A **bold** word", &(2..2)), None);
+        assert_eq!(selected_source_text("A **bold** word", &(1..99)), None);
+    }
+
+    #[test]
+    fn clipboard_paste_edit_preserves_text_without_autocomplete() {
+        assert_eq!(
+            clipboard_paste_edit(&(4..4), "**"),
+            (4..4, "**".to_string(), 6..6)
+        );
+        assert_eq!(
+            clipboard_paste_edit(&(4..4), "```"),
+            (4..4, "```".to_string(), 7..7)
+        );
+    }
+
+    #[test]
+    fn clipboard_paste_edit_replaces_selection_and_keeps_newlines() {
+        assert_eq!(
+            clipboard_paste_edit(&(2..6), "a\nb"),
+            (2..6, "a\nb".to_string(), 5..5)
+        );
     }
 
     #[test]

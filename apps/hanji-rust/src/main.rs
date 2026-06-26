@@ -8,10 +8,10 @@ mod snapshot;
 use std::{ops::Range, process};
 
 use gpui::{
-    App, Application, Bounds, Context, CursorStyle, EntityInputHandler, FocusHandle, Focusable,
-    IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    Render, SharedString, UTF16Selection, Window, WindowBounds, WindowOptions, actions, div, point,
-    prelude::*, px, rgb, size,
+    App, Application, Bounds, ClipboardItem, Context, CursorStyle, EntityInputHandler, FocusHandle,
+    Focusable, IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    Pixels, Render, SharedString, UTF16Selection, Window, WindowBounds, WindowOptions, actions,
+    div, point, prelude::*, px, rgb, size,
 };
 use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
 use hanji_markdown::{
@@ -21,10 +21,10 @@ use hanji_storage::DocumentSession;
 
 use editing::{
     ListIndentDirection, MarkerHitMode, blockquote_newline_edit_for_line, bounds_contains_point,
-    document_selection_range, drag_distance_exceeds_threshold,
+    clipboard_paste_edit, document_selection_range, drag_distance_exceeds_threshold,
     empty_marker_pair_delete_backward_edit, extension_points_for_selection,
     horizontal_offset_within_line, line_marker_hit_offset, list_indent_edit,
-    list_newline_edit_for_line, marker_autocomplete_edit, marker_skip_offset,
+    list_newline_edit_for_line, marker_autocomplete_edit, marker_skip_offset, selected_source_text,
     selection_is_reversed, selection_range_from_anchor_and_head, task_marker_state_char_range,
 };
 use encoding::byte_offset_to_utf16;
@@ -65,6 +65,9 @@ actions!(
         SelectAll,
         IndentList,
         OutdentList,
+        Copy,
+        Cut,
+        Paste,
         Undo,
         Redo,
         Save,
@@ -345,6 +348,39 @@ impl Hanji {
         let range = document_selection_range(self.session.document().len());
 
         self.select_from_anchor_to(range.start, range.end, None, cx);
+    }
+
+    fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        let range = self.selected_range();
+        if let Some(text) = selected_source_text(self.session.document().text(), &range) {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        }
+    }
+
+    fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
+        let range = self.selected_range();
+        let Some(text) = selected_source_text(self.session.document().text(), &range) else {
+            return;
+        };
+
+        self.marked_range = None;
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        self.replace_range(range.clone(), "", range.start..range.start, window, cx);
+    }
+
+    fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+
+        let (range, replacement, selection_after) =
+            clipboard_paste_edit(&self.selected_range(), &text);
+
+        self.marked_range = None;
+        self.replace_range(range, &replacement, selection_after, window, cx);
     }
 
     fn indent_list(&mut self, _: &IndentList, window: &mut Window, cx: &mut Context<Self>) {
@@ -1140,6 +1176,9 @@ impl Render for Hanji {
             .on_action(cx.listener(Self::toggle_italic))
             .on_action(cx.listener(Self::toggle_code))
             .on_action(cx.listener(Self::select_all))
+            .on_action(cx.listener(Self::copy))
+            .on_action(cx.listener(Self::cut))
+            .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::indent_list))
             .on_action(cx.listener(Self::outdent_list))
             .on_action(cx.listener(Self::undo))
@@ -1233,6 +1272,9 @@ fn main() {
             KeyBinding::new("cmd-i", ToggleItalic, None),
             KeyBinding::new("cmd-e", ToggleCode, None),
             KeyBinding::new("cmd-a", SelectAll, None),
+            KeyBinding::new("cmd-c", Copy, None),
+            KeyBinding::new("cmd-x", Cut, None),
+            KeyBinding::new("cmd-v", Paste, None),
             KeyBinding::new("cmd-z", Undo, None),
             KeyBinding::new("cmd-shift-z", Redo, None),
             KeyBinding::new("cmd-s", Save, None),
