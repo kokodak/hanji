@@ -1045,6 +1045,15 @@ fn link_destination_from_source<'a>(
     let start = source_outer_range.start.checked_sub(line_start)?;
     let end = source_outer_range.end.checked_sub(line_start)?;
     let source = line_source.get(start..end)?;
+
+    if let Some(url) = source
+        .strip_prefix('<')
+        .and_then(|source| source.strip_suffix('>'))
+        && !url.is_empty()
+    {
+        return Some(url);
+    }
+
     let separator = source.find("](")?;
 
     source
@@ -1567,6 +1576,14 @@ mod tests {
 
         assert_eq!(
             link_destination_from_source(source, 0, TextRange::new(5, 33)),
+            Some("https://hanji.local")
+        );
+        assert_eq!(
+            link_destination_from_source(
+                "Read <https://hanji.local> now",
+                0,
+                TextRange::new(5, 26)
+            ),
             Some("https://hanji.local")
         );
         assert_eq!(

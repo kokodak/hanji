@@ -69,6 +69,7 @@ pub enum MarkdownInline {
     Emphasis { markers: MarkdownMarkerRanges },
     Strikethrough { markers: MarkdownMarkerRanges },
     Code { markers: MarkdownMarkerRanges },
+    Autolink { markers: MarkdownMarkerRanges },
     Link { markers: MarkdownLinkRanges },
 }
 
@@ -1164,6 +1165,29 @@ fn push_inline_source_segments<'a>(
                     ProjectedSegmentKind::CodeMarker,
                 );
             }
+            MarkdownInline::Autolink { markers } => {
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    markers.opening,
+                    ProjectedSegmentKind::LinkMarker,
+                );
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    inline.content_range,
+                    ProjectedSegmentKind::LinkText,
+                );
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    markers.closing,
+                    ProjectedSegmentKind::LinkMarker,
+                );
+            }
             MarkdownInline::Link { markers } => {
                 push_segment(
                     segments,
@@ -1248,6 +1272,7 @@ fn push_hidden_visible_segment<'a>(
         MarkdownInline::Emphasis { .. } => ProjectedSegmentKind::EmphasisContent,
         MarkdownInline::Strikethrough { .. } => ProjectedSegmentKind::StrikethroughContent,
         MarkdownInline::Code { .. } => ProjectedSegmentKind::CodeContent,
+        MarkdownInline::Autolink { .. } => ProjectedSegmentKind::LinkText,
         MarkdownInline::Link { .. } => ProjectedSegmentKind::LinkText,
     };
 
@@ -1417,6 +1442,35 @@ fn push_source_visible_segments<'a>(
                 ProjectedSegmentKind::CodeMarker,
             );
         }
+        MarkdownInline::Autolink { markers } => {
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                markers.opening,
+                markers.opening,
+                ProjectedSegmentKind::LinkMarker,
+            );
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                inline.content_range,
+                inline.content_range,
+                ProjectedSegmentKind::LinkText,
+            );
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                markers.closing,
+                markers.closing,
+                ProjectedSegmentKind::LinkMarker,
+            );
+        }
         MarkdownInline::Link { markers } => {
             push_visible_segment(
                 segments,
@@ -1536,6 +1590,7 @@ fn push_text_with_projected_inlines<'a>(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InlineSpan {
     Escape(EscapeSpan),
+    Autolink(AutolinkSpan),
     Emphasis(EmphasisPair),
     Strikethrough(StrikethroughPair),
     Link(LinkSpan),
@@ -1545,6 +1600,7 @@ impl InlineSpan {
     fn start(self) -> usize {
         match self {
             Self::Escape(span) => span.start,
+            Self::Autolink(span) => span.opening_start,
             Self::Emphasis(pair) => pair.opening_start,
             Self::Strikethrough(pair) => pair.opening_start,
             Self::Link(span) => span.opening_start,
@@ -1554,6 +1610,7 @@ impl InlineSpan {
     fn end(self) -> usize {
         match self {
             Self::Escape(span) => span.end,
+            Self::Autolink(span) => span.closing_start + 1,
             Self::Emphasis(pair) => pair.closing_start + pair.kind.marker_len(),
             Self::Strikethrough(pair) => pair.closing_start + STRIKETHROUGH_MARKER_LEN,
             Self::Link(span) => span.closing_start + 1,
@@ -1563,9 +1620,10 @@ impl InlineSpan {
     fn priority(self) -> u8 {
         match self {
             Self::Escape(_) => 0,
-            Self::Link(_) => 1,
-            Self::Strikethrough(_) => 2,
-            Self::Emphasis(_) => 3,
+            Self::Autolink(_) => 1,
+            Self::Link(_) => 2,
+            Self::Strikethrough(_) => 3,
+            Self::Emphasis(_) => 4,
         }
     }
 }
@@ -1576,6 +1634,12 @@ const STRIKETHROUGH_MARKER_LEN: usize = 2;
 struct EscapeSpan {
     start: usize,
     end: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AutolinkSpan {
+    opening_start: usize,
+    closing_start: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1620,6 +1684,11 @@ fn inline_spans(source: &str, start: usize, end: usize) -> Vec<InlineSpan> {
         escape_spans(source, start, end)
             .into_iter()
             .map(InlineSpan::Escape),
+    );
+    candidates.extend(
+        autolink_spans(source, start, end)
+            .into_iter()
+            .map(InlineSpan::Autolink),
     );
     candidates.extend(
         link_spans(source, start, end)
@@ -1675,6 +1744,44 @@ fn escape_spans(source: &str, start: usize, end: usize) -> Vec<EscapeSpan> {
     }
 
     spans
+}
+
+fn autolink_spans(source: &str, start: usize, end: usize) -> Vec<AutolinkSpan> {
+    let mut spans = Vec::new();
+    let mut search_start = start;
+
+    while let Some(opening_start) = find_unescaped_byte(source, b'<', search_start, end) {
+        let url_start = opening_start + 1;
+        let Some(closing_start) = find_unescaped_byte(source, b'>', url_start, end) else {
+            search_start = url_start;
+            continue;
+        };
+
+        let Some(url) = source.get(url_start..closing_start) else {
+            search_start = url_start;
+            continue;
+        };
+        if supported_autolink_url(url) {
+            spans.push(AutolinkSpan {
+                opening_start,
+                closing_start,
+            });
+        }
+
+        search_start = closing_start + 1;
+    }
+
+    spans
+}
+
+fn supported_autolink_url(url: &str) -> bool {
+    if url.chars().any(char::is_whitespace) {
+        return false;
+    }
+
+    url.strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .is_some_and(|rest| !rest.is_empty())
 }
 
 fn link_spans(source: &str, start: usize, end: usize) -> Vec<LinkSpan> {
@@ -1895,6 +2002,9 @@ fn push_projected_inline<'a>(
         InlineSpan::Escape(span) => {
             push_escape_inline(inlines, source, source_start, span);
         }
+        InlineSpan::Autolink(span) => {
+            push_autolink_inline(inlines, source, source_start, span);
+        }
         InlineSpan::Emphasis(pair) => match pair.kind {
             EmphasisDelimiterKind::Emphasis => {
                 push_emphasis_inline(
@@ -1948,6 +2058,38 @@ fn push_escape_inline<'a>(
         source: &source[span.start..span.end],
         content: &source[span.start + 1..span.end],
         kind: MarkdownInline::Escape { marker },
+    });
+}
+
+fn push_autolink_inline<'a>(
+    inlines: &mut Vec<ProjectedInline<'a>>,
+    source: &'a str,
+    source_start: usize,
+    span: AutolinkSpan,
+) {
+    let url_start = span.opening_start + 1;
+    let closing_end = span.closing_start + 1;
+
+    inlines.push(ProjectedInline {
+        source_range: TextRange::new(
+            source_start + span.opening_start,
+            source_start + closing_end,
+        ),
+        content_range: TextRange::new(source_start + url_start, source_start + span.closing_start),
+        source: &source[span.opening_start..closing_end],
+        content: &source[url_start..span.closing_start],
+        kind: MarkdownInline::Autolink {
+            markers: MarkdownMarkerRanges {
+                opening: TextRange::new(
+                    source_start + span.opening_start,
+                    source_start + url_start,
+                ),
+                closing: TextRange::new(
+                    source_start + span.closing_start,
+                    source_start + closing_end,
+                ),
+            },
+        },
     });
 }
 
@@ -3327,6 +3469,72 @@ mod tests {
     }
 
     #[test]
+    fn projects_autolink_inline_spans_with_source_ranges() {
+        let document = Document::new("Read <https://hanji.local> now");
+        let projection = project_document(&document);
+        let inlines = &projection.lines()[0].inlines;
+
+        assert_eq!(inlines.len(), 3);
+        assert_eq!(
+            inlines[1],
+            ProjectedInline {
+                source_range: TextRange::new(5, 26),
+                content_range: TextRange::new(6, 25),
+                source: "<https://hanji.local>",
+                content: "https://hanji.local",
+                kind: MarkdownInline::Autolink {
+                    markers: MarkdownMarkerRanges {
+                        opening: TextRange::new(5, 6),
+                        closing: TextRange::new(25, 26),
+                    },
+                },
+            }
+        );
+        assert_eq!(
+            projection.lines()[0].visible_text(),
+            "Read https://hanji.local now"
+        );
+    }
+
+    #[test]
+    fn exposes_source_visible_segments_for_autolink_spans() {
+        let document = Document::new("Read <https://hanji.local> now");
+        let projection = project_document(&document);
+        let segments = projection.lines()[0].source_visible_segments();
+
+        assert_eq!(
+            segments,
+            vec![
+                ProjectedSegment {
+                    range: TextRange::new(0, 5),
+                    source: "Read ",
+                    kind: ProjectedSegmentKind::Text,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(5, 6),
+                    source: "<",
+                    kind: ProjectedSegmentKind::LinkMarker,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(6, 25),
+                    source: "https://hanji.local",
+                    kind: ProjectedSegmentKind::LinkText,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(25, 26),
+                    source: ">",
+                    kind: ProjectedSegmentKind::LinkMarker,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(26, 30),
+                    source: " now",
+                    kind: ProjectedSegmentKind::Text,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn hides_link_markers_and_destination_in_preview() {
         let document = Document::new("Read [Hanji](https://hanji.local) now");
         let projection = project_document(&document);
@@ -3385,6 +3593,25 @@ mod tests {
         assert_eq!(
             line.visible_text_revealing_source_in(Some(TextRange::caret("Read".len()))),
             "Read Hanji now"
+        );
+    }
+
+    #[test]
+    fn caret_inside_autolink_reveals_autolink_source() {
+        let document = Document::new("Read <https://hanji.local> now");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        for caret in ["Read <https".len(), "Read <https://hanji.local>".len()] {
+            assert_eq!(
+                line.visible_text_revealing_source_in(Some(TextRange::caret(caret))),
+                "Read <https://hanji.local> now"
+            );
+        }
+
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::caret("Read".len()))),
+            "Read https://hanji.local now"
         );
     }
 
@@ -3481,6 +3708,26 @@ mod tests {
                 .iter()
                 .all(|inline| !matches!(inline.kind, MarkdownInline::Link { .. }))
         );
+    }
+
+    #[test]
+    fn malformed_autolinks_remain_text() {
+        for source in [
+            "Read <ftp://hanji.local>",
+            "Read <https://>",
+            "Read <https://hanji local>",
+        ] {
+            let document = Document::new(source);
+            let projection = project_document(&document);
+            let line = &projection.lines()[0];
+
+            assert_eq!(line.visible_text(), source);
+            assert!(
+                line.inlines
+                    .iter()
+                    .all(|inline| !matches!(inline.kind, MarkdownInline::Autolink { .. }))
+            );
+        }
     }
 
     #[test]
