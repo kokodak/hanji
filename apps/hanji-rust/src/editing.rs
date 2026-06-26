@@ -264,7 +264,7 @@ fn strong_marker_autocomplete_edit(
         "*" => {
             let marker_start = range.start.checked_sub("*".len())?;
             if !previous_text_is_exact_marker(text, range.start, "*")
-                || has_unclosed_marker_before(text, marker_start, "**")
+                || would_close_unclosed_strong_at(text, marker_start)
                 || following_text_starts_with(text, range.start, "*")
             {
                 return None;
@@ -274,7 +274,7 @@ fn strong_marker_autocomplete_edit(
         }
         "**" => {
             if previous_text_is_exact_marker(text, range.start, "*")
-                || has_unclosed_marker_before(text, range.start, "**")
+                || would_close_unclosed_strong_at(text, range.start)
                 || following_text_starts_with(text, range.start, "*")
             {
                 return None;
@@ -286,6 +286,17 @@ fn strong_marker_autocomplete_edit(
     };
 
     Some((range.clone(), replacement, caret..caret))
+}
+
+fn would_close_unclosed_strong_at(text: &str, marker_start: usize) -> bool {
+    has_unclosed_marker_before(text, marker_start, "**")
+        && previous_char_is_inline_content(text, marker_start)
+}
+
+fn previous_char_is_inline_content(text: &str, offset: usize) -> bool {
+    text.get(..offset)
+        .and_then(|prefix| prefix.chars().next_back())
+        .is_some_and(|character| !character.is_whitespace())
 }
 
 fn previous_text_is_exact_marker(text: &str, offset: usize, marker: &str) -> bool {
@@ -693,6 +704,47 @@ mod tests {
         assert_eq!(
             marker_autocomplete_edit("**qwe", &("**qwe".len().."**qwe".len()), "**"),
             None
+        );
+    }
+
+    #[test]
+    fn strong_autocomplete_starts_after_broken_strong_at_text_boundaries() {
+        let after_space = "**qwe* ";
+        assert_eq!(
+            marker_autocomplete_edit(after_space, &(after_space.len()..after_space.len()), "**"),
+            Some((
+                after_space.len()..after_space.len(),
+                "****".to_string(),
+                after_space.len() + 2..after_space.len() + 2
+            ))
+        );
+
+        let after_newline = "**qwe*\n";
+        assert_eq!(
+            marker_autocomplete_edit(
+                after_newline,
+                &(after_newline.len()..after_newline.len()),
+                "**"
+            ),
+            Some((
+                after_newline.len()..after_newline.len(),
+                "****".to_string(),
+                after_newline.len() + 2..after_newline.len() + 2
+            ))
+        );
+
+        let typed_first_marker_after_space = "**qwe* *";
+        assert_eq!(
+            marker_autocomplete_edit(
+                typed_first_marker_after_space,
+                &(typed_first_marker_after_space.len()..typed_first_marker_after_space.len()),
+                "*"
+            ),
+            Some((
+                typed_first_marker_after_space.len()..typed_first_marker_after_space.len(),
+                "***".to_string(),
+                typed_first_marker_after_space.len() + 1..typed_first_marker_after_space.len() + 1
+            ))
         );
     }
 
