@@ -23,7 +23,7 @@ Hanji is a light, local-first WYSIWYG Markdown editor built around simple plain 
 Core crates can be checked without the GPUI desktop dependency:
 
 ```sh
-cargo test --workspace --exclude hanji-rust
+cargo test --workspace --exclude hanji
 ```
 
 The GPUI app requires a macOS toolchain that can compile Metal shaders:

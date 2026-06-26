@@ -25,9 +25,9 @@ app:
 	fi; \
 	printf "Using Metal Toolchain: %s\n" "$$metal_toolchain"; \
 	if [ -n "$$HANJI_FILE" ]; then \
-		TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo run -p hanji-rust -- "$$HANJI_FILE"; \
+		TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo run -p hanji -- "$$HANJI_FILE"; \
 	else \
-		TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo run -p hanji-rust; \
+		TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo run -p hanji; \
 	fi
 
 check-app:
@@ -40,7 +40,7 @@ check-app:
 		exit 1; \
 	fi; \
 	printf "Using Metal Toolchain: %s\n" "$$metal_toolchain"; \
-	TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo check -p hanji-rust
+	TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo check -p hanji
 
 build-app:
 	@metal_toolchain="$$HANJI_METAL_TOOLCHAIN"; \
@@ -52,10 +52,10 @@ build-app:
 		exit 1; \
 	fi; \
 	printf "Using Metal Toolchain: %s\n" "$$metal_toolchain"; \
-	TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo build -p hanji-rust
+	TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo build -p hanji
 
 test:
-	cargo test --workspace --exclude hanji-rust
+	cargo test --workspace --exclude hanji
 
 metal:
 	xcodebuild -downloadComponent MetalToolchain -exportPath /private/tmp/HanjiMetalToolchain

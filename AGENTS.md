@@ -19,7 +19,7 @@ Hanji is a light, local-first Markdown editor. It should feel simple enough for 
 - Put design documents under `docs/`.
 - Put core editor concepts under `docs/design/`.
 - Keep the Rust and GPUI architecture direction in `docs/architecture.md` until a dedicated ADR structure exists.
-- Keep GPUI app code in `apps/hanji-rust/`.
+- Keep GPUI app code in `apps/hanji/`.
 - Add tests alongside the feature once test infrastructure is introduced.
 - Start commit messages with an English imperative verb and make the scope broad enough to describe the full change.
 
@@ -28,5 +28,5 @@ Hanji is a light, local-first Markdown editor. It should feel simple enough for 
 ```sh
 make app
 make check-app
-cargo test --workspace --exclude hanji-rust
+cargo test --workspace --exclude hanji
 ```

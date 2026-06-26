@@ -1,6 +1,6 @@
 [workspace]
 members = [
-  "apps/hanji-rust",
+  "apps/hanji",
   "crates/hanji-core",
   "crates/hanji-markdown",
   "crates/hanji-plugin-api",

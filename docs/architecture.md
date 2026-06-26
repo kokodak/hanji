@@ -14,7 +14,7 @@ crates/
   hanji-plugin-api/ Future public plugin contracts
 
 apps/
-  hanji-rust/       GPUI desktop application
+  hanji/            GPUI desktop application
 ```
 
 This structure is intentionally small. Crates can stay thin until their boundaries become real.
@@ -24,7 +24,7 @@ This structure is intentionally small. Crates can stay thin until their boundari
 - `hanji-core` owns editing behavior and must not import UI framework types.
 - `hanji-markdown` treats Markdown text as the source of truth.
 - `hanji-storage` keeps documents visible as normal files and keeps app metadata separate.
-- `apps/hanji-rust` translates GPUI input, rendering, and window events into core commands.
+- `apps/hanji` translates GPUI input, rendering, and window events into core commands.
 
 ## Markdown Crate Boundaries
 

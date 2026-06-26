@@ -17,7 +17,7 @@ Hanji is a light, local-first Markdown text editor.
 Rust core checks:
 
 ```sh
-cargo test --workspace --exclude hanji-rust
+cargo test --workspace --exclude hanji
 ```
 
 GPUI desktop app:

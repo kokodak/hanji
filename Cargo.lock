@@ -2292,6 +2292,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hanji"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "hanji-core",
+ "hanji-markdown",
+ "hanji-storage",
+ "libc",
+]
+
+[[package]]
 name = "hanji-core"
 version = "0.1.0"
 dependencies = [
@@ -2308,17 +2319,6 @@ dependencies = [
 [[package]]
 name = "hanji-plugin-api"
 version = "0.1.0"
-
-[[package]]
-name = "hanji-rust"
-version = "0.1.0"
-dependencies = [
- "gpui",
- "hanji-core",
- "hanji-markdown",
- "hanji-storage",
- "libc",
-]
 
 [[package]]
 name = "hanji-storage"
