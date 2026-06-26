@@ -13,6 +13,10 @@ pub(crate) fn selection_range_from_anchor_and_head(anchor: usize, head: usize) -
     TextRange::new(anchor.min(head), anchor.max(head))
 }
 
+pub(crate) fn document_selection_range(document_len: usize) -> TextRange {
+    TextRange::new(0, document_len)
+}
+
 pub(crate) fn selection_is_reversed(anchor: usize, head: usize) -> bool {
     head < anchor
 }
@@ -474,6 +478,12 @@ mod tests {
             extension_points_for_selection(TextRange::new(8, 16), 1),
             (8, 16)
         );
+    }
+
+    #[test]
+    fn document_selection_range_covers_entire_source() {
+        assert_eq!(document_selection_range(0), TextRange::new(0, 0));
+        assert_eq!(document_selection_range(12), TextRange::new(0, 12));
     }
 
     #[test]

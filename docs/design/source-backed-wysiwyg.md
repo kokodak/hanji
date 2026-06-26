@@ -105,6 +105,8 @@ Double-click selection uses the same word definition as keyboard word movement. 
 
 Keyboard selection expansion uses the same source coordinate rules. `Shift+Arrow` extends by visible caret movement, `Shift+Option+Left/Right` extends to the previous or next source word boundary within the current line, and `Shift+Cmd` extends to the current line or document boundary depending on the arrow direction. Left and right movement shortcuts should not cross line boundaries; moving between lines belongs to up and down movement.
 
+Select all selects the full Markdown source range, including hidden markers and structural syntax. It should behave like a normal plain-text editor selection for replacement, copy, and subsequent keyboard selection changes.
+
 ## Test Scenarios
 
 Projection tests should focus on behavior that can change editing meaning:
@@ -117,6 +119,7 @@ Projection tests should focus on behavior that can change editing meaning:
 - A selection starting outside an inline span includes crossed marker text.
 - A selection starting inside inline content excludes hidden markers unless the user explicitly extends into them.
 - Double-clicking a word selects the word source range with the same boundary rules as keyboard word movement.
+- Select all covers the full Markdown source, including currently hidden syntax markers.
 - Hidden inline content boundaries map to editable marker edges.
 - Heading recognition starts only after the ATX hash run is followed by whitespace.
 - Inactive recognized headings hide the ATX marker and render content as preview text.

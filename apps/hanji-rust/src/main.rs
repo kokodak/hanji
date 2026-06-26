@@ -21,10 +21,11 @@ use hanji_storage::DocumentSession;
 
 use editing::{
     MarkerHitMode, blockquote_newline_edit_for_line, bounds_contains_point,
-    drag_distance_exceeds_threshold, empty_marker_pair_delete_backward_edit,
-    extension_points_for_selection, horizontal_offset_within_line, line_marker_hit_offset,
-    list_newline_edit_for_line, marker_autocomplete_edit, marker_skip_offset,
-    selection_is_reversed, selection_range_from_anchor_and_head, task_marker_state_char_range,
+    document_selection_range, drag_distance_exceeds_threshold,
+    empty_marker_pair_delete_backward_edit, extension_points_for_selection,
+    horizontal_offset_within_line, line_marker_hit_offset, list_newline_edit_for_line,
+    marker_autocomplete_edit, marker_skip_offset, selection_is_reversed,
+    selection_range_from_anchor_and_head, task_marker_state_char_range,
 };
 use encoding::byte_offset_to_utf16;
 use external::external_url_command;
@@ -61,6 +62,7 @@ actions!(
         ToggleStrong,
         ToggleItalic,
         ToggleCode,
+        SelectAll,
         Undo,
         Redo,
         Save,
@@ -332,6 +334,15 @@ impl Hanji {
             window,
             cx,
         );
+    }
+
+    fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        self.is_selecting = false;
+        self.selection_drag_origin = None;
+        let range = document_selection_range(self.session.document().len());
+
+        self.select_from_anchor_to(range.start, range.end, None, cx);
     }
 
     fn apply_markdown_command(
@@ -1094,6 +1105,7 @@ impl Render for Hanji {
             .on_action(cx.listener(Self::toggle_strong))
             .on_action(cx.listener(Self::toggle_italic))
             .on_action(cx.listener(Self::toggle_code))
+            .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
             .on_action(cx.listener(Self::save))
@@ -1182,6 +1194,7 @@ fn main() {
             KeyBinding::new("cmd-b", ToggleStrong, None),
             KeyBinding::new("cmd-i", ToggleItalic, None),
             KeyBinding::new("cmd-e", ToggleCode, None),
+            KeyBinding::new("cmd-a", SelectAll, None),
             KeyBinding::new("cmd-z", Undo, None),
             KeyBinding::new("cmd-shift-z", Redo, None),
             KeyBinding::new("cmd-s", Save, None),
