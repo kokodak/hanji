@@ -2,7 +2,7 @@ use hanji_core::{Document, TextRange};
 
 use crate::{
     MarkdownCodeBlockLine, MarkdownLine, blockquote_content_start, classify_line,
-    heading_content_start, list_item_content_start,
+    heading_content_start, horizontal_rule_marker_range, list_item_content_start,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +20,7 @@ impl<'a> MarkdownProjection<'a> {
 pub enum ProjectedSegmentKind {
     Text,
     HeadingMarker,
+    HorizontalRuleMarker,
     BlockquoteMarker,
     ListMarker,
     EscapeMarker,
@@ -136,6 +137,10 @@ impl<'a> ProjectedLine<'a> {
 
         if matches!(self.kind, MarkdownLine::CodeBlock { .. }) {
             return self.code_block_visible_segments_revealing_source_in(reveal_range);
+        }
+
+        if matches!(self.kind, MarkdownLine::HorizontalRule) {
+            return self.horizontal_rule_visible_segments_revealing_source_in(reveal_range);
         }
 
         let mut segments = Vec::new();
@@ -260,6 +265,10 @@ impl<'a> ProjectedLine<'a> {
 
         if matches!(self.kind, MarkdownLine::CodeBlock { .. }) {
             return self.code_block_source_visible_segments();
+        }
+
+        if matches!(self.kind, MarkdownLine::HorizontalRule) {
+            return self.horizontal_rule_source_visible_segments();
         }
 
         let mut segments = Vec::new();
@@ -399,6 +408,60 @@ impl<'a> ProjectedLine<'a> {
         }
 
         push_inline_source_segments(&mut segments, self.source, self.range.start, &self.inlines);
+
+        segments
+    }
+
+    fn horizontal_rule_visible_segments_revealing_source_in(
+        &self,
+        reveal_range: Option<TextRange>,
+    ) -> Vec<ProjectedVisibleSegment<'a>> {
+        if !reveal_range.is_some_and(|range| should_reveal_line_source(self.range, range)) {
+            return Vec::new();
+        }
+
+        self.horizontal_rule_source_visible_segments()
+            .into_iter()
+            .scan(0, |visible_start, segment| {
+                let start = *visible_start;
+                *visible_start += segment.source.len();
+                Some(ProjectedVisibleSegment {
+                    visible_range: TextRange::new(start, *visible_start),
+                    source_range: segment.range,
+                    source_outer_range: segment.range,
+                    source: segment.source,
+                    kind: segment.kind,
+                })
+            })
+            .collect()
+    }
+
+    fn horizontal_rule_source_visible_segments(&self) -> Vec<ProjectedSegment<'a>> {
+        let mut segments = Vec::new();
+
+        if let Some(marker_range) = self.marker_range {
+            push_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                TextRange::new(self.range.start, marker_range.start),
+                ProjectedSegmentKind::Text,
+            );
+            push_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                marker_range,
+                ProjectedSegmentKind::HorizontalRuleMarker,
+            );
+            push_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                TextRange::new(marker_range.end, self.range.end),
+                ProjectedSegmentKind::Text,
+            );
+        }
 
         segments
     }
@@ -763,12 +826,15 @@ fn project_normal_line<'a>(range: TextRange, source: &'a str) -> ProjectedLine<'
     let kind = classify_line(source);
     let content_start = match kind {
         MarkdownLine::Heading { .. } => heading_content_start(source).unwrap_or(0),
+        MarkdownLine::HorizontalRule => 0,
         MarkdownLine::Blockquote => blockquote_content_start(source).unwrap_or(0),
         MarkdownLine::ListItem { .. } => list_item_content_start(source).unwrap_or(0),
         MarkdownLine::Blank | MarkdownLine::Paragraph | MarkdownLine::CodeBlock { .. } => 0,
     };
     let marker_range = match kind {
         MarkdownLine::Heading { .. } => heading_marker_range(source, range.start),
+        MarkdownLine::HorizontalRule => horizontal_rule_marker_range(source)
+            .map(|marker| TextRange::new(range.start + marker.start, range.start + marker.end)),
         MarkdownLine::Blockquote | MarkdownLine::ListItem { .. } => {
             (content_start > 0).then_some(TextRange::new(range.start, range.start + content_start))
         }
@@ -781,7 +847,11 @@ fn project_normal_line<'a>(range: TextRange, source: &'a str) -> ProjectedLine<'
         code_block_range: None,
         source,
         kind,
-        inlines: project_inlines(&source[content_start..], range.start + content_start),
+        inlines: if matches!(kind, MarkdownLine::HorizontalRule) {
+            Vec::new()
+        } else {
+            project_inlines(&source[content_start..], range.start + content_start)
+        },
     }
 }
 
@@ -805,6 +875,7 @@ fn project_code_block_line<'a>(
 fn block_marker_kind(kind: MarkdownLine) -> ProjectedSegmentKind {
     match kind {
         MarkdownLine::Heading { .. } => ProjectedSegmentKind::HeadingMarker,
+        MarkdownLine::HorizontalRule => ProjectedSegmentKind::HorizontalRuleMarker,
         MarkdownLine::Blockquote => ProjectedSegmentKind::BlockquoteMarker,
         MarkdownLine::ListItem { .. } => ProjectedSegmentKind::ListMarker,
         MarkdownLine::Blank | MarkdownLine::Paragraph | MarkdownLine::CodeBlock { .. } => {
@@ -1903,6 +1974,73 @@ mod tests {
         assert_eq!(lines[3].source, "Notes");
         assert_eq!(lines[3].kind, MarkdownLine::Paragraph);
         assert_eq!(lines[3].inlines.len(), 1);
+    }
+
+    #[test]
+    fn projects_horizontal_rule_lines() {
+        let document = Document::new("Before\n---\nAfter");
+        let projection = project_document(&document);
+        let lines = projection.lines();
+
+        assert_eq!(lines[1].range, TextRange::new(7, 10));
+        assert_eq!(lines[1].source, "---");
+        assert_eq!(lines[1].kind, MarkdownLine::HorizontalRule);
+        assert_eq!(lines[1].marker_range, Some(TextRange::new(7, 10)));
+        assert!(lines[1].inlines.is_empty());
+    }
+
+    #[test]
+    fn hides_horizontal_rule_source_in_preview() {
+        let document = Document::new("  ---  ");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(line.visible_text(), "");
+        assert_eq!(line.visible_len(), 0);
+        assert_eq!(
+            line.source_visible_segments(),
+            vec![
+                ProjectedSegment {
+                    range: TextRange::new(0, 2),
+                    source: "  ",
+                    kind: ProjectedSegmentKind::Text,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(2, 5),
+                    source: "---",
+                    kind: ProjectedSegmentKind::HorizontalRuleMarker,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(5, 7),
+                    source: "  ",
+                    kind: ProjectedSegmentKind::Text,
+                },
+            ]
+        );
+        assert_eq!(line.visible_to_source_caret_offset(0), 7);
+        assert_eq!(line.source_to_visible_offset(2), 0);
+    }
+
+    #[test]
+    fn caret_inside_horizontal_rule_reveals_source() {
+        let document = Document::new("---");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+
+        assert_eq!(
+            line.visible_text_revealing_source_in(Some(TextRange::caret(1))),
+            "---"
+        );
+        assert_eq!(
+            line.visible_segments_revealing_source_in(Some(TextRange::caret(1))),
+            vec![ProjectedVisibleSegment {
+                visible_range: TextRange::new(0, 3),
+                source_range: TextRange::new(0, 3),
+                source_outer_range: TextRange::new(0, 3),
+                source: "---",
+                kind: ProjectedSegmentKind::HorizontalRuleMarker,
+            }]
+        );
     }
 
     #[test]

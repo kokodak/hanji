@@ -9,7 +9,7 @@ pub use command::{
 pub use line::{
     MarkdownCodeBlockLine, MarkdownLine, MarkdownListItem, MarkdownListMarker, MarkdownTaskState,
     OrderedListDelimiter, blockquote_content_start, classify_line, first_heading,
-    heading_content_start, list_item, list_item_content_start,
+    heading_content_start, horizontal_rule_marker_range, list_item, list_item_content_start,
 };
 pub use projection::{
     MarkdownInline, MarkdownLinkRanges, MarkdownMarkerRanges, MarkdownProjection, ProjectedInline,

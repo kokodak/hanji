@@ -30,6 +30,9 @@ const MARKDOWN_MARKER_COLOR: u32 = 0x238636;
 const CODE_BLOCK_BACKGROUND_COLOR: u32 = 0x25231f14;
 const CODE_BLOCK_CORNER_RADIUS: f32 = 5.0;
 const CODE_BLOCK_TEXT_INSET: f32 = 12.0;
+const HORIZONTAL_RULE_COLOR: u32 = 0xd8d3c7;
+const HORIZONTAL_RULE_INSET: f32 = 4.0;
+const HORIZONTAL_RULE_HEIGHT: f32 = 1.0;
 
 pub(crate) struct EditorElement {
     pub(crate) editor: Entity<Hanji>,
@@ -42,6 +45,7 @@ pub(crate) struct EditorPrepaintState {
     task_marker_hitboxes: Vec<TaskMarkerHitbox>,
     link_hitboxes: Vec<LinkHitbox>,
     code_backgrounds: Vec<PaintQuad>,
+    horizontal_rules: Vec<PaintQuad>,
     cursor: Option<PaintQuad>,
     selections: Vec<PaintQuad>,
 }
@@ -185,6 +189,7 @@ impl Element for EditorElement {
         let mut task_marker_hitboxes = Vec::new();
         let mut link_hitboxes = Vec::new();
         let mut code_backgrounds = Vec::new();
+        let mut horizontal_rules = Vec::new();
         let mut code_block_background_runs = Vec::new();
         let mut code_block_background_run = None;
         let mut top = 0.0;
@@ -266,6 +271,11 @@ impl Element for EditorElement {
                 }
                 list_markers.push(marker_snapshot);
             }
+            if matches!(line.kind, MarkdownLine::HorizontalRule)
+                && !horizontal_rule_source_is_revealed(&visible_segments)
+            {
+                horizontal_rules.push(horizontal_rule_quad(container_bounds));
+            }
             code_backgrounds.extend(code_background_quads(
                 &visible_segments,
                 &layout,
@@ -321,6 +331,7 @@ impl Element for EditorElement {
             task_marker_hitboxes,
             link_hitboxes,
             code_backgrounds,
+            horizontal_rules,
             cursor,
             selections,
         }
@@ -353,6 +364,10 @@ impl Element for EditorElement {
 
         for background in prepaint.code_backgrounds.drain(..) {
             window.paint_quad(background);
+        }
+
+        for rule in prepaint.horizontal_rules.drain(..) {
+            window.paint_quad(rule);
         }
 
         for selection in prepaint.selections.drain(..) {
@@ -401,6 +416,29 @@ fn line_marker_is_revealed(segments: &[ProjectedVisibleSegment<'_>]) -> bool {
     segments
         .iter()
         .any(|segment| matches!(segment.kind, ProjectedSegmentKind::ListMarker))
+}
+
+fn horizontal_rule_source_is_revealed(segments: &[ProjectedVisibleSegment<'_>]) -> bool {
+    segments
+        .iter()
+        .any(|segment| matches!(segment.kind, ProjectedSegmentKind::HorizontalRuleMarker))
+}
+
+fn horizontal_rule_quad(bounds: Bounds<Pixels>) -> PaintQuad {
+    let line_height = bounds.bottom() - bounds.top();
+    let rule_height = px(HORIZONTAL_RULE_HEIGHT);
+    let rule_top = bounds.top() + (line_height - rule_height) / 2.0;
+
+    fill(
+        Bounds::new(
+            point(bounds.left() + px(HORIZONTAL_RULE_INSET), rule_top),
+            size(
+                (bounds.right() - bounds.left() - px(HORIZONTAL_RULE_INSET * 2.0)).max(px(0.0)),
+                rule_height,
+            ),
+        ),
+        rgb(HORIZONTAL_RULE_COLOR),
+    )
 }
 
 fn list_marker_snapshot(
@@ -677,6 +715,7 @@ fn line_text_runs(
             ProjectedSegmentKind::LinkDestination => InlineRunStyle::Plain,
             ProjectedSegmentKind::EscapeMarker => InlineRunStyle::EscapeMarker,
             ProjectedSegmentKind::HeadingMarker
+            | ProjectedSegmentKind::HorizontalRuleMarker
             | ProjectedSegmentKind::BlockquoteMarker
             | ProjectedSegmentKind::ListMarker
             | ProjectedSegmentKind::StrongMarker
@@ -794,6 +833,7 @@ fn code_background_ranges(segments: &[ProjectedVisibleSegment<'_>]) -> Vec<TextR
             }
             ProjectedSegmentKind::Text
             | ProjectedSegmentKind::HeadingMarker
+            | ProjectedSegmentKind::HorizontalRuleMarker
             | ProjectedSegmentKind::BlockquoteMarker
             | ProjectedSegmentKind::ListMarker
             | ProjectedSegmentKind::EscapeMarker
@@ -1046,6 +1086,15 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
             is_checked_task: false,
             text_indent: 18.0,
         },
+        MarkdownLine::HorizontalRule => LinePresentation {
+            font_size: FONT_SIZE,
+            line_height: LINE_HEIGHT,
+            is_heading: false,
+            is_blockquote: false,
+            is_code_block: false,
+            is_checked_task: false,
+            text_indent: 0.0,
+        },
         MarkdownLine::ListItem { task, .. } => LinePresentation {
             font_size: FONT_SIZE,
             line_height: LINE_HEIGHT,
@@ -1220,6 +1269,35 @@ mod tests {
                 .all(|segment| matches!(segment.kind, ProjectedSegmentKind::CodeBlockContent))
         );
         assert!(code_background_ranges(&segments).is_empty());
+    }
+
+    #[test]
+    fn horizontal_rule_lines_use_plain_line_presentation() {
+        let presentation = line_presentation(MarkdownLine::HorizontalRule);
+
+        assert!(!presentation.is_heading);
+        assert!(!presentation.is_blockquote);
+        assert!(!presentation.is_code_block);
+        assert!(!presentation.is_checked_task);
+        assert_eq!(presentation.font_size, FONT_SIZE);
+        assert_eq!(presentation.line_height, LINE_HEIGHT);
+        assert_eq!(presentation.text_indent, 0.0);
+    }
+
+    #[test]
+    fn revealed_horizontal_rule_marker_uses_green_syntax_color() {
+        let document = Document::new("---");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let segments = line.visible_segments_revealing_source_in(Some(TextRange::caret(1)));
+        let runs = line_text_runs(
+            &segments,
+            line_presentation(line.kind),
+            &TextStyle::default(),
+        );
+
+        assert_eq!(segments[0].kind, ProjectedSegmentKind::HorizontalRuleMarker);
+        assert_eq!(runs[0].color, rgb(MARKDOWN_MARKER_COLOR).into());
     }
 
     #[test]

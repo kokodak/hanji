@@ -5,6 +5,7 @@ pub enum MarkdownLine {
     Heading {
         level: u8,
     },
+    HorizontalRule,
     Blockquote,
     CodeBlock {
         role: MarkdownCodeBlockLine,
@@ -74,6 +75,10 @@ pub fn classify_line(line: &str) -> MarkdownLine {
         return MarkdownLine::Blockquote;
     }
 
+    if horizontal_rule_marker_range(line).is_some() {
+        return MarkdownLine::HorizontalRule;
+    }
+
     if let Some(list_item) = list_item(line) {
         return MarkdownLine::ListItem {
             marker: list_item.marker,
@@ -104,6 +109,28 @@ pub fn blockquote_content_start(line: &str) -> Option<usize> {
 
 pub fn heading_content_start(line: &str) -> Option<usize> {
     heading_level_and_content_start(line).map(|(_, content_start)| content_start)
+}
+
+pub fn horizontal_rule_marker_range(line: &str) -> Option<std::ops::Range<usize>> {
+    let indent = line
+        .bytes()
+        .take_while(|byte| *byte == b' ')
+        .take(4)
+        .count();
+    if indent >= 4 {
+        return None;
+    }
+
+    let content = &line[indent..];
+    let marker_len = content.bytes().take_while(|byte| *byte == b'-').count();
+    if marker_len < 3 {
+        return None;
+    }
+
+    content[marker_len..]
+        .bytes()
+        .all(|byte| matches!(byte, b' ' | b'\t'))
+        .then_some(indent..indent + marker_len)
 }
 
 pub fn list_item_content_start(line: &str) -> Option<usize> {
@@ -286,6 +313,24 @@ mod tests {
         assert_eq!(classify_line("# "), MarkdownLine::Heading { level: 1 });
         assert_eq!(classify_line("#"), MarkdownLine::Paragraph);
         assert_eq!(classify_line("###"), MarkdownLine::Paragraph);
+    }
+
+    #[test]
+    fn classifies_horizontal_rules() {
+        assert_eq!(classify_line("---"), MarkdownLine::HorizontalRule);
+        assert_eq!(classify_line("   ---  "), MarkdownLine::HorizontalRule);
+        assert_eq!(classify_line("----"), MarkdownLine::HorizontalRule);
+        assert_eq!(classify_line("--"), MarkdownLine::Paragraph);
+        assert_eq!(classify_line("--- title"), MarkdownLine::Paragraph);
+        assert_eq!(classify_line("    ---"), MarkdownLine::Paragraph);
+    }
+
+    #[test]
+    fn finds_horizontal_rule_marker_range() {
+        assert_eq!(horizontal_rule_marker_range("---"), Some(0..3));
+        assert_eq!(horizontal_rule_marker_range("  ----  "), Some(2..6));
+        assert_eq!(horizontal_rule_marker_range("--"), None);
+        assert_eq!(horizontal_rule_marker_range("--- title"), None);
     }
 
     #[test]
