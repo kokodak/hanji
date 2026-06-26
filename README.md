@@ -1,4 +1,4 @@
-# Han-ji
+# Hanji <sub><sub>한지 韓紙</sub></sub>
 
 Capture the thought.
 
