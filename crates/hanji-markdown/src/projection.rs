@@ -28,6 +28,8 @@ pub enum ProjectedSegmentKind {
     StrongContent,
     EmphasisMarker,
     EmphasisContent,
+    StrikethroughMarker,
+    StrikethroughContent,
     CodeMarker,
     CodeContent,
     CodeBlockFence,
@@ -65,6 +67,7 @@ pub enum MarkdownInline {
     Escape { marker: TextRange },
     Strong { markers: MarkdownMarkerRanges },
     Emphasis { markers: MarkdownMarkerRanges },
+    Strikethrough { markers: MarkdownMarkerRanges },
     Code { markers: MarkdownMarkerRanges },
     Link { markers: MarkdownLinkRanges },
 }
@@ -1115,6 +1118,29 @@ fn push_inline_source_segments<'a>(
                     ProjectedSegmentKind::EmphasisMarker,
                 );
             }
+            MarkdownInline::Strikethrough { markers } => {
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    markers.opening,
+                    ProjectedSegmentKind::StrikethroughMarker,
+                );
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    inline.content_range,
+                    ProjectedSegmentKind::StrikethroughContent,
+                );
+                push_segment(
+                    segments,
+                    line_source,
+                    line_start,
+                    markers.closing,
+                    ProjectedSegmentKind::StrikethroughMarker,
+                );
+            }
             MarkdownInline::Code { markers } => {
                 push_segment(
                     segments,
@@ -1220,6 +1246,7 @@ fn push_hidden_visible_segment<'a>(
         MarkdownInline::Escape { .. } => ProjectedSegmentKind::Text,
         MarkdownInline::Strong { .. } => ProjectedSegmentKind::StrongContent,
         MarkdownInline::Emphasis { .. } => ProjectedSegmentKind::EmphasisContent,
+        MarkdownInline::Strikethrough { .. } => ProjectedSegmentKind::StrikethroughContent,
         MarkdownInline::Code { .. } => ProjectedSegmentKind::CodeContent,
         MarkdownInline::Link { .. } => ProjectedSegmentKind::LinkText,
     };
@@ -1330,6 +1357,35 @@ fn push_source_visible_segments<'a>(
                 markers.closing,
                 markers.closing,
                 ProjectedSegmentKind::EmphasisMarker,
+            );
+        }
+        MarkdownInline::Strikethrough { markers } => {
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                markers.opening,
+                markers.opening,
+                ProjectedSegmentKind::StrikethroughMarker,
+            );
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                inline.content_range,
+                inline.content_range,
+                ProjectedSegmentKind::StrikethroughContent,
+            );
+            push_visible_segment(
+                segments,
+                line_source,
+                line_start,
+                visible_start,
+                markers.closing,
+                markers.closing,
+                ProjectedSegmentKind::StrikethroughMarker,
             );
         }
         MarkdownInline::Code { markers } => {
@@ -1481,6 +1537,7 @@ fn push_text_with_projected_inlines<'a>(
 enum InlineSpan {
     Escape(EscapeSpan),
     Emphasis(EmphasisPair),
+    Strikethrough(StrikethroughPair),
     Link(LinkSpan),
 }
 
@@ -1489,6 +1546,7 @@ impl InlineSpan {
         match self {
             Self::Escape(span) => span.start,
             Self::Emphasis(pair) => pair.opening_start,
+            Self::Strikethrough(pair) => pair.opening_start,
             Self::Link(span) => span.opening_start,
         }
     }
@@ -1497,6 +1555,7 @@ impl InlineSpan {
         match self {
             Self::Escape(span) => span.end,
             Self::Emphasis(pair) => pair.closing_start + pair.kind.marker_len(),
+            Self::Strikethrough(pair) => pair.closing_start + STRIKETHROUGH_MARKER_LEN,
             Self::Link(span) => span.closing_start + 1,
         }
     }
@@ -1505,10 +1564,13 @@ impl InlineSpan {
         match self {
             Self::Escape(_) => 0,
             Self::Link(_) => 1,
-            Self::Emphasis(_) => 2,
+            Self::Strikethrough(_) => 2,
+            Self::Emphasis(_) => 3,
         }
     }
 }
+
+const STRIKETHROUGH_MARKER_LEN: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct EscapeSpan {
@@ -1519,6 +1581,12 @@ struct EscapeSpan {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct EmphasisPair {
     kind: EmphasisDelimiterKind,
+    opening_start: usize,
+    closing_start: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StrikethroughPair {
     opening_start: usize,
     closing_start: usize,
 }
@@ -1557,6 +1625,11 @@ fn inline_spans(source: &str, start: usize, end: usize) -> Vec<InlineSpan> {
         link_spans(source, start, end)
             .into_iter()
             .map(InlineSpan::Link),
+    );
+    candidates.extend(
+        strikethrough_pairs(source, start, end)
+            .into_iter()
+            .map(InlineSpan::Strikethrough),
     );
     candidates.extend(
         emphasis_pairs(source, start, end)
@@ -1664,6 +1737,72 @@ fn find_link_label_end(source: &str, search_start: usize, end: usize) -> Option<
 
 fn find_link_destination_end(source: &str, search_start: usize, end: usize) -> Option<usize> {
     find_unescaped_byte(source, b')', search_start, end)
+}
+
+fn strikethrough_pairs(source: &str, start: usize, end: usize) -> Vec<StrikethroughPair> {
+    let mut pairs = Vec::new();
+    let mut pending_strikethrough = None;
+    let mut search_start = start;
+
+    while let Some(marker_start) = find_exact_strikethrough_marker(source, search_start, end) {
+        let can_close = can_close_strikethrough(source, marker_start);
+        let can_open = can_open_strikethrough(source, marker_start, end);
+
+        if let Some(opening_start) = pending_strikethrough
+            && can_close
+            && opening_start + STRIKETHROUGH_MARKER_LEN < marker_start
+        {
+            pairs.push(StrikethroughPair {
+                opening_start,
+                closing_start: marker_start,
+            });
+            pending_strikethrough = None;
+        } else if can_open {
+            pending_strikethrough = Some(marker_start);
+        }
+
+        search_start = marker_start + STRIKETHROUGH_MARKER_LEN;
+    }
+
+    pairs
+}
+
+fn find_exact_strikethrough_marker(source: &str, search_start: usize, end: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut cursor = search_start;
+
+    while cursor < end {
+        if bytes[cursor] == b'~' {
+            if is_escaped(source, cursor) {
+                cursor += 1;
+                continue;
+            }
+
+            let marker_start = cursor;
+
+            while cursor < end && bytes[cursor] == b'~' {
+                cursor += 1;
+            }
+
+            if cursor - marker_start == STRIKETHROUGH_MARKER_LEN {
+                return Some(marker_start);
+            }
+        } else {
+            cursor += 1;
+        }
+    }
+
+    None
+}
+
+fn can_open_strikethrough(source: &str, marker_start: usize, end: usize) -> bool {
+    next_char(source, marker_start + STRIKETHROUGH_MARKER_LEN, end)
+        .is_some_and(|character| !character.is_whitespace() && !matches!(character, '~' | '`'))
+}
+
+fn can_close_strikethrough(source: &str, marker_start: usize) -> bool {
+    previous_char(source, marker_start)
+        .is_some_and(|character| !character.is_whitespace() && !matches!(character, '~' | '`'))
 }
 
 fn emphasis_pairs(source: &str, start: usize, end: usize) -> Vec<EmphasisPair> {
@@ -1778,6 +1917,16 @@ fn push_projected_inline<'a>(
                 );
             }
         },
+        InlineSpan::Strikethrough(pair) => {
+            push_strikethrough_inline(
+                inlines,
+                source,
+                source_start,
+                pair.opening_start,
+                pair.opening_start + STRIKETHROUGH_MARKER_LEN,
+                pair.closing_start,
+            );
+        }
         InlineSpan::Link(span) => {
             push_link_inline(inlines, source, source_start, span);
         }
@@ -1913,6 +2062,30 @@ fn push_strong_inline<'a>(
         source: &source[opening_start..closing_end],
         content: &source[content_start..closing_start],
         kind: MarkdownInline::Strong {
+            markers: MarkdownMarkerRanges {
+                opening: TextRange::new(source_start + opening_start, source_start + content_start),
+                closing: TextRange::new(source_start + closing_start, source_start + closing_end),
+            },
+        },
+    });
+}
+
+fn push_strikethrough_inline<'a>(
+    inlines: &mut Vec<ProjectedInline<'a>>,
+    source: &'a str,
+    source_start: usize,
+    opening_start: usize,
+    content_start: usize,
+    closing_start: usize,
+) {
+    let closing_end = closing_start + STRIKETHROUGH_MARKER_LEN;
+
+    inlines.push(ProjectedInline {
+        source_range: TextRange::new(source_start + opening_start, source_start + closing_end),
+        content_range: TextRange::new(source_start + content_start, source_start + closing_start),
+        source: &source[opening_start..closing_end],
+        content: &source[content_start..closing_start],
+        kind: MarkdownInline::Strikethrough {
             markers: MarkdownMarkerRanges {
                 opening: TextRange::new(source_start + opening_start, source_start + content_start),
                 closing: TextRange::new(source_start + closing_start, source_start + closing_end),
@@ -2749,13 +2922,79 @@ mod tests {
     }
 
     #[test]
+    fn projects_strikethrough_inline_spans_with_source_ranges() {
+        let document = Document::new("This is ~~gone~~ text");
+        let projection = project_document(&document);
+        let inlines = &projection.lines()[0].inlines;
+
+        assert_eq!(inlines.len(), 3);
+        assert_eq!(
+            inlines[1],
+            ProjectedInline {
+                source_range: TextRange::new(8, 16),
+                content_range: TextRange::new(10, 14),
+                source: "~~gone~~",
+                content: "gone",
+                kind: MarkdownInline::Strikethrough {
+                    markers: MarkdownMarkerRanges {
+                        opening: TextRange::new(8, 10),
+                        closing: TextRange::new(14, 16),
+                    },
+                },
+            }
+        );
+        assert_eq!(projection.lines()[0].visible_text(), "This is gone text");
+    }
+
+    #[test]
+    fn exposes_source_visible_segments_for_strikethrough_spans() {
+        let document = Document::new("This is ~~gone~~ text");
+        let projection = project_document(&document);
+        let segments = projection.lines()[0].source_visible_segments();
+
+        assert_eq!(
+            segments,
+            vec![
+                ProjectedSegment {
+                    range: TextRange::new(0, 8),
+                    source: "This is ",
+                    kind: ProjectedSegmentKind::Text,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(8, 10),
+                    source: "~~",
+                    kind: ProjectedSegmentKind::StrikethroughMarker,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(10, 14),
+                    source: "gone",
+                    kind: ProjectedSegmentKind::StrikethroughContent,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(14, 16),
+                    source: "~~",
+                    kind: ProjectedSegmentKind::StrikethroughMarker,
+                },
+                ProjectedSegment {
+                    range: TextRange::new(16, 21),
+                    source: " text",
+                    kind: ProjectedSegmentKind::Text,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn projects_visible_text_without_markers() {
-        let document = Document::new("This is *soft*, **bold**, and `code`");
+        let document = Document::new("This is *soft*, **bold**, ~~gone~~, and `code`");
         let projection = project_document(&document);
         let line = &projection.lines()[0];
 
-        assert_eq!(line.visible_text(), "This is soft, bold, and code");
-        assert_eq!(line.visible_len(), "This is soft, bold, and code".len());
+        assert_eq!(line.visible_text(), "This is soft, bold, gone, and code");
+        assert_eq!(
+            line.visible_len(),
+            "This is soft, bold, gone, and code".len()
+        );
     }
 
     #[test]
@@ -3341,6 +3580,17 @@ mod tests {
     }
 
     #[test]
+    fn does_not_project_strikethrough_from_longer_tilde_runs() {
+        let document = Document::new("This is ~~~not stable~~~");
+        let projection = project_document(&document);
+        let inlines = &projection.lines()[0].inlines;
+
+        assert_eq!(inlines.len(), 1);
+        assert_eq!(inlines[0].source, "This is ~~~not stable~~~");
+        assert_eq!(inlines[0].kind, MarkdownInline::Text);
+    }
+
+    #[test]
     fn projects_emphasis_before_strong_without_style_leakage() {
         let document = Document::new("This is *abc* before **bold**");
         let projection = project_document(&document);
@@ -3561,6 +3811,19 @@ mod tests {
 
         assert_eq!(inlines.len(), 3);
         assert_eq!(inlines[1].content, "**code**");
+        assert!(matches!(inlines[1].kind, MarkdownInline::Code { .. }));
+    }
+
+    #[test]
+    fn does_not_project_strikethrough_inside_inline_code() {
+        let document = Document::new("Use `~~code~~` here");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let inlines = &line.inlines;
+
+        assert_eq!(line.visible_text(), "Use ~~code~~ here");
+        assert_eq!(inlines.len(), 3);
+        assert_eq!(inlines[1].content, "~~code~~");
         assert!(matches!(inlines[1].kind, MarkdownInline::Code { .. }));
     }
 }

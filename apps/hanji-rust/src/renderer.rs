@@ -1,8 +1,8 @@
 use gpui::{
     App, BorderStyle, Bounds, Element, ElementId, ElementInputHandler, Entity, FontWeight,
     GlobalElementId, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels, ShapedLine,
-    SharedString, Style, TextRun, TextStyle, UnderlineStyle, Window, fill, point, px, quad,
-    relative, rgb, rgba, size,
+    SharedString, StrikethroughStyle, Style, TextRun, TextStyle, UnderlineStyle, Window, fill,
+    point, px, quad, relative, rgb, rgba, size,
 };
 use hanji_core::TextRange;
 use hanji_markdown::{
@@ -709,6 +709,7 @@ fn line_text_runs(
         let style = match segment.kind {
             ProjectedSegmentKind::StrongContent => InlineRunStyle::Strong,
             ProjectedSegmentKind::EmphasisContent => InlineRunStyle::Emphasis,
+            ProjectedSegmentKind::StrikethroughContent => InlineRunStyle::Strikethrough,
             ProjectedSegmentKind::CodeContent => InlineRunStyle::Code,
             ProjectedSegmentKind::CodeBlockContent => InlineRunStyle::CodeBlock,
             ProjectedSegmentKind::LinkText => InlineRunStyle::Link,
@@ -720,6 +721,7 @@ fn line_text_runs(
             | ProjectedSegmentKind::ListMarker
             | ProjectedSegmentKind::StrongMarker
             | ProjectedSegmentKind::EmphasisMarker
+            | ProjectedSegmentKind::StrikethroughMarker
             | ProjectedSegmentKind::CodeMarker
             | ProjectedSegmentKind::CodeBlockFence
             | ProjectedSegmentKind::LinkMarker => InlineRunStyle::Marker,
@@ -744,6 +746,7 @@ enum InlineRunStyle {
     Marker,
     Strong,
     Emphasis,
+    Strikethrough,
     Code,
     CodeBlock,
     Link,
@@ -791,9 +794,15 @@ fn push_text_run(
         InlineRunStyle::Link => Some(link_underline()),
         InlineRunStyle::Plain
         | InlineRunStyle::Marker
+        | InlineRunStyle::Strikethrough
         | InlineRunStyle::Code
         | InlineRunStyle::CodeBlock
         | InlineRunStyle::EscapeMarker => None,
+    };
+    let strikethrough = if matches!(style, InlineRunStyle::Strikethrough) {
+        Some(strikethrough_style())
+    } else {
+        None
     };
 
     runs.push(TextRun {
@@ -802,7 +811,7 @@ fn push_text_run(
         color,
         background_color: None,
         underline,
-        strikethrough: None,
+        strikethrough,
     });
 }
 
@@ -824,6 +833,13 @@ fn link_underline() -> UnderlineStyle {
     }
 }
 
+fn strikethrough_style() -> StrikethroughStyle {
+    StrikethroughStyle {
+        thickness: px(1.0),
+        color: Some(rgb(0x25231f).into()),
+    }
+}
+
 fn code_background_ranges(segments: &[ProjectedVisibleSegment<'_>]) -> Vec<TextRange> {
     segments
         .iter()
@@ -841,6 +857,8 @@ fn code_background_ranges(segments: &[ProjectedVisibleSegment<'_>]) -> Vec<TextR
             | ProjectedSegmentKind::StrongContent
             | ProjectedSegmentKind::EmphasisMarker
             | ProjectedSegmentKind::EmphasisContent
+            | ProjectedSegmentKind::StrikethroughMarker
+            | ProjectedSegmentKind::StrikethroughContent
             | ProjectedSegmentKind::CodeBlockFence
             | ProjectedSegmentKind::CodeBlockContent
             | ProjectedSegmentKind::LinkMarker
@@ -1493,6 +1511,25 @@ mod tests {
 
         assert_eq!(link_run.color, text_style.color);
         assert!(link_run.underline.is_some());
+    }
+
+    #[test]
+    fn strikethrough_content_uses_line_through() {
+        let document = Document::new("Remove ~~this~~ text");
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let text_style = TextStyle::default();
+        let segments = line.visible_segments();
+        let runs = line_text_runs(&segments, line_presentation(line.kind), &text_style);
+        let strike_run = segments
+            .iter()
+            .zip(runs.iter())
+            .find(|(segment, _)| matches!(segment.kind, ProjectedSegmentKind::StrikethroughContent))
+            .map(|(_, run)| run)
+            .expect("strikethrough text run");
+
+        assert_eq!(strike_run.color, text_style.color);
+        assert!(strike_run.strikethrough.is_some());
     }
 
     #[test]
