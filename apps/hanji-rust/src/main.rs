@@ -33,6 +33,14 @@ use renderer::{EditorElement, FONT_SIZE, LINE_HEIGHT, LinkHitbox, TaskMarkerHitb
 use session::open_initial_session;
 use snapshot::LineSnapshot;
 
+fn editor_cursor_style(is_hovering_link: bool) -> CursorStyle {
+    if is_hovering_link {
+        CursorStyle::PointingHand
+    } else {
+        CursorStyle::IBeam
+    }
+}
+
 actions!(
     hanji,
     [
@@ -82,6 +90,7 @@ struct Hanji {
     last_lines: Vec<LineSnapshot>,
     last_task_markers: Vec<TaskMarkerHitbox>,
     last_link_hitboxes: Vec<LinkHitbox>,
+    hovered_link_url: Option<String>,
     preferred_column: Option<usize>,
     selection_anchor: Option<usize>,
     selection_head: Option<usize>,
@@ -486,6 +495,7 @@ impl Hanji {
     ) {
         window.focus(&self.focus_handle);
         self.marked_range = None;
+        self.update_hovered_link_at_position(event.position, cx);
         if !event.modifiers.shift
             && let Some(task_marker) = self.task_marker_at_position(event.position)
             && self.toggle_task_marker(task_marker, window, cx)
@@ -522,8 +532,11 @@ impl Hanji {
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
         if event.pressed_button != Some(MouseButton::Left) {
+            self.update_hovered_link_at_position(event.position, cx);
             return;
         }
+
+        self.clear_hovered_link(cx);
 
         if !self.is_selecting {
             let Some(origin) = self.selection_drag_origin else {
@@ -551,9 +564,10 @@ impl Hanji {
         );
     }
 
-    fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+    fn on_mouse_up(&mut self, event: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.is_selecting = false;
         self.selection_drag_origin = None;
+        self.update_hovered_link_at_position(event.position, cx);
     }
 
     fn move_caret(&mut self, offset: usize, cx: &mut Context<Self>) {
@@ -891,6 +905,24 @@ impl Hanji {
             .cloned()
     }
 
+    fn update_hovered_link_at_position(
+        &mut self,
+        position: gpui::Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        let hovered_link_url = self.link_at_position(position).map(|link| link.url);
+        if self.hovered_link_url != hovered_link_url {
+            self.hovered_link_url = hovered_link_url;
+            cx.notify();
+        }
+    }
+
+    fn clear_hovered_link(&mut self, cx: &mut Context<Self>) {
+        if self.hovered_link_url.take().is_some() {
+            cx.notify();
+        }
+    }
+
     fn open_link(&mut self, link: LinkHitbox, cx: &mut Context<Self>) -> bool {
         let Some(command) = external_url_command(&link.url) else {
             self.status_message = Some("Only http and https links can be opened.".to_string());
@@ -1145,6 +1177,7 @@ impl Render for Hanji {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let document_label: SharedString = self.document_label().into();
         let status_message: SharedString = self.status_message.clone().unwrap_or_default().into();
+        let editor_cursor = editor_cursor_style(self.hovered_link_url.is_some());
 
         div()
             .track_focus(&self.focus_handle(cx))
@@ -1222,7 +1255,7 @@ impl Render for Hanji {
                     .line_height(px(LINE_HEIGHT))
                     .text_size(px(FONT_SIZE))
                     .font_family("Menlo")
-                    .cursor(CursorStyle::IBeam)
+                    .cursor(editor_cursor)
                     .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
                     .on_mouse_move(cx.listener(Self::on_mouse_move))
                     .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
@@ -1230,6 +1263,17 @@ impl Render for Hanji {
                         editor: cx.entity(),
                     }),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn editor_cursor_uses_pointing_hand_when_hovering_link() {
+        assert_eq!(editor_cursor_style(true), CursorStyle::PointingHand);
+        assert_eq!(editor_cursor_style(false), CursorStyle::IBeam);
     }
 }
 
@@ -1299,6 +1343,7 @@ fn main() {
                             last_lines: Vec::new(),
                             last_task_markers: Vec::new(),
                             last_link_hitboxes: Vec::new(),
+                            hovered_link_url: None,
                             preferred_column: None,
                             selection_anchor: None,
                             selection_head: None,
