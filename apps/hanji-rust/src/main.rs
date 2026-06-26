@@ -4,15 +4,21 @@ mod external;
 mod renderer;
 mod session;
 mod snapshot;
+mod time_label;
 
-use std::{ops::Range, path::Path, process};
+use std::{
+    ops::Range,
+    path::Path,
+    process,
+    time::{Duration, Instant, SystemTime},
+};
 
 use gpui::{
     App, Application, Bounds, ClipboardItem, Context, CursorStyle, EntityInputHandler, FocusHandle,
     Focusable, IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     PathPromptOptions, Pixels, PromptButton, PromptLevel, Render, ScrollHandle, SharedString,
-    UTF16Selection, Window, WindowBounds, WindowOptions, actions, div, point, prelude::*, px, rgb,
-    size,
+    Timer, TitlebarOptions, UTF16Selection, Window, WindowBounds, WindowOptions, actions, div,
+    point, prelude::*, px, rgb, size,
 };
 use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
 use hanji_markdown::{
@@ -33,8 +39,64 @@ use external::external_url_command;
 use renderer::{EditorElement, FONT_SIZE, LINE_HEIGHT, LinkHitbox, TaskMarkerHitbox};
 use session::open_initial_session;
 use snapshot::{LineSnapshot, line_for_offset};
+use time_label::{document_modified_time, format_last_edited_time};
 
 const CARET_SCROLL_MARGIN: f32 = 24.0;
+const CARET_BLINK_IDLE_DELAY_MS: u64 = 900;
+const CARET_BLINK_FRAME_MS: u64 = 16;
+const CARET_BLINK_VISIBLE_HOLD_MS: u64 = 420;
+const CARET_BLINK_FADE_MS: u64 = 80;
+const CARET_BLINK_HIDDEN_HOLD_MS: u64 = 420;
+const CARET_BLINK_CYCLE_MS: u64 =
+    CARET_BLINK_VISIBLE_HOLD_MS + CARET_BLINK_FADE_MS * 2 + CARET_BLINK_HIDDEN_HOLD_MS;
+const CARET_OPACITY_EPSILON: f32 = 0.01;
+
+fn caret_blink_idle_delay_elapsed(idle_for: Duration) -> bool {
+    idle_for >= Duration::from_millis(CARET_BLINK_IDLE_DELAY_MS)
+}
+
+fn caret_blink_opacity(idle_for: Duration) -> f32 {
+    if !caret_blink_idle_delay_elapsed(idle_for) {
+        return 1.0;
+    }
+
+    let active_for = idle_for - Duration::from_millis(CARET_BLINK_IDLE_DELAY_MS);
+    let phase_ms = (active_for.as_millis() % u128::from(CARET_BLINK_CYCLE_MS)) as u64;
+    let fade_out_start = CARET_BLINK_VISIBLE_HOLD_MS;
+    let hidden_start = fade_out_start + CARET_BLINK_FADE_MS;
+    let fade_in_start = hidden_start + CARET_BLINK_HIDDEN_HOLD_MS;
+
+    if phase_ms < fade_out_start {
+        return 1.0;
+    }
+
+    if phase_ms < hidden_start {
+        let progress = (phase_ms - fade_out_start) as f32 / CARET_BLINK_FADE_MS as f32;
+        return 1.0 - smoothstep(progress);
+    }
+
+    if phase_ms < fade_in_start {
+        return 0.0;
+    }
+
+    let progress = (phase_ms - fade_in_start) as f32 / CARET_BLINK_FADE_MS as f32;
+
+    smoothstep(progress)
+}
+
+fn smoothstep(progress: f32) -> f32 {
+    let progress = progress.clamp(0.0, 1.0);
+
+    progress * progress * (3.0 - 2.0 * progress)
+}
+
+fn caret_blink_next_delay(idle_for: Duration) -> Duration {
+    if caret_blink_idle_delay_elapsed(idle_for) {
+        Duration::from_millis(CARET_BLINK_FRAME_MS)
+    } else {
+        Duration::from_millis(CARET_BLINK_IDLE_DELAY_MS).saturating_sub(idle_for)
+    }
+}
 
 fn editor_cursor_style(is_hovering_link: bool) -> CursorStyle {
     if is_hovering_link {
@@ -113,6 +175,10 @@ struct Hanji {
     is_selecting: bool,
     selection_drag_origin: Option<gpui::Point<Pixels>>,
     status_message: Option<String>,
+    last_edited_at: SystemTime,
+    caret_opacity: f32,
+    caret_last_activity_at: Instant,
+    caret_blink_started: bool,
 }
 
 impl Hanji {
@@ -499,9 +565,12 @@ impl Hanji {
     }
 
     fn save(&mut self, _: &Save, window: &mut Window, cx: &mut Context<Self>) {
+        self.reset_caret_blink();
+
         match self.session.save() {
             Ok(()) => {
                 self.status_message = Some("Saved.".to_string());
+                self.last_edited_at = SystemTime::now();
                 self.update_window_title(window);
             }
             Err(error) => {
@@ -515,6 +584,7 @@ impl Hanji {
     fn open_document(&mut self, _: &OpenDocument, window: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
         self.clear_selection_tracking();
+        self.reset_caret_blink();
 
         let discard_changes = if self.session.is_dirty() {
             Some(window.prompt(
@@ -693,6 +763,7 @@ impl Hanji {
             .unwrap_or(offset);
 
         if self.session.set_selection(Selection::caret(offset)).is_ok() {
+            self.reset_caret_blink();
             self.scroll_selection_into_view();
             cx.notify();
         }
@@ -709,6 +780,7 @@ impl Hanji {
         if self.session.set_selection(Selection::caret(offset)).is_ok() {
             self.preferred_column = Some(column);
             self.preferred_visual_x = None;
+            self.reset_caret_blink();
             self.scroll_selection_into_view();
             cx.notify();
         }
@@ -730,6 +802,7 @@ impl Hanji {
         if self.session.set_selection(Selection::caret(offset)).is_ok() {
             self.preferred_column = None;
             self.preferred_visual_x = Some(visual_x);
+            self.reset_caret_blink();
             self.scroll_selection_into_view();
             cx.notify();
         }
@@ -934,6 +1007,7 @@ impl Hanji {
             self.selection_head = Some(head);
             self.preferred_column = preferred_column;
             self.preferred_visual_x = None;
+            self.reset_caret_blink();
             self.scroll_selection_into_view();
             cx.notify();
         }
@@ -956,6 +1030,7 @@ impl Hanji {
             self.selection_head = Some(head);
             self.preferred_column = None;
             self.preferred_visual_x = Some(visual_x);
+            self.reset_caret_blink();
             self.scroll_selection_into_view();
             cx.notify();
         }
@@ -1015,10 +1090,12 @@ impl Hanji {
         self.last_lines.clear();
         self.last_task_markers.clear();
         self.last_link_hitboxes.clear();
+        self.last_edited_at = document_modified_time(self.session.path());
         self.editor_scroll.set_offset(point(px(0.0), px(0.0)));
         self.hovered_link_url = None;
         self.clear_preferred_vertical_target();
         self.clear_selection_tracking();
+        self.reset_caret_blink();
         self.status_message = Some(format!("Opened {opened_name}."));
 
         window.focus(&self.focus_handle);
@@ -1323,6 +1400,8 @@ impl Hanji {
 
     fn document_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.status_message = None;
+        self.last_edited_at = SystemTime::now();
+        self.reset_caret_blink();
         self.update_window_title(window);
         self.scroll_selection_into_view();
         cx.notify();
@@ -1341,6 +1420,40 @@ impl Hanji {
         let dirty = if self.session.is_dirty() { " *" } else { "" };
 
         format!("{name}{dirty}")
+    }
+
+    fn reset_caret_blink(&mut self) {
+        self.caret_opacity = 1.0;
+        self.caret_last_activity_at = Instant::now();
+    }
+
+    fn start_caret_blink(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if self.caret_blink_started {
+            return;
+        }
+
+        self.caret_blink_started = true;
+        cx.spawn_in(window, async move |editor, cx| {
+            loop {
+                let delay = match editor.update_in(cx, |editor, _, cx| {
+                    let idle_for = editor.caret_last_activity_at.elapsed();
+                    let opacity = caret_blink_opacity(idle_for);
+
+                    if (editor.caret_opacity - opacity).abs() > CARET_OPACITY_EPSILON {
+                        editor.caret_opacity = opacity;
+                        cx.notify();
+                    }
+
+                    caret_blink_next_delay(idle_for)
+                }) {
+                    Ok(delay) => delay,
+                    Err(_) => break,
+                };
+
+                Timer::after(delay).await;
+            }
+        })
+        .detach();
     }
 }
 
@@ -1476,8 +1589,17 @@ impl Focusable for Hanji {
 
 impl Render for Hanji {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let document_label: SharedString = self.document_label().into();
-        let status_message: SharedString = self.status_message.clone().unwrap_or_default().into();
+        let mut status_detail = self.document_label();
+        if let Some(message) = self
+            .status_message
+            .as_deref()
+            .filter(|message| !message.is_empty())
+        {
+            status_detail.push_str(" · ");
+            status_detail.push_str(message);
+        }
+        let status_detail: SharedString = status_detail.into();
+        let last_edited_label: SharedString = format_last_edited_time(self.last_edited_at).into();
         let editor_cursor = editor_cursor_style(self.hovered_link_url.is_some());
 
         div()
@@ -1524,30 +1646,25 @@ impl Render for Hanji {
             .flex_col()
             .size_full()
             .bg(rgb(0xffffff))
-            .p(px(24.0))
             .text_color(rgb(0x111111))
             .child(
                 div()
                     .flex()
                     .flex_shrink_0()
+                    .h(px(38.0))
+                    .w_full()
                     .items_center()
                     .justify_between()
-                    .pb_2()
+                    .bg(rgb(0xffffff))
+                    .pl(px(76.0))
+                    .pr(px(18.0))
                     .child(div().text_sm().text_color(rgb(0x111111)).child("Hanji"))
                     .child(
                         div()
                             .text_sm()
                             .text_color(rgb(0x6b7280))
-                            .child(document_label),
+                            .child(status_detail),
                     ),
-            )
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .h(px(20.0))
-                    .text_sm()
-                    .text_color(rgb(0x6b7280))
-                    .child(status_message),
             )
             .child(
                 div()
@@ -1567,6 +1684,16 @@ impl Render for Hanji {
                     .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
                     .on_mouse_move(cx.listener(Self::on_mouse_move))
                     .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+                    .child(
+                        div()
+                            .id("document-last-edited")
+                            .w_full()
+                            .h(px(22.0))
+                            .text_size(px(12.0))
+                            .line_height(px(16.0))
+                            .text_color(rgb(0x9ca3af))
+                            .child(last_edited_label),
+                    )
                     .child(EditorElement {
                         editor: cx.entity(),
                     }),
@@ -1585,6 +1712,54 @@ mod tests {
     }
 
     #[test]
+    fn caret_blink_waits_until_idle_delay() {
+        assert!(!caret_blink_idle_delay_elapsed(Duration::from_millis(
+            CARET_BLINK_IDLE_DELAY_MS - 1
+        )));
+        assert!(caret_blink_idle_delay_elapsed(Duration::from_millis(
+            CARET_BLINK_IDLE_DELAY_MS
+        )));
+    }
+
+    #[test]
+    fn caret_blink_opacity_uses_short_eased_transitions_after_idle_delay() {
+        let idle_delay = Duration::from_millis(CARET_BLINK_IDLE_DELAY_MS);
+        let visible_hold = Duration::from_millis(CARET_BLINK_VISIBLE_HOLD_MS);
+        let half_fade = Duration::from_millis(CARET_BLINK_FADE_MS / 2);
+        let fade = Duration::from_millis(CARET_BLINK_FADE_MS);
+        let hidden_hold = Duration::from_millis(CARET_BLINK_HIDDEN_HOLD_MS);
+        let full_cycle = Duration::from_millis(CARET_BLINK_CYCLE_MS);
+
+        assert_near(
+            caret_blink_opacity(idle_delay - Duration::from_millis(1)),
+            1.0,
+        );
+        assert_near(caret_blink_opacity(idle_delay), 1.0);
+        assert_near(
+            caret_blink_opacity(idle_delay + visible_hold - Duration::from_millis(1)),
+            1.0,
+        );
+        assert_near(
+            caret_blink_opacity(idle_delay + visible_hold + half_fade),
+            0.5,
+        );
+        assert!(caret_blink_opacity(idle_delay + visible_hold + fade) < 0.01);
+        assert!(caret_blink_opacity(idle_delay + visible_hold + fade + hidden_hold) < 0.01);
+        assert_near(
+            caret_blink_opacity(idle_delay + visible_hold + fade + hidden_hold + half_fade),
+            0.5,
+        );
+        assert_near(caret_blink_opacity(idle_delay + full_cycle), 1.0);
+    }
+
+    fn assert_near(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 0.01,
+            "expected {actual} to be near {expected}"
+        );
+    }
+
+    #[test]
     fn document_path_label_prefers_file_name() {
         assert_eq!(
             document_path_label(Path::new("/tmp/notes/hanji.md")),
@@ -1599,6 +1774,7 @@ fn main() {
         eprintln!("Could not open document: {error}");
         process::exit(1);
     });
+    let initial_window_title = format!("{} - Hanji", document_path_label(session.path()));
 
     Application::new().run(move |cx: &mut App| {
         cx.bind_keys([
@@ -1651,13 +1827,20 @@ fn main() {
             .open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    titlebar: Some(TitlebarOptions {
+                        title: Some(initial_window_title.clone().into()),
+                        appears_transparent: true,
+                        traffic_light_position: Some(point(px(14.0), px(14.0))),
+                    }),
                     ..Default::default()
                 },
                 move |window, cx| {
                     cx.new(|cx| {
-                        let editor = Hanji {
+                        let session = session.take().expect("initial session was already opened");
+                        let mut editor = Hanji {
                             focus_handle: cx.focus_handle(),
-                            session: session.take().expect("initial session was already opened"),
+                            last_edited_at: document_modified_time(session.path()),
+                            session,
                             marked_range: None,
                             last_lines: Vec::new(),
                             last_task_markers: Vec::new(),
@@ -1671,8 +1854,12 @@ fn main() {
                             is_selecting: false,
                             selection_drag_origin: None,
                             status_message: None,
+                            caret_opacity: 1.0,
+                            caret_last_activity_at: Instant::now(),
+                            caret_blink_started: false,
                         };
                         editor.update_window_title(window);
+                        editor.start_caret_blink(window, cx);
                         editor
                     })
                 },

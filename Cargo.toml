@@ -21,4 +21,5 @@ hanji-core = { path = "crates/hanji-core" }
 hanji-markdown = { path = "crates/hanji-markdown" }
 hanji-plugin-api = { path = "crates/hanji-plugin-api" }
 hanji-storage = { path = "crates/hanji-storage" }
+libc = "0.2"
 unicode-segmentation = "1.13.2"

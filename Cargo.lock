@@ -2317,6 +2317,7 @@ dependencies = [
  "hanji-core",
  "hanji-markdown",
  "hanji-storage",
+ "libc",
 ]
 
 [[package]]

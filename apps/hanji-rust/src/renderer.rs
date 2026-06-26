@@ -27,6 +27,7 @@ const CHECKBOX_BOX_SIZE: f32 = 16.0;
 const CHECKBOX_CHECK_FONT_SIZE: f32 = 17.0;
 const CHECKBOX_CONTENT_GAP: f32 = 5.0;
 const MARKDOWN_MARKER_COLOR: u32 = 0x238636;
+const CARET_COLOR: u32 = MARKDOWN_MARKER_COLOR;
 const LINK_TEXT_COLOR: u32 = 0xe6c000;
 const CODE_BLOCK_BACKGROUND_COLOR: u32 = 0x25231f14;
 const CODE_BLOCK_CORNER_RADIUS: f32 = 5.0;
@@ -34,7 +35,7 @@ const CODE_BLOCK_TEXT_INSET: f32 = 12.0;
 const HORIZONTAL_RULE_COLOR: u32 = 0xd8d3c7;
 const HORIZONTAL_RULE_INSET: f32 = 4.0;
 const HORIZONTAL_RULE_HEIGHT: f32 = 1.0;
-const EDITOR_CHROME_HORIZONTAL_PADDING: f32 = 80.0;
+const EDITOR_CHROME_HORIZONTAL_PADDING: f32 = 32.0;
 const EDITOR_SCROLL_HORIZONTAL_PADDING: f32 = 32.0;
 const MIN_WRAP_WIDTH: f32 = 120.0;
 
@@ -338,8 +339,8 @@ impl Element for EditorElement {
                 .map(code_block_background_quad),
         );
 
-        let cursor = if selection.is_empty() {
-            caret_quad(&lines, selection.start)
+        let cursor = if selection.is_empty() && editor.caret_opacity > 0.0 {
+            caret_quad(&lines, selection.start, editor.caret_opacity)
         } else {
             None
         };
@@ -1311,7 +1312,7 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
     }
 }
 
-fn caret_quad(lines: &[LineSnapshot], offset: usize) -> Option<PaintQuad> {
+fn caret_quad(lines: &[LineSnapshot], offset: usize, opacity: f32) -> Option<PaintQuad> {
     let line = line_for_offset(lines, offset)?;
     let visible_offset = line.source_to_visible_offset(offset);
     let position = line.wrapped_caret_position(visible_offset)?;
@@ -1324,8 +1325,14 @@ fn caret_quad(lines: &[LineSnapshot], offset: usize) -> Option<PaintQuad> {
             ),
             size(px(2.0), line.line_height),
         ),
-        rgb(0x25231f),
+        rgb_with_opacity(CARET_COLOR, opacity),
     ))
+}
+
+fn rgb_with_opacity(color: u32, opacity: f32) -> gpui::Rgba {
+    let alpha = (opacity.clamp(0.0, 1.0) * 255.0).round() as u32;
+
+    rgba((color << 8) | alpha)
 }
 
 fn selection_quads(lines: &[LineSnapshot], selection: TextRange) -> Vec<PaintQuad> {
