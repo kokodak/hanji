@@ -419,6 +419,15 @@ impl Hanji {
         }
 
         let offset = self.index_for_mouse_position(event.position);
+        if !event.modifiers.shift
+            && event.click_count >= 2
+            && let Some(range) = self.word_selection_range_for_offset(offset)
+        {
+            self.is_selecting = false;
+            self.selection_drag_origin = None;
+            self.select_from_anchor_to(range.start, range.end, None, cx);
+            return;
+        }
 
         self.is_selecting = false;
         self.selection_drag_origin = Some(event.position);
@@ -714,6 +723,14 @@ impl Hanji {
         let line_index = document.line_index_at_offset(offset).ok()?;
 
         document.line_range(line_index)
+    }
+
+    fn word_selection_range_for_offset(&self, offset: usize) -> Option<TextRange> {
+        self.session
+            .document()
+            .word_range_at_offset(offset)
+            .ok()
+            .flatten()
     }
 
     fn horizontal_offset_within_current_line(

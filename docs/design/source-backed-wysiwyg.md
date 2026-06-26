@@ -101,6 +101,8 @@ For list items, the visible start of the line maps after the hidden list marker 
 
 For selection placement, source range boundaries remain meaningful. A selection that starts outside an inline span and extends into that span should reveal and select the marker text it crosses. A selection that starts inside the inline content uses the same caret placement rule as editing, so it selects the content without implicitly adding hidden markers.
 
+Double-click selection uses the same word definition as keyboard word movement. A double click inside or at the edge of a word selects that word's source range. Clicking punctuation or whitespace that is not adjacent to a word should keep normal caret placement.
+
 Keyboard selection expansion uses the same source coordinate rules. `Shift+Arrow` extends by visible caret movement, `Shift+Option+Left/Right` extends to the previous or next source word boundary within the current line, and `Shift+Cmd` extends to the current line or document boundary depending on the arrow direction. Left and right movement shortcuts should not cross line boundaries; moving between lines belongs to up and down movement.
 
 ## Test Scenarios
@@ -114,6 +116,7 @@ Projection tests should focus on behavior that can change editing meaning:
 - A selection spanning multiple inline spans reveals each intersected span.
 - A selection starting outside an inline span includes crossed marker text.
 - A selection starting inside inline content excludes hidden markers unless the user explicitly extends into them.
+- Double-clicking a word selects the word source range with the same boundary rules as keyboard word movement.
 - Hidden inline content boundaries map to editable marker edges.
 - Heading recognition starts only after the ATX hash run is followed by whitespace.
 - Inactive recognized headings hide the ATX marker and render content as preview text.

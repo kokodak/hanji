@@ -100,6 +100,11 @@ impl TextBuffer {
         Ok(next_word_offset(&self.text, offset))
     }
 
+    pub fn word_range_at_offset(&self, offset: usize) -> Result<Option<TextRange>, EditError> {
+        self.validate_range(TextRange::caret(offset))?;
+        Ok(word_range_at_offset(&self.text, offset))
+    }
+
     pub fn nearest_grapheme_offset(&self, offset: usize) -> Result<usize, EditError> {
         if offset > self.text.len() {
             return Err(EditError::InvalidRange);
@@ -359,6 +364,35 @@ fn next_word_offset(text: &str, offset: usize) -> Option<usize> {
     Some(cursor)
 }
 
+fn word_range_at_offset(text: &str, offset: usize) -> Option<TextRange> {
+    let (mut start, mut end) = current_grapheme(text, offset)
+        .filter(|(_, grapheme)| is_word_grapheme(grapheme))
+        .map(|(start, grapheme)| (start, start + grapheme.len()))
+        .or_else(|| {
+            previous_grapheme(text, offset)
+                .filter(|(_, grapheme)| is_word_grapheme(grapheme))
+                .map(|(start, grapheme)| (start, start + grapheme.len()))
+        })?;
+
+    while let Some((previous_start, grapheme)) = previous_grapheme(text, start) {
+        if !is_word_grapheme(grapheme) {
+            break;
+        }
+
+        start = previous_start;
+    }
+
+    while let Some((current_start, grapheme)) = current_grapheme(text, end) {
+        if current_start != end || !is_word_grapheme(grapheme) {
+            break;
+        }
+
+        end += grapheme.len();
+    }
+
+    Some(TextRange::new(start, end))
+}
+
 fn previous_grapheme(text: &str, offset: usize) -> Option<(usize, &str)> {
     text[..offset].grapheme_indices(true).last()
 }
@@ -614,6 +648,41 @@ mod tests {
         assert_eq!(buffer.next_word_offset(after_a), Ok(Some(end)));
         assert_eq!(buffer.previous_word_offset(end), Ok(Some(after_flag)));
         assert_eq!(buffer.previous_word_offset(after_flag), Ok(Some(0)));
+    }
+
+    #[test]
+    fn finds_word_range_at_offsets() {
+        let buffer = TextBuffer::new("Capture **thought** with 한지_note");
+
+        assert_eq!(
+            buffer.word_range_at_offset("Capture **tho".len()),
+            Ok(Some(TextRange::new(
+                "Capture **".len(),
+                "Capture **thought".len()
+            )))
+        );
+        assert_eq!(
+            buffer.word_range_at_offset("Capture **thought".len()),
+            Ok(Some(TextRange::new(
+                "Capture **".len(),
+                "Capture **thought".len()
+            )))
+        );
+        assert_eq!(
+            buffer.word_range_at_offset("Capture **".len()),
+            Ok(Some(TextRange::new(
+                "Capture **".len(),
+                "Capture **thought".len()
+            )))
+        );
+        assert_eq!(buffer.word_range_at_offset("Capture ".len()), Ok(None));
+        assert_eq!(
+            buffer.word_range_at_offset("Capture **thought** with 한지".len()),
+            Ok(Some(TextRange::new(
+                "Capture **thought** with ".len(),
+                "Capture **thought** with 한지_note".len()
+            )))
+        );
     }
 
     #[test]

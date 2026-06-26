@@ -66,6 +66,10 @@ impl Document {
         self.buffer.next_word_offset(offset)
     }
 
+    pub fn word_range_at_offset(&self, offset: usize) -> Result<Option<TextRange>, EditError> {
+        self.buffer.word_range_at_offset(offset)
+    }
+
     pub fn nearest_grapheme_offset(&self, offset: usize) -> Result<usize, EditError> {
         self.buffer.nearest_grapheme_offset(offset)
     }
