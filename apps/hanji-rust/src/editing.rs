@@ -114,11 +114,97 @@ pub(crate) fn marker_autocomplete_edit(
     new_text: &str,
 ) -> Option<(Range<usize>, String, Range<usize>)> {
     if range.start != range.end {
-        return None;
+        return marker_wrap_selection_edit(text, range, new_text);
     }
 
     code_fence_autocomplete_edit(text, range, new_text)
         .or_else(|| strong_marker_autocomplete_edit(text, range, new_text))
+}
+
+pub(crate) fn marker_skip_offset(
+    text: &str,
+    range: &Range<usize>,
+    new_text: &str,
+) -> Option<usize> {
+    if range.start != range.end || !matches!(new_text, "*" | "**") {
+        return None;
+    }
+
+    let marker = "**";
+    if !text
+        .get(range.start..)
+        .is_some_and(|suffix| suffix.starts_with(marker))
+        || !has_unclosed_marker_before(text, range.start, marker)
+    {
+        return None;
+    }
+
+    Some(range.start + marker.len())
+}
+
+pub(crate) fn empty_marker_pair_delete_backward_edit(
+    text: &str,
+    range: &Range<usize>,
+) -> Option<(Range<usize>, String, Range<usize>)> {
+    if range.start != range.end {
+        return None;
+    }
+
+    let marker = "**";
+    let opening_start = range.start.checked_sub(marker.len())?;
+    let closing_end = range.start + marker.len();
+    if text.get(opening_start..range.start) != Some(marker)
+        || text.get(range.start..closing_end) != Some(marker)
+        || marker_count_before(text, opening_start, marker) % 2 != 0
+    {
+        return None;
+    }
+
+    Some((
+        opening_start..closing_end,
+        String::new(),
+        opening_start..opening_start,
+    ))
+}
+
+fn marker_wrap_selection_edit(
+    text: &str,
+    range: &Range<usize>,
+    new_text: &str,
+) -> Option<(Range<usize>, String, Range<usize>)> {
+    match new_text {
+        "**" => wrap_selection_with_marker(text, range, "**"),
+        "```" => wrap_selection_with_fence(text, range),
+        _ => None,
+    }
+}
+
+fn wrap_selection_with_marker(
+    text: &str,
+    range: &Range<usize>,
+    marker: &str,
+) -> Option<(Range<usize>, String, Range<usize>)> {
+    let selected = text.get(range.clone())?;
+    let marker_len = marker.len();
+    let replacement = format!("{marker}{selected}{marker}");
+    let selection_start = range.start + marker_len;
+    let selection_end = selection_start + selected.len();
+
+    Some((range.clone(), replacement, selection_start..selection_end))
+}
+
+fn wrap_selection_with_fence(
+    text: &str,
+    range: &Range<usize>,
+) -> Option<(Range<usize>, String, Range<usize>)> {
+    let selected = text.get(range.clone())?;
+    let prefix = "```\n";
+    let suffix = "\n```";
+    let replacement = format!("{prefix}{selected}{suffix}");
+    let selection_start = range.start + prefix.len();
+    let selection_end = selection_start + selected.len();
+
+    Some((range.clone(), replacement, selection_start..selection_end))
 }
 
 fn code_fence_autocomplete_edit(
@@ -134,6 +220,9 @@ fn code_fence_autocomplete_edit(
     let line_prefix = text.get(line_start..range.start)?;
     let line_suffix = text.get(range.start..line_end)?;
     if !line_suffix.is_empty() {
+        return None;
+    }
+    if has_unclosed_code_fence_before(text, line_start) {
         return None;
     }
 
@@ -169,7 +258,9 @@ fn strong_marker_autocomplete_edit(
 ) -> Option<(Range<usize>, String, Range<usize>)> {
     let (replacement, caret) = match new_text {
         "*" => {
+            let marker_start = range.start.checked_sub("*".len())?;
             if !previous_text_is_exact_marker(text, range.start, "*")
+                || has_unclosed_marker_before(text, marker_start, "**")
                 || following_text_starts_with(text, range.start, "*")
             {
                 return None;
@@ -179,6 +270,7 @@ fn strong_marker_autocomplete_edit(
         }
         "**" => {
             if previous_text_is_exact_marker(text, range.start, "*")
+                || has_unclosed_marker_before(text, range.start, "**")
                 || following_text_starts_with(text, range.start, "*")
             {
                 return None;
@@ -209,6 +301,66 @@ fn previous_text_is_exact_marker(text: &str, offset: usize, marker: &str) -> boo
 fn following_text_starts_with(text: &str, offset: usize, marker: &str) -> bool {
     text.get(offset..)
         .is_some_and(|suffix| suffix.starts_with(marker))
+}
+
+fn has_unclosed_marker_before(text: &str, offset: usize, marker: &str) -> bool {
+    marker_count_before(text, offset, marker) % 2 == 1
+}
+
+fn marker_count_before(text: &str, offset: usize, marker: &str) -> usize {
+    text.get(..offset)
+        .map_or(0, |prefix| prefix.match_indices(marker).count())
+}
+
+fn has_unclosed_code_fence_before(text: &str, offset: usize) -> bool {
+    let Some(prefix) = text.get(..offset) else {
+        return false;
+    };
+    let mut open_marker_len = None;
+
+    for line in prefix.split('\n') {
+        if let Some(marker_len) = open_marker_len {
+            if is_closing_backtick_fence(line, marker_len) {
+                open_marker_len = None;
+            }
+        } else if let Some(marker_len) = opening_backtick_fence_len(line) {
+            open_marker_len = Some(marker_len);
+        }
+    }
+
+    open_marker_len.is_some()
+}
+
+fn opening_backtick_fence_len(line: &str) -> Option<usize> {
+    let indent = line
+        .bytes()
+        .take_while(|byte| *byte == b' ')
+        .take(4)
+        .count();
+    if indent >= 4 {
+        return None;
+    }
+
+    let marker_len = line[indent..]
+        .bytes()
+        .take_while(|byte| *byte == b'`')
+        .count();
+    (marker_len >= 3).then_some(marker_len)
+}
+
+fn is_closing_backtick_fence(line: &str, min_marker_len: usize) -> bool {
+    let Some(marker_len) = opening_backtick_fence_len(line) else {
+        return false;
+    };
+    marker_len >= min_marker_len
+        && line[line
+            .bytes()
+            .take_while(|byte| *byte == b' ')
+            .take(4)
+            .count()
+            + marker_len..]
+            .bytes()
+            .all(|byte| matches!(byte, b' ' | b'\t'))
 }
 
 fn line_bounds_for_offset(text: &str, offset: usize) -> (usize, usize) {
@@ -484,6 +636,26 @@ mod tests {
     }
 
     #[test]
+    fn code_fence_autocomplete_does_not_interfere_with_closing_unclosed_fence() {
+        assert_eq!(
+            marker_autocomplete_edit(
+                "```\ncode\n``",
+                &("```\ncode\n``".len().."```\ncode\n``".len()),
+                "`"
+            ),
+            None
+        );
+        assert_eq!(
+            marker_autocomplete_edit(
+                "```\ncode\n",
+                &("```\ncode\n".len().."```\ncode\n".len()),
+                "```"
+            ),
+            None
+        );
+    }
+
+    #[test]
     fn second_asterisk_autocompletes_strong_markers() {
         assert_eq!(
             marker_autocomplete_edit("*", &(1..1), "*"),
@@ -500,6 +672,79 @@ mod tests {
         assert_eq!(marker_autocomplete_edit("**", &(2..2), "*"), None);
         assert_eq!(marker_autocomplete_edit("*", &(1..1), "**"), None);
         assert_eq!(marker_autocomplete_edit("**", &(1..1), "*"), None);
+    }
+
+    #[test]
+    fn strong_autocomplete_does_not_interfere_with_closing_unclosed_strong() {
+        assert_eq!(
+            marker_autocomplete_edit("**qwe*", &("**qwe*".len().."**qwe*".len()), "*"),
+            None
+        );
+        assert_eq!(
+            marker_autocomplete_edit("**qwe", &("**qwe".len().."**qwe".len()), "**"),
+            None
+        );
+    }
+
+    #[test]
+    fn marker_input_wraps_selected_text() {
+        assert_eq!(
+            marker_autocomplete_edit("Hanji notes", &(6..11), "**"),
+            Some((6..11, "**notes**".to_string(), 8..13))
+        );
+        assert_eq!(
+            marker_autocomplete_edit("let value = 1;", &(0..14), "```"),
+            Some((0..14, "```\nlet value = 1;\n```".to_string(), 4..18))
+        );
+    }
+
+    #[test]
+    fn marker_input_does_not_wrap_selection_with_partial_markers() {
+        assert_eq!(marker_autocomplete_edit("Hanji notes", &(6..11), "*"), None);
+        assert_eq!(marker_autocomplete_edit("Hanji notes", &(6..11), "`"), None);
+    }
+
+    #[test]
+    fn strong_closing_marker_input_skips_existing_closing_marker() {
+        assert_eq!(
+            marker_skip_offset("**bold**", &("**bold".len().."**bold".len()), "*"),
+            Some("**bold**".len())
+        );
+        assert_eq!(
+            marker_skip_offset("**bold**", &("**bold".len().."**bold".len()), "**"),
+            Some("**bold**".len())
+        );
+    }
+
+    #[test]
+    fn marker_skip_requires_open_strong_span() {
+        assert_eq!(marker_skip_offset("plain **", &(6..6), "*"), None);
+        assert_eq!(marker_skip_offset("**bold**", &(0..0), "*"), None);
+        assert_eq!(marker_skip_offset("**bold**", &(2..6), "*"), None);
+    }
+
+    #[test]
+    fn backspace_inside_empty_strong_pair_deletes_both_markers() {
+        assert_eq!(
+            empty_marker_pair_delete_backward_edit("****", &(2..2)),
+            Some((0..4, String::new(), 0..0))
+        );
+        assert_eq!(
+            empty_marker_pair_delete_backward_edit("Say **** now", &(6..6)),
+            Some((4..8, String::new(), 4..4))
+        );
+    }
+
+    #[test]
+    fn empty_pair_delete_does_not_cross_non_empty_strong_pairs() {
+        assert_eq!(
+            empty_marker_pair_delete_backward_edit("**a****b**", &(5..5)),
+            None
+        );
+        assert_eq!(
+            empty_marker_pair_delete_backward_edit("****", &(1..1)),
+            None
+        );
     }
 
     #[test]

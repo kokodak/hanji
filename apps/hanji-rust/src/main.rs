@@ -21,8 +21,9 @@ use hanji_storage::DocumentSession;
 
 use editing::{
     MarkerHitMode, blockquote_newline_edit_for_line, bounds_contains_point,
-    drag_distance_exceeds_threshold, extension_points_for_selection, horizontal_offset_within_line,
-    line_marker_hit_offset, list_newline_edit_for_line, marker_autocomplete_edit,
+    drag_distance_exceeds_threshold, empty_marker_pair_delete_backward_edit,
+    extension_points_for_selection, horizontal_offset_within_line, line_marker_hit_offset,
+    list_newline_edit_for_line, marker_autocomplete_edit, marker_skip_offset,
     selection_is_reversed, selection_range_from_anchor_and_head, task_marker_state_char_range,
 };
 use encoding::byte_offset_to_utf16;
@@ -86,6 +87,14 @@ impl Hanji {
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
         self.clear_selection_tracking();
+        let range = self.selected_range();
+        if let Some((range, replacement, selection_after)) =
+            empty_marker_pair_delete_backward_edit(self.session.document().text(), &range)
+        {
+            self.replace_range(range, &replacement, selection_after, window, cx);
+            return;
+        }
+
         let changed = self
             .session
             .execute(EditorCommand::DeleteBackward)
@@ -958,6 +967,12 @@ impl EntityInputHandler for Hanji {
             .map(|range| self.utf16_range_to_byte(range))
             .or_else(|| self.marked_range.clone())
             .unwrap_or_else(|| self.selected_range());
+        if let Some(offset) = marker_skip_offset(self.session.document().text(), &range, new_text) {
+            self.move_caret(offset, cx);
+            self.marked_range = None;
+            return;
+        }
+
         let (range, replacement, selection_after) =
             marker_autocomplete_edit(self.session.document().text(), &range, new_text)
                 .unwrap_or_else(|| {
