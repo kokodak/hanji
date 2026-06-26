@@ -99,6 +99,17 @@ pub(crate) fn list_newline_edit_for_line(
     let content = &line_source[list_item.content_start..];
 
     if content.trim().is_empty() {
+        let indent_len = list_indent_len(line_source);
+        if indent_len > 0 {
+            let remove_len = indent_len.min(LIST_INDENT_WIDTH);
+            let caret = range.start.saturating_sub(remove_len);
+            return Some((
+                line_range.start..line_range.start + remove_len,
+                String::new(),
+                caret..caret,
+            ));
+        }
+
         let caret = line_range.start;
         return Some((
             line_range.start..line_range.end,
@@ -107,11 +118,7 @@ pub(crate) fn list_newline_edit_for_line(
         ));
     }
 
-    let indent_len = line_source
-        .bytes()
-        .take_while(|byte| *byte == b' ')
-        .take(4)
-        .count();
+    let indent_len = line_source.bytes().take_while(|byte| *byte == b' ').count();
     let marker = next_list_item_marker_text(list_item.marker, list_item.task);
     let replacement = format!("\n{}{marker} ", &line_source[..indent_len]);
     let caret = range.start + replacement.len();
@@ -187,11 +194,7 @@ fn list_indent_edit_for_line(
             " ".repeat(LIST_INDENT_WIDTH),
         )),
         ListIndentDirection::Decrease => {
-            let remove_len = line_source
-                .bytes()
-                .take_while(|byte| *byte == b' ')
-                .take(LIST_INDENT_WIDTH)
-                .count();
+            let remove_len = list_indent_len(line_source).min(LIST_INDENT_WIDTH);
             if remove_len == 0 {
                 return None;
             }
@@ -202,6 +205,10 @@ fn list_indent_edit_for_line(
             ))
         }
     }
+}
+
+fn list_indent_len(line_source: &str) -> usize {
+    line_source.bytes().take_while(|byte| *byte == b' ').count()
 }
 
 fn transform_range_after_edits(range: &Range<usize>, edits: &[TextEdit]) -> Range<usize> {
@@ -726,6 +733,26 @@ mod tests {
         assert_eq!(
             list_newline_edit_for_line("- [ ] ", TextRange::new(0, 6), &(6..6)),
             Some((0..6, String::new(), 0..0))
+        );
+    }
+
+    #[test]
+    fn list_newline_outdents_empty_nested_item() {
+        assert_eq!(
+            list_newline_edit_for_line("  - ", TextRange::new(0, 4), &(4..4)),
+            Some((0..2, String::new(), 2..2))
+        );
+        assert_eq!(
+            list_newline_edit_for_line("    - [ ] ", TextRange::new(0, 10), &(10..10)),
+            Some((0..2, String::new(), 8..8))
+        );
+    }
+
+    #[test]
+    fn list_newline_preserves_full_nested_indent() {
+        assert_eq!(
+            list_newline_edit_for_line("      - Item", TextRange::new(0, 12), &(12..12)),
+            Some((12..12, "\n      - ".to_string(), 21..21))
         );
     }
 
