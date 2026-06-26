@@ -1,13 +1,20 @@
 use std::ops::Range;
 
 use gpui::{Bounds, Pixels};
-use hanji_core::TextRange;
+use hanji_core::{TextEdit, TextRange};
 use hanji_markdown::{
     MarkdownListMarker, MarkdownTaskState, OrderedListDelimiter, blockquote_content_start,
     list_item,
 };
 
 const DRAG_SELECTION_THRESHOLD: f64 = 2.0;
+const LIST_INDENT_WIDTH: usize = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ListIndentDirection {
+    Increase,
+    Decrease,
+}
 
 pub(crate) fn selection_range_from_anchor_and_head(anchor: usize, head: usize) -> TextRange {
     TextRange::new(anchor.min(head), anchor.max(head))
@@ -110,6 +117,115 @@ pub(crate) fn list_newline_edit_for_line(
     let caret = range.start + replacement.len();
 
     Some((range.clone(), replacement, caret..caret))
+}
+
+pub(crate) fn list_indent_edit(
+    text: &str,
+    range: &Range<usize>,
+    direction: ListIndentDirection,
+) -> Option<(Vec<TextEdit>, Range<usize>)> {
+    let edits = selected_list_line_ranges(text, range)
+        .into_iter()
+        .filter_map(|line_range| list_indent_edit_for_line(text, line_range, direction))
+        .collect::<Vec<_>>();
+
+    if edits.is_empty() {
+        return None;
+    }
+
+    let selection_after = transform_range_after_edits(range, &edits);
+    Some((edits, selection_after))
+}
+
+fn selected_list_line_ranges(text: &str, range: &Range<usize>) -> Vec<TextRange> {
+    let effective_end = effective_line_selection_end(text, range);
+    let mut line_ranges = Vec::new();
+    let mut line_start = 0;
+
+    loop {
+        let line_end = text[line_start..]
+            .find('\n')
+            .map_or(text.len(), |offset| line_start + offset);
+
+        if line_end >= range.start && line_start <= effective_end {
+            line_ranges.push(TextRange::new(line_start, line_end));
+        }
+
+        if line_end == text.len() || line_start > effective_end {
+            break;
+        }
+
+        line_start = line_end + 1;
+    }
+
+    line_ranges
+}
+
+fn effective_line_selection_end(text: &str, range: &Range<usize>) -> usize {
+    if range.start == range.end {
+        return range.end;
+    }
+
+    if range.end > 0 && text.as_bytes().get(range.end - 1) == Some(&b'\n') {
+        range.end - 1
+    } else {
+        range.end
+    }
+}
+
+fn list_indent_edit_for_line(
+    text: &str,
+    line_range: TextRange,
+    direction: ListIndentDirection,
+) -> Option<TextEdit> {
+    let line_source = text.get(line_range.start..line_range.end)?;
+    list_item(line_source)?;
+
+    match direction {
+        ListIndentDirection::Increase => Some(TextEdit::insert(
+            line_range.start,
+            " ".repeat(LIST_INDENT_WIDTH),
+        )),
+        ListIndentDirection::Decrease => {
+            let remove_len = line_source
+                .bytes()
+                .take_while(|byte| *byte == b' ')
+                .take(LIST_INDENT_WIDTH)
+                .count();
+            if remove_len == 0 {
+                return None;
+            }
+
+            Some(TextEdit::replace(
+                TextRange::new(line_range.start, line_range.start + remove_len),
+                "",
+            ))
+        }
+    }
+}
+
+fn transform_range_after_edits(range: &Range<usize>, edits: &[TextEdit]) -> Range<usize> {
+    transform_offset_after_edits(range.start, edits)..transform_offset_after_edits(range.end, edits)
+}
+
+fn transform_offset_after_edits(offset: usize, edits: &[TextEdit]) -> usize {
+    let mut transformed = offset;
+
+    for edit in edits {
+        let removed_len = edit.range.end - edit.range.start;
+        let inserted_len = edit.text.len();
+        if removed_len == 0 {
+            if edit.range.start <= offset {
+                transformed += inserted_len;
+            }
+        } else if edit.range.end <= offset {
+            transformed -= removed_len.saturating_sub(inserted_len);
+        } else if edit.range.start < offset {
+            transformed = transformed.saturating_sub(offset - edit.range.start);
+        }
+    }
+
+    transformed
 }
 
 pub(crate) fn marker_autocomplete_edit(
@@ -622,6 +738,47 @@ mod tests {
         assert_eq!(
             list_newline_edit_for_line("- Item", TextRange::new(0, 6), &(2..6)),
             None
+        );
+    }
+
+    #[test]
+    fn list_indent_increases_current_list_item_indent() {
+        assert_eq!(
+            list_indent_edit("- Item", &(3..3), ListIndentDirection::Increase),
+            Some((vec![TextEdit::insert(0, "  ")], 5..5))
+        );
+    }
+
+    #[test]
+    fn list_indent_decreases_current_list_item_indent() {
+        assert_eq!(
+            list_indent_edit("  - Item", &(4..4), ListIndentDirection::Decrease),
+            Some((vec![TextEdit::replace(TextRange::new(0, 2), "")], 2..2))
+        );
+        assert_eq!(
+            list_indent_edit("- Item", &(2..2), ListIndentDirection::Decrease),
+            None
+        );
+    }
+
+    #[test]
+    fn list_indent_targets_only_selected_list_lines() {
+        let text = "- One\nplain\n- Two";
+        assert_eq!(
+            list_indent_edit(text, &(0..text.len()), ListIndentDirection::Increase),
+            Some((
+                vec![TextEdit::insert(0, "  "), TextEdit::insert(12, "  ")],
+                2..21
+            ))
+        );
+    }
+
+    #[test]
+    fn list_indent_selection_ending_at_next_line_start_excludes_that_line() {
+        let text = "- One\n- Two";
+        assert_eq!(
+            list_indent_edit(text, &(0..6), ListIndentDirection::Increase),
+            Some((vec![TextEdit::insert(0, "  ")], 2..8))
         );
     }
 

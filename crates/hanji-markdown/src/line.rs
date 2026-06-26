@@ -111,14 +111,7 @@ pub fn list_item_content_start(line: &str) -> Option<usize> {
 }
 
 pub fn list_item(line: &str) -> Option<MarkdownListItem> {
-    let indent = line
-        .bytes()
-        .take_while(|byte| *byte == b' ')
-        .take(4)
-        .count();
-    if indent >= 4 {
-        return None;
-    }
+    let indent = line.bytes().take_while(|byte| *byte == b' ').count();
 
     let content = &line[indent..];
 
@@ -378,9 +371,9 @@ mod tests {
         assert_eq!(list_item_content_start("-   Item"), Some(4));
         assert_eq!(list_item_content_start("  3. Item"), Some(5));
         assert_eq!(list_item_content_start("2) Item"), Some(3));
+        assert_eq!(list_item_content_start("    - Nested"), Some(6));
         assert_eq!(list_item_content_start("-Item"), None);
         assert_eq!(list_item_content_start("1.Item"), None);
-        assert_eq!(list_item_content_start("    - Code"), None);
     }
 
     #[test]

@@ -20,12 +20,12 @@ use hanji_markdown::{
 use hanji_storage::DocumentSession;
 
 use editing::{
-    MarkerHitMode, blockquote_newline_edit_for_line, bounds_contains_point,
+    ListIndentDirection, MarkerHitMode, blockquote_newline_edit_for_line, bounds_contains_point,
     document_selection_range, drag_distance_exceeds_threshold,
     empty_marker_pair_delete_backward_edit, extension_points_for_selection,
-    horizontal_offset_within_line, line_marker_hit_offset, list_newline_edit_for_line,
-    marker_autocomplete_edit, marker_skip_offset, selection_is_reversed,
-    selection_range_from_anchor_and_head, task_marker_state_char_range,
+    horizontal_offset_within_line, line_marker_hit_offset, list_indent_edit,
+    list_newline_edit_for_line, marker_autocomplete_edit, marker_skip_offset,
+    selection_is_reversed, selection_range_from_anchor_and_head, task_marker_state_char_range,
 };
 use encoding::byte_offset_to_utf16;
 use external::external_url_command;
@@ -63,6 +63,8 @@ actions!(
         ToggleItalic,
         ToggleCode,
         SelectAll,
+        IndentList,
+        OutdentList,
         Undo,
         Redo,
         Save,
@@ -343,6 +345,38 @@ impl Hanji {
         let range = document_selection_range(self.session.document().len());
 
         self.select_from_anchor_to(range.start, range.end, None, cx);
+    }
+
+    fn indent_list(&mut self, _: &IndentList, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_list_indent(ListIndentDirection::Increase, window, cx);
+    }
+
+    fn outdent_list(&mut self, _: &OutdentList, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_list_indent(ListIndentDirection::Decrease, window, cx);
+    }
+
+    fn apply_list_indent(
+        &mut self,
+        direction: ListIndentDirection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.marked_range = None;
+        let range = self.selected_range();
+        let Some((edits, selection_after)) =
+            list_indent_edit(self.session.document().text(), &range, direction)
+        else {
+            return;
+        };
+        let selection_after =
+            Selection::single(TextRange::new(selection_after.start, selection_after.end));
+        let transaction = Transaction::new(edits, Some(selection_after));
+
+        if self.session.apply(transaction).is_ok() {
+            self.preferred_column = None;
+            self.clear_selection_tracking();
+            self.document_changed(window, cx);
+        }
     }
 
     fn apply_markdown_command(
@@ -1106,6 +1140,8 @@ impl Render for Hanji {
             .on_action(cx.listener(Self::toggle_italic))
             .on_action(cx.listener(Self::toggle_code))
             .on_action(cx.listener(Self::select_all))
+            .on_action(cx.listener(Self::indent_list))
+            .on_action(cx.listener(Self::outdent_list))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
             .on_action(cx.listener(Self::save))
@@ -1172,6 +1208,8 @@ fn main() {
             KeyBinding::new("right", Right, None),
             KeyBinding::new("shift-left", ShiftLeft, None),
             KeyBinding::new("shift-right", ShiftRight, None),
+            KeyBinding::new("tab", IndentList, None),
+            KeyBinding::new("shift-tab", OutdentList, None),
             KeyBinding::new("alt-left", OptionLeft, None),
             KeyBinding::new("alt-right", OptionRight, None),
             KeyBinding::new("alt-shift-left", ShiftOptionLeft, None),
