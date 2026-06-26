@@ -5,13 +5,14 @@ mod renderer;
 mod session;
 mod snapshot;
 
-use std::{ops::Range, process};
+use std::{ops::Range, path::Path, process};
 
 use gpui::{
     App, Application, Bounds, ClipboardItem, Context, CursorStyle, EntityInputHandler, FocusHandle,
     Focusable, IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Pixels, Render, SharedString, UTF16Selection, Window, WindowBounds, WindowOptions, actions,
-    div, point, prelude::*, px, rgb, size,
+    PathPromptOptions, Pixels, PromptButton, PromptLevel, Render, ScrollHandle, SharedString,
+    UTF16Selection, Window, WindowBounds, WindowOptions, actions, div, point, prelude::*, px, rgb,
+    size,
 };
 use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
 use hanji_markdown::{
@@ -31,7 +32,9 @@ use encoding::byte_offset_to_utf16;
 use external::external_url_command;
 use renderer::{EditorElement, FONT_SIZE, LINE_HEIGHT, LinkHitbox, TaskMarkerHitbox};
 use session::open_initial_session;
-use snapshot::LineSnapshot;
+use snapshot::{LineSnapshot, line_for_offset};
+
+const CARET_SCROLL_MARGIN: f32 = 24.0;
 
 fn editor_cursor_style(is_hovering_link: bool) -> CursorStyle {
     if is_hovering_link {
@@ -39,6 +42,13 @@ fn editor_cursor_style(is_hovering_link: bool) -> CursorStyle {
     } else {
         CursorStyle::IBeam
     }
+}
+
+fn document_path_label(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 actions!(
@@ -79,10 +89,13 @@ actions!(
         Paste,
         Undo,
         Redo,
+        OpenDocument,
         Save,
         Quit
     ]
 );
+
+const OPEN_WITHOUT_SAVING_PROMPT_INDEX: usize = 1;
 
 struct Hanji {
     focus_handle: FocusHandle,
@@ -91,8 +104,10 @@ struct Hanji {
     last_lines: Vec<LineSnapshot>,
     last_task_markers: Vec<TaskMarkerHitbox>,
     last_link_hitboxes: Vec<LinkHitbox>,
+    editor_scroll: ScrollHandle,
     hovered_link_url: Option<String>,
     preferred_column: Option<usize>,
+    preferred_visual_x: Option<Pixels>,
     selection_anchor: Option<usize>,
     selection_head: Option<usize>,
     is_selecting: bool,
@@ -428,7 +443,7 @@ impl Hanji {
         let transaction = Transaction::new(edits, Some(selection_after));
 
         if self.session.apply(transaction).is_ok() {
-            self.preferred_column = None;
+            self.clear_preferred_vertical_target();
             self.clear_selection_tracking();
             self.document_changed(window, cx);
         }
@@ -449,7 +464,7 @@ impl Hanji {
             .edit_document(|document| execute_markdown_command(document, command))
         {
             Ok(true) => {
-                self.preferred_column = None;
+                self.clear_preferred_vertical_target();
                 self.document_changed(window, cx);
             }
             Ok(false) => {}
@@ -495,6 +510,94 @@ impl Hanji {
         }
 
         cx.notify();
+    }
+
+    fn open_document(&mut self, _: &OpenDocument, window: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        self.clear_selection_tracking();
+
+        let discard_changes = if self.session.is_dirty() {
+            Some(window.prompt(
+                PromptLevel::Warning,
+                "Open another file?",
+                Some("Unsaved changes in the current document will be lost."),
+                &[PromptButton::cancel("Cancel"), PromptButton::ok("Open")],
+                cx,
+            ))
+        } else {
+            None
+        };
+
+        cx.spawn_in(window, async move |editor, cx| {
+            if let Some(discard_changes) = discard_changes {
+                let Ok(answer) = discard_changes.await else {
+                    return;
+                };
+
+                if answer != OPEN_WITHOUT_SAVING_PROMPT_INDEX {
+                    return;
+                }
+            }
+
+            let selected_paths = match cx.update(|_, app| {
+                app.prompt_for_paths(PathPromptOptions {
+                    files: true,
+                    directories: false,
+                    multiple: false,
+                    prompt: Some("Open".into()),
+                })
+            }) {
+                Ok(selected_paths) => selected_paths,
+                Err(error) => {
+                    editor
+                        .update_in(cx, |editor, _, cx| {
+                            editor.status_message = Some(format!("Open failed: {error}"));
+                            cx.notify();
+                        })
+                        .ok();
+                    return;
+                }
+            };
+
+            let selected_paths = match selected_paths.await {
+                Ok(Ok(Some(paths))) => paths,
+                Ok(Ok(None)) => return,
+                Ok(Err(error)) => {
+                    editor
+                        .update_in(cx, |editor, _, cx| {
+                            editor.status_message = Some(format!("Open failed: {error}"));
+                            cx.notify();
+                        })
+                        .ok();
+                    return;
+                }
+                Err(error) => {
+                    editor
+                        .update_in(cx, |editor, _, cx| {
+                            editor.status_message = Some(format!("Open failed: {error}"));
+                            cx.notify();
+                        })
+                        .ok();
+                    return;
+                }
+            };
+
+            let Some(path) = selected_paths.into_iter().next() else {
+                return;
+            };
+
+            let opened_session = DocumentSession::open(path);
+            editor
+                .update_in(cx, |editor, window, cx| match opened_session {
+                    Ok(session) => editor.replace_session(session, window, cx),
+                    Err(error) => {
+                        editor.status_message = Some(format!("Open failed: {error}"));
+                        cx.notify();
+                    }
+                })
+                .ok();
+        })
+        .detach();
     }
 
     fn on_mouse_down(
@@ -581,7 +684,7 @@ impl Hanji {
     }
 
     fn move_caret(&mut self, offset: usize, cx: &mut Context<Self>) {
-        self.preferred_column = None;
+        self.clear_preferred_vertical_target();
         self.clear_selection_tracking();
         let offset = self
             .session
@@ -590,6 +693,7 @@ impl Hanji {
             .unwrap_or(offset);
 
         if self.session.set_selection(Selection::caret(offset)).is_ok() {
+            self.scroll_selection_into_view();
             cx.notify();
         }
     }
@@ -604,6 +708,29 @@ impl Hanji {
 
         if self.session.set_selection(Selection::caret(offset)).is_ok() {
             self.preferred_column = Some(column);
+            self.preferred_visual_x = None;
+            self.scroll_selection_into_view();
+            cx.notify();
+        }
+    }
+
+    fn move_caret_preserving_visual_x(
+        &mut self,
+        offset: usize,
+        visual_x: Pixels,
+        cx: &mut Context<Self>,
+    ) {
+        self.clear_selection_tracking();
+        let offset = self
+            .session
+            .document()
+            .nearest_grapheme_offset(offset)
+            .unwrap_or(offset);
+
+        if self.session.set_selection(Selection::caret(offset)).is_ok() {
+            self.preferred_column = None;
+            self.preferred_visual_x = Some(visual_x);
+            self.scroll_selection_into_view();
             cx.notify();
         }
     }
@@ -619,30 +746,93 @@ impl Hanji {
             range.end
         };
 
-        let Ok(position) = document.position_at_offset(offset) else {
-            return;
-        };
-        let Some(target_line) = position.line.checked_add_signed(direction) else {
-            return;
-        };
-
-        if target_line >= document.line_count() {
+        if let Some((target_offset, visual_x)) =
+            self.visual_vertical_target_for_offset(offset, direction)
+        {
+            self.move_caret_preserving_visual_x(target_offset, visual_x, cx);
             return;
         }
 
+        let Some((target_offset, column)) =
+            self.logical_vertical_target_for_offset(offset, direction)
+        else {
+            return;
+        };
+
+        self.move_caret_preserving_column(target_offset, column, cx);
+    }
+
+    fn logical_vertical_target_for_offset(
+        &self,
+        offset: usize,
+        direction: isize,
+    ) -> Option<(usize, usize)> {
+        let document = self.session.document();
+        let Ok(position) = document.position_at_offset(offset) else {
+            return None;
+        };
+        let Some(target_line) = position.line.checked_add_signed(direction) else {
+            return None;
+        };
+
+        if target_line >= document.line_count() {
+            return None;
+        }
+
         let column = self.preferred_column.unwrap_or(position.column);
-        let target_offset = document
+        document
             .offset_at_position(TextPosition::new(target_line, column))
             .or_else(|_| {
                 document
                     .line_range(target_line)
                     .map(|range| range.end)
                     .ok_or(hanji_core::EditError::InvalidRange)
-            });
+            })
+            .ok()
+            .map(|target_offset| (target_offset, column))
+    }
 
-        if let Ok(target_offset) = target_offset {
-            self.move_caret_preserving_column(target_offset, column, cx);
+    fn visual_vertical_target_for_offset(
+        &self,
+        offset: usize,
+        direction: isize,
+    ) -> Option<(usize, Pixels)> {
+        let (line_index, line) = self.line_index_for_offset(offset)?;
+        let visible_offset = line.source_to_visible_offset(offset);
+        let position = line.wrapped_caret_position(visible_offset)?;
+        let row = line.wrapped_row_for_visible_offset(visible_offset)?;
+        let current_row = self.flat_visual_row_index(line_index, row);
+        let target_row = current_row.checked_add_signed(direction)?;
+        let (target_line_index, target_line_row) =
+            self.line_index_and_row_for_flat_visual_row(target_row)?;
+        let target_line = self.last_lines.get(target_line_index)?;
+        let visual_x = self.preferred_visual_x.unwrap_or(position.x);
+        let target_visible_offset =
+            target_line.visible_offset_for_wrapped_row_x(target_line_row, visual_x);
+        let target_offset = target_line.visible_to_source_caret_offset(target_visible_offset);
+
+        Some((target_offset, visual_x))
+    }
+
+    fn flat_visual_row_index(&self, line_index: usize, row: usize) -> usize {
+        self.last_lines
+            .iter()
+            .take(line_index)
+            .map(LineSnapshot::wrapped_row_count)
+            .sum::<usize>()
+            + row
+    }
+
+    fn line_index_and_row_for_flat_visual_row(&self, mut row: usize) -> Option<(usize, usize)> {
+        for (line_index, line) in self.last_lines.iter().enumerate() {
+            let row_count = line.wrapped_row_count();
+            if row < row_count {
+                return Some((line_index, row));
+            }
+            row -= row_count;
         }
+
+        None
     }
 
     fn extend_selection_horizontally(&mut self, direction: isize, cx: &mut Context<Self>) {
@@ -661,32 +851,22 @@ impl Hanji {
     }
 
     fn extend_selection_vertically(&mut self, direction: isize, cx: &mut Context<Self>) {
-        let document = self.session.document();
         let (anchor, head) = self.selection_extension_points(direction);
-        let Ok(position) = document.position_at_offset(head) else {
-            return;
-        };
-        let Some(target_line) = position.line.checked_add_signed(direction) else {
-            return;
-        };
 
-        if target_line >= document.line_count() {
+        if let Some((target_offset, visual_x)) =
+            self.visual_vertical_target_for_offset(head, direction)
+        {
+            self.select_from_anchor_to_preserving_visual_x(anchor, target_offset, visual_x, cx);
             return;
         }
 
-        let column = self.preferred_column.unwrap_or(position.column);
-        let target_offset = document
-            .offset_at_position(TextPosition::new(target_line, column))
-            .or_else(|_| {
-                document
-                    .line_range(target_line)
-                    .map(|range| range.end)
-                    .ok_or(hanji_core::EditError::InvalidRange)
-            });
+        let Some((target_offset, column)) =
+            self.logical_vertical_target_for_offset(head, direction)
+        else {
+            return;
+        };
 
-        if let Ok(target_offset) = target_offset {
-            self.select_from_anchor_to(anchor, target_offset, Some(column), cx);
-        }
+        self.select_from_anchor_to(anchor, target_offset, Some(column), cx);
     }
 
     fn extend_selection_by_word(&mut self, direction: isize, cx: &mut Context<Self>) {
@@ -753,8 +933,37 @@ impl Hanji {
             self.selection_anchor = Some(anchor);
             self.selection_head = Some(head);
             self.preferred_column = preferred_column;
+            self.preferred_visual_x = None;
+            self.scroll_selection_into_view();
             cx.notify();
         }
+    }
+
+    fn select_from_anchor_to_preserving_visual_x(
+        &mut self,
+        anchor: usize,
+        head: usize,
+        visual_x: Pixels,
+        cx: &mut Context<Self>,
+    ) {
+        let document = self.session.document();
+        let anchor = document.nearest_grapheme_offset(anchor).unwrap_or(anchor);
+        let head = document.nearest_grapheme_offset(head).unwrap_or(head);
+        let range = selection_range_from_anchor_and_head(anchor, head);
+
+        if self.session.set_selection(Selection::single(range)).is_ok() {
+            self.selection_anchor = Some(anchor);
+            self.selection_head = Some(head);
+            self.preferred_column = None;
+            self.preferred_visual_x = Some(visual_x);
+            self.scroll_selection_into_view();
+            cx.notify();
+        }
+    }
+
+    fn clear_preferred_vertical_target(&mut self) {
+        self.preferred_column = None;
+        self.preferred_visual_x = None;
     }
 
     fn clear_selection_tracking(&mut self) {
@@ -787,10 +996,80 @@ impl Hanji {
             return false;
         }
 
-        self.preferred_column = None;
+        self.clear_preferred_vertical_target();
         self.clear_selection_tracking();
         self.document_changed(window, cx);
         true
+    }
+
+    fn replace_session(
+        &mut self,
+        session: DocumentSession,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let opened_name = document_path_label(session.path());
+
+        self.session = session;
+        self.marked_range = None;
+        self.last_lines.clear();
+        self.last_task_markers.clear();
+        self.last_link_hitboxes.clear();
+        self.editor_scroll.set_offset(point(px(0.0), px(0.0)));
+        self.hovered_link_url = None;
+        self.clear_preferred_vertical_target();
+        self.clear_selection_tracking();
+        self.status_message = Some(format!("Opened {opened_name}."));
+
+        window.focus(&self.focus_handle);
+        self.update_window_title(window);
+        cx.notify();
+    }
+
+    fn scroll_selection_into_view(&self) {
+        let selection = self.session.document().selection().primary();
+        let target_offset = self.selection_head.unwrap_or(selection.end);
+        let Some(line) = line_for_offset(&self.last_lines, target_offset) else {
+            return;
+        };
+
+        let viewport = self.editor_scroll.bounds();
+        if viewport.size.height <= px(0.0) {
+            return;
+        }
+
+        let margin = px(CARET_SCROLL_MARGIN);
+        let target_top = viewport.top() + margin;
+        let target_bottom = viewport.bottom() - margin;
+        let target_left = viewport.left() + margin;
+        let target_right = viewport.right() - margin;
+        let mut offset = self.editor_scroll.offset();
+        let caret_position = line
+            .wrapped_caret_position(line.source_to_visible_offset(target_offset))
+            .unwrap_or_else(|| point(px(0.0), px(0.0)));
+        let caret_x = line.bounds.left() + caret_position.x;
+        let caret_top = line.bounds.top() + caret_position.y;
+        let caret_bottom = caret_top + line.line_height;
+
+        if caret_top < target_top {
+            offset.y += target_top - caret_top;
+        } else if caret_bottom > target_bottom {
+            offset.y -= caret_bottom - target_bottom;
+        }
+
+        if caret_x < target_left {
+            offset.x += target_left - caret_x;
+        } else if caret_x > target_right {
+            offset.x -= caret_x - target_right;
+        }
+
+        offset.x = offset
+            .x
+            .clamp(-self.editor_scroll.max_offset().width, px(0.0));
+        offset.y = offset
+            .y
+            .clamp(-self.editor_scroll.max_offset().height, px(0.0));
+        self.editor_scroll.set_offset(offset);
     }
 
     fn blockquote_newline_edit(
@@ -888,11 +1167,11 @@ impl Hanji {
             return offset;
         }
 
-        let local_x = position.x - line.bounds.left();
-        let visible_offset = line
-            .layout
-            .closest_index_for_x(local_x)
-            .min(line.visible_len);
+        let local_position = point(
+            position.x - line.bounds.left(),
+            position.y - line.bounds.top(),
+        );
+        let visible_offset = line.visible_offset_for_local_position(local_position);
         let offset = line.visible_to_source_caret_offset(visible_offset);
 
         self.session
@@ -998,13 +1277,17 @@ impl Hanji {
         let line = self.line_for_offset(range.start)?;
         let start = line.source_to_visible_offset(range.start);
         let end = line.source_to_visible_offset(range.end);
-        let start_x = line.layout.x_for_index(start);
-        let end_x = line.layout.x_for_index(end).max(start_x + px(2.0));
+        let start_position = line
+            .wrapped_caret_position(start)
+            .unwrap_or_else(|| point(px(0.0), px(0.0)));
+        let end_position = line.wrapped_caret_position(end).unwrap_or(start_position);
+        let left = line.bounds.left() + start_position.x;
+        let right = (line.bounds.left() + end_position.x).max(left + px(2.0));
+        let top = line.bounds.top() + start_position.y;
+        let bottom =
+            (line.bounds.top() + end_position.y + line.line_height).max(top + line.line_height);
 
-        Some(Bounds::from_corners(
-            point(line.bounds.left() + start_x, line.bounds.top()),
-            point(line.bounds.left() + end_x, line.bounds.bottom()),
-        ))
+        Some(Bounds::from_corners(point(left, top), point(right, bottom)))
     }
 
     fn line_for_offset(&self, offset: usize) -> Option<&LineSnapshot> {
@@ -1012,6 +1295,18 @@ impl Hanji {
             .iter()
             .find(|line| offset >= line.range.start && offset <= line.range.end)
             .or_else(|| self.last_lines.last())
+    }
+
+    fn line_index_for_offset(&self, offset: usize) -> Option<(usize, &LineSnapshot)> {
+        self.last_lines
+            .iter()
+            .enumerate()
+            .find(|(_, line)| offset >= line.range.start && offset <= line.range.end)
+            .or_else(|| {
+                self.last_lines
+                    .last()
+                    .map(|line| (self.last_lines.len() - 1, line))
+            })
     }
 
     fn snap_byte_range(&self, range: Range<usize>) -> Range<usize> {
@@ -1029,6 +1324,7 @@ impl Hanji {
     fn document_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.status_message = None;
         self.update_window_title(window);
+        self.scroll_selection_into_view();
         cx.notify();
     }
 
@@ -1041,12 +1337,7 @@ impl Hanji {
     }
 
     fn document_label(&self) -> String {
-        let name = self
-            .session
-            .path()
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("Untitled");
+        let name = document_path_label(self.session.path());
         let dirty = if self.session.is_dirty() { " *" } else { "" };
 
         format!("{name}{dirty}")
@@ -1227,42 +1518,48 @@ impl Render for Hanji {
             .on_action(cx.listener(Self::outdent_list))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
+            .on_action(cx.listener(Self::open_document))
             .on_action(cx.listener(Self::save))
             .flex()
             .flex_col()
-            .gap_4()
             .size_full()
-            .bg(rgb(0xf8f7f2))
-            .p_8()
-            .text_color(rgb(0x25231f))
+            .bg(rgb(0xffffff))
+            .p(px(24.0))
+            .text_color(rgb(0x111111))
             .child(
                 div()
                     .flex()
+                    .flex_shrink_0()
                     .items_center()
                     .justify_between()
-                    .child(div().text_xl().child("Hanji"))
+                    .pb_2()
+                    .child(div().text_sm().text_color(rgb(0x111111)).child("Hanji"))
                     .child(
                         div()
                             .text_sm()
-                            .text_color(rgb(0x69645a))
+                            .text_color(rgb(0x6b7280))
                             .child(document_label),
                     ),
             )
             .child(
                 div()
+                    .flex_shrink_0()
+                    .h(px(20.0))
                     .text_sm()
-                    .text_color(rgb(0x69645a))
+                    .text_color(rgb(0x6b7280))
                     .child(status_message),
             )
             .child(
                 div()
+                    .id("editor-scroll")
                     .flex_1()
                     .w_full()
-                    .min_h(px(360.0))
+                    .min_h(px(0.0))
                     .p_4()
-                    .border_1()
-                    .border_color(rgb(0xd8d3c7))
-                    .bg(rgb(0xfffefb))
+                    .overflow_y_scroll()
+                    .overflow_x_hidden()
+                    .scrollbar_width(px(8.0))
+                    .track_scroll(&self.editor_scroll)
                     .line_height(px(LINE_HEIGHT))
                     .text_size(px(FONT_SIZE))
                     .font_family("Menlo")
@@ -1285,6 +1582,15 @@ mod tests {
     fn editor_cursor_uses_pointing_hand_when_hovering_link() {
         assert_eq!(editor_cursor_style(true), CursorStyle::PointingHand);
         assert_eq!(editor_cursor_style(false), CursorStyle::IBeam);
+    }
+
+    #[test]
+    fn document_path_label_prefers_file_name() {
+        assert_eq!(
+            document_path_label(Path::new("/tmp/notes/hanji.md")),
+            "hanji.md"
+        );
+        assert_eq!(document_path_label(Path::new("/")), "/");
     }
 }
 
@@ -1333,6 +1639,7 @@ fn main() {
             KeyBinding::new("cmd-v", Paste, None),
             KeyBinding::new("cmd-z", Undo, None),
             KeyBinding::new("cmd-shift-z", Redo, None),
+            KeyBinding::new("cmd-o", OpenDocument, None),
             KeyBinding::new("cmd-s", Save, None),
             KeyBinding::new("cmd-q", Quit, None),
         ]);
@@ -1355,8 +1662,10 @@ fn main() {
                             last_lines: Vec::new(),
                             last_task_markers: Vec::new(),
                             last_link_hitboxes: Vec::new(),
+                            editor_scroll: ScrollHandle::new(),
                             hovered_link_url: None,
                             preferred_column: None,
+                            preferred_visual_x: None,
                             selection_anchor: None,
                             selection_head: None,
                             is_selecting: false,

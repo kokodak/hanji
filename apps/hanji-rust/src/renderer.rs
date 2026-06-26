@@ -1,8 +1,8 @@
 use gpui::{
     App, BorderStyle, Bounds, Element, ElementId, ElementInputHandler, Entity, FontWeight,
     GlobalElementId, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels, ShapedLine,
-    SharedString, StrikethroughStyle, Style, TextRun, TextStyle, UnderlineStyle, Window, fill,
-    point, px, quad, relative, rgb, rgba, size,
+    SharedString, StrikethroughStyle, Style, TextAlign, TextRun, TextStyle, UnderlineStyle, Window,
+    WrappedLine, fill, point, px, quad, relative, rgb, rgba, size,
 };
 use hanji_core::TextRange;
 use hanji_markdown::{
@@ -34,6 +34,9 @@ const CODE_BLOCK_TEXT_INSET: f32 = 12.0;
 const HORIZONTAL_RULE_COLOR: u32 = 0xd8d3c7;
 const HORIZONTAL_RULE_INSET: f32 = 4.0;
 const HORIZONTAL_RULE_HEIGHT: f32 = 1.0;
+const EDITOR_CHROME_HORIZONTAL_PADDING: f32 = 80.0;
+const EDITOR_SCROLL_HORIZONTAL_PADDING: f32 = 32.0;
+const MIN_WRAP_WIDTH: f32 = 120.0;
 
 pub(crate) struct EditorElement {
     pub(crate) editor: Entity<Hanji>,
@@ -158,11 +161,32 @@ impl Element for EditorElement {
     ) -> (LayoutId, Self::RequestLayoutState) {
         let editor = self.editor.read(cx);
         let document = editor.session.document();
+        let selection = document.selection().primary();
+        let text_style = window.text_style();
         let projection = project_document(document);
         let mut height = 0.0;
+        let wrap_container_width = request_layout_wrap_width(editor, window);
 
         for line in projection.lines() {
-            height += line_presentation(line.kind).line_height;
+            let presentation = line_presentation(line.kind);
+            let visible_segments = line.visible_segments_revealing_source_in(Some(selection));
+            let line_text: SharedString = visible_text_from_segments(&visible_segments).into();
+            let runs = line_text_runs(&visible_segments, presentation, &text_style);
+            let content_offset_width = hidden_list_content_offset_width_for_layout(
+                line.kind,
+                line.source,
+                line.range,
+                line.marker_range,
+                &visible_segments,
+                presentation,
+                &text_style,
+                window,
+            );
+            let wrap_width =
+                line_wrap_width(wrap_container_width, presentation, content_offset_width);
+            let layout = shape_wrapped_line(line_text, presentation, &runs, wrap_width, window);
+
+            height += f32::from(layout.size(px(presentation.line_height)).height);
         }
 
         let mut style = Style::default();
@@ -203,39 +227,38 @@ impl Element for EditorElement {
         for line in projection.lines() {
             let presentation = line_presentation(line.kind);
             let visible_segments = line.visible_segments_revealing_source_in(Some(selection));
+            let marker_container_bounds = Bounds::new(
+                point(bounds.left(), bounds.top() + px(top)),
+                size(bounds.size.width, px(presentation.line_height)),
+            );
             let list_marker_geometry = hidden_list_marker_geometry(
                 line.kind,
                 line.source,
                 line.range,
                 line.marker_range,
                 &visible_segments,
-                Bounds::new(
-                    point(bounds.left(), bounds.top() + px(top)),
-                    size(bounds.size.width, px(presentation.line_height)),
-                ),
+                marker_container_bounds,
                 presentation,
                 &text_style,
                 window,
             );
             let line_text: SharedString = visible_text_from_segments(&visible_segments).into();
             let runs = line_text_runs(&visible_segments, presentation, &text_style);
-            let layout =
-                window
-                    .text_system()
-                    .shape_line(line_text, px(presentation.font_size), &runs, None);
+            let content_offset_width =
+                list_marker_geometry.map_or(px(0.0), |geometry| geometry.content_offset_width);
+            let wrap_width = line_wrap_width(bounds.size.width, presentation, content_offset_width);
+            let layout = shape_wrapped_line(line_text, presentation, &runs, wrap_width, window);
+            let wrapped_height = layout.size(px(presentation.line_height)).height;
             let container_bounds = Bounds::new(
                 point(bounds.left(), bounds.top() + px(top)),
-                size(bounds.size.width, px(presentation.line_height)),
+                size(bounds.size.width, wrapped_height),
             );
             let line_bounds = Bounds::new(
                 point(
-                    bounds.left()
-                        + px(presentation.text_indent)
-                        + list_marker_geometry
-                            .map_or(px(0.0), |geometry| geometry.content_offset_width),
+                    bounds.left() + px(presentation.text_indent) + content_offset_width,
                     bounds.top() + px(top),
                 ),
-                size(bounds.size.width, px(presentation.line_height)),
+                size(wrap_width, wrapped_height),
             );
             record_blockquote_bar_run(
                 &mut blockquote_bar_runs,
@@ -277,31 +300,28 @@ impl Element for EditorElement {
             {
                 horizontal_rules.push(horizontal_rule_quad(container_bounds));
             }
-            code_backgrounds.extend(code_background_quads(
-                &visible_segments,
-                &layout,
-                line_bounds,
-            ));
-            link_hitboxes.extend(link_hitboxes_for_segments(
-                &visible_segments,
-                &layout,
-                line_bounds,
-                line.source,
-                line.range.start,
-            ));
-            top += presentation.line_height;
+            top += f32::from(wrapped_height);
             let visible_len = visible_segments
                 .last()
                 .map_or(0, |segment| segment.visible_range.end);
 
-            lines.push(LineSnapshot::new(
+            let line_snapshot = LineSnapshot::new(
                 line.range,
                 line.marker_range,
                 visible_len,
-                visible_segments,
+                visible_segments.clone(),
                 layout,
+                px(presentation.line_height),
                 line_bounds,
+            );
+            code_backgrounds.extend(code_background_quads(&visible_segments, &line_snapshot));
+            link_hitboxes.extend(link_hitboxes_for_segments(
+                &visible_segments,
+                &line_snapshot,
+                line.source,
+                line.range.start,
             ));
+            lines.push(line_snapshot);
         }
         flush_blockquote_bar_run(&mut blockquote_bar_runs, &mut blockquote_bar_run);
         flush_code_block_background_run(
@@ -379,7 +399,9 @@ impl Element for EditorElement {
             line.layout
                 .paint(
                     line.bounds.origin,
-                    line.bounds.bottom() - line.bounds.top(),
+                    line.line_height,
+                    TextAlign::Left,
+                    Some(line.bounds),
                     window,
                     cx,
                 )
@@ -411,6 +433,45 @@ fn visible_text_from_segments(segments: &[ProjectedVisibleSegment<'_>]) -> Strin
     }
 
     text
+}
+
+fn request_layout_wrap_width(editor: &Hanji, window: &Window) -> Pixels {
+    let scroll_width =
+        editor.editor_scroll.bounds().size.width - px(EDITOR_SCROLL_HORIZONTAL_PADDING);
+    if scroll_width > px(0.0) {
+        return scroll_width.max(px(MIN_WRAP_WIDTH));
+    }
+
+    (window.viewport_size().width - px(EDITOR_CHROME_HORIZONTAL_PADDING)).max(px(MIN_WRAP_WIDTH))
+}
+
+fn line_wrap_width(
+    container_width: Pixels,
+    presentation: LinePresentation,
+    content_offset_width: Pixels,
+) -> Pixels {
+    (container_width - px(presentation.text_indent) - content_offset_width).max(px(MIN_WRAP_WIDTH))
+}
+
+fn shape_wrapped_line(
+    text: SharedString,
+    presentation: LinePresentation,
+    runs: &[TextRun],
+    wrap_width: Pixels,
+    window: &mut Window,
+) -> WrappedLine {
+    window
+        .text_system()
+        .shape_text(
+            text,
+            px(presentation.font_size),
+            runs,
+            Some(wrap_width),
+            None,
+        )
+        .ok()
+        .and_then(|mut lines| lines.pop())
+        .unwrap_or_default()
 }
 
 fn line_marker_is_revealed(segments: &[ProjectedVisibleSegment<'_>]) -> bool {
@@ -600,6 +661,41 @@ fn hidden_list_marker_geometry(
         content_offset_width,
         marker_bounds,
     })
+}
+
+fn hidden_list_content_offset_width_for_layout(
+    line_kind: MarkdownLine,
+    line_source: &str,
+    line_range: TextRange,
+    marker_range: Option<TextRange>,
+    visible_segments: &[ProjectedVisibleSegment<'_>],
+    presentation: LinePresentation,
+    text_style: &TextStyle,
+    window: &mut Window,
+) -> Pixels {
+    if !matches!(line_kind, MarkdownLine::ListItem { .. })
+        || line_marker_is_revealed(visible_segments)
+    {
+        return px(0.0);
+    }
+
+    let marker_range = match marker_range {
+        Some(marker_range) => marker_range,
+        None => return px(0.0),
+    };
+    let Some(marker_source) =
+        line_source.get(marker_range.start - line_range.start..marker_range.end - line_range.start)
+    else {
+        return px(0.0);
+    };
+    let content_marker_source = hidden_list_content_marker_source(marker_source, line_kind);
+
+    text_width(
+        content_marker_source,
+        presentation.font_size,
+        text_style,
+        window,
+    ) + px(hidden_list_content_extra_gap(line_kind))
 }
 
 fn list_marker_indent_len(source: &str) -> usize {
@@ -1023,12 +1119,11 @@ fn collect_code_block_background_bounds(lines: &[(Bounds<Pixels>, bool)]) -> Vec
 
 fn code_background_quads(
     segments: &[ProjectedVisibleSegment<'_>],
-    layout: &ShapedLine,
-    bounds: Bounds<Pixels>,
+    line: &LineSnapshot,
 ) -> Vec<PaintQuad> {
     code_background_ranges(segments)
         .into_iter()
-        .filter_map(|range| code_background_quad(layout, bounds, range))
+        .flat_map(|range| code_background_quads_for_range(line, range))
         .collect()
 }
 
@@ -1045,34 +1140,32 @@ fn code_block_background_quad(bounds: Bounds<Pixels>) -> PaintQuad {
 
 fn link_hitboxes_for_segments(
     segments: &[ProjectedVisibleSegment<'_>],
-    layout: &ShapedLine,
-    bounds: Bounds<Pixels>,
+    line: &LineSnapshot,
     line_source: &str,
     line_start: usize,
 ) -> Vec<LinkHitbox> {
-    segments
-        .iter()
-        .filter_map(|segment| {
-            if !matches!(segment.kind, ProjectedSegmentKind::LinkText) {
-                return None;
-            }
+    let mut hitboxes = Vec::new();
 
-            let url =
-                link_destination_from_source(line_source, line_start, segment.source_outer_range)?;
-            let start_x = layout.x_for_index(segment.visible_range.start);
-            let end_x = layout
-                .x_for_index(segment.visible_range.end)
-                .max(start_x + px(2.0));
+    for segment in segments {
+        if !matches!(segment.kind, ProjectedSegmentKind::LinkText) {
+            continue;
+        }
 
-            Some(LinkHitbox {
-                bounds: Bounds::from_corners(
-                    point(bounds.left() + start_x, bounds.top()),
-                    point(bounds.left() + end_x, bounds.bottom()),
-                ),
+        let Some(url) =
+            link_destination_from_source(line_source, line_start, segment.source_outer_range)
+        else {
+            continue;
+        };
+
+        for bounds in line.wrapped_range_bounds(segment.visible_range, px(2.0)) {
+            hitboxes.push(LinkHitbox {
+                bounds,
                 url: url.to_string(),
-            })
-        })
-        .collect()
+            });
+        }
+    }
+
+    hitboxes
 }
 
 fn link_destination_from_source<'a>(
@@ -1143,25 +1236,11 @@ fn is_supported_link_destination(destination: &str) -> bool {
         .is_some_and(|rest| !rest.is_empty())
 }
 
-fn code_background_quad(
-    layout: &ShapedLine,
-    bounds: Bounds<Pixels>,
-    range: TextRange,
-) -> Option<PaintQuad> {
-    if range.is_empty() {
-        return None;
-    }
-
-    let start_x = layout.x_for_index(range.start);
-    let end_x = layout.x_for_index(range.end);
-
-    Some(fill(
-        Bounds::from_corners(
-            point(bounds.left() + start_x, bounds.top()),
-            point(bounds.left() + end_x, bounds.bottom()),
-        ),
-        rgba(0x25231f2a),
-    ))
+fn code_background_quads_for_range(line: &LineSnapshot, range: TextRange) -> Vec<PaintQuad> {
+    line.wrapped_range_bounds(range, px(0.0))
+        .into_iter()
+        .map(|bounds| fill(bounds, rgba(0x25231f2a)))
+        .collect()
 }
 
 fn line_presentation(line: MarkdownLine) -> LinePresentation {
@@ -1235,12 +1314,15 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
 fn caret_quad(lines: &[LineSnapshot], offset: usize) -> Option<PaintQuad> {
     let line = line_for_offset(lines, offset)?;
     let visible_offset = line.source_to_visible_offset(offset);
-    let x = line.layout.x_for_index(visible_offset);
+    let position = line.wrapped_caret_position(visible_offset)?;
 
     Some(fill(
         Bounds::new(
-            point(line.bounds.left() + x, line.bounds.top()),
-            size(px(2.0), line.bounds.bottom() - line.bounds.top()),
+            point(
+                line.bounds.left() + position.x,
+                line.bounds.top() + position.y,
+            ),
+            size(px(2.0), line.line_height),
         ),
         rgb(0x25231f),
     ))
@@ -1253,31 +1335,25 @@ fn selection_quads(lines: &[LineSnapshot], selection: TextRange) -> Vec<PaintQua
 
     lines
         .iter()
-        .filter_map(|line| {
+        .flat_map(|line| {
             let start = selection.start.max(line.range.start);
             let end = selection.end.min(line.range.end);
 
             if start >= end {
-                return None;
+                return Vec::new();
             }
 
             let visible_start = line.source_to_visible_offset(start);
             let visible_end = line.source_to_visible_offset(end);
 
             if visible_start >= visible_end {
-                return None;
+                return Vec::new();
             }
 
-            let start_x = line.layout.x_for_index(visible_start);
-            let end_x = line.layout.x_for_index(visible_end);
-
-            Some(fill(
-                Bounds::from_corners(
-                    point(line.bounds.left() + start_x, line.bounds.top()),
-                    point(line.bounds.left() + end_x, line.bounds.bottom()),
-                ),
-                rgba(0x276ef140),
-            ))
+            line.wrapped_range_bounds(TextRange::new(visible_start, visible_end), px(0.0))
+                .into_iter()
+                .map(|bounds| fill(bounds, rgba(0x276ef140)))
+                .collect()
         })
         .collect()
 }

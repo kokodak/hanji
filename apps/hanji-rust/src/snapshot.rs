@@ -1,4 +1,4 @@
-use gpui::{Bounds, Pixels, ShapedLine};
+use gpui::{Bounds, Pixels, Point, WrappedLine, point, px};
 use hanji_core::TextRange;
 use hanji_markdown::{ProjectedSegmentKind, ProjectedVisibleSegment};
 
@@ -8,7 +8,8 @@ pub(crate) struct LineSnapshot {
     pub(crate) marker_range: Option<TextRange>,
     pub(crate) visible_len: usize,
     segments: Vec<LineSegmentSnapshot>,
-    pub(crate) layout: ShapedLine,
+    pub(crate) layout: WrappedLine,
+    pub(crate) line_height: Pixels,
     pub(crate) bounds: Bounds<Pixels>,
 }
 
@@ -18,7 +19,8 @@ impl LineSnapshot {
         marker_range: Option<TextRange>,
         visible_len: usize,
         visible_segments: Vec<ProjectedVisibleSegment<'_>>,
-        layout: ShapedLine,
+        layout: WrappedLine,
+        line_height: Pixels,
         bounds: Bounds<Pixels>,
     ) -> Self {
         Self {
@@ -27,6 +29,7 @@ impl LineSnapshot {
             visible_len,
             segments: visible_segments.into_iter().map(Into::into).collect(),
             layout,
+            line_height,
             bounds,
         }
     }
@@ -48,6 +51,129 @@ impl LineSnapshot {
             visible_offset,
         )
     }
+
+    pub(crate) fn wrapped_row_count(&self) -> usize {
+        self.layout.wrap_boundaries().len() + 1
+    }
+
+    pub(crate) fn wrapped_caret_position(&self, visible_offset: usize) -> Option<Point<Pixels>> {
+        let visible_offset = visible_offset.min(self.visible_len);
+
+        for visual in self.wrapped_visual_ranges() {
+            let is_last_row = visual.range.end == self.visible_len;
+
+            if visible_offset < visual.range.start {
+                continue;
+            }
+
+            if visible_offset < visual.range.end
+                || (is_last_row && visible_offset == visual.range.end)
+            {
+                let x = self.layout.unwrapped_layout.x_for_index(visible_offset) - visual.start_x;
+                return Some(point(x, self.line_height * visual.row as f32));
+            }
+
+            if visible_offset == visual.range.end && !is_last_row {
+                continue;
+            }
+        }
+
+        self.layout
+            .position_for_index(visible_offset, self.line_height)
+    }
+
+    pub(crate) fn wrapped_row_for_visible_offset(&self, visible_offset: usize) -> Option<usize> {
+        let position = self.wrapped_caret_position(visible_offset)?;
+        Some((position.y / self.line_height) as usize)
+    }
+
+    pub(crate) fn visible_offset_for_local_position(&self, position: Point<Pixels>) -> usize {
+        self.layout
+            .closest_index_for_position(position, self.line_height)
+            .unwrap_or_else(|offset| offset)
+            .min(self.visible_len)
+    }
+
+    pub(crate) fn visible_offset_for_wrapped_row_x(&self, row: usize, x: Pixels) -> usize {
+        let row = row.min(self.wrapped_row_count().saturating_sub(1));
+        self.visible_offset_for_local_position(point(
+            x.max(px(0.0)),
+            self.line_height * row as f32 + self.line_height / 2.0,
+        ))
+    }
+
+    pub(crate) fn wrapped_range_bounds(
+        &self,
+        range: TextRange,
+        min_width: Pixels,
+    ) -> Vec<Bounds<Pixels>> {
+        if range.is_empty() {
+            return Vec::new();
+        }
+
+        let range = TextRange::new(
+            range.start.min(self.visible_len),
+            range.end.min(self.visible_len),
+        );
+        let mut bounds = Vec::new();
+
+        for visual in self.wrapped_visual_ranges() {
+            let start = range.start.max(visual.range.start);
+            let end = range.end.min(visual.range.end);
+
+            if start >= end {
+                continue;
+            }
+
+            let start_x = self.layout.unwrapped_layout.x_for_index(start) - visual.start_x;
+            let end_x = self.layout.unwrapped_layout.x_for_index(end) - visual.start_x;
+            let top = self.bounds.top() + self.line_height * visual.row as f32;
+            let left = self.bounds.left() + start_x;
+            let right = (self.bounds.left() + end_x).max(left + min_width);
+
+            bounds.push(Bounds::from_corners(
+                point(left, top),
+                point(right, top + self.line_height),
+            ));
+        }
+
+        bounds
+    }
+
+    fn wrapped_visual_ranges(&self) -> Vec<WrappedVisualRange> {
+        let mut ranges = Vec::new();
+        let mut start = 0;
+        let mut start_x = px(0.0);
+
+        for (row, boundary) in self.layout.wrap_boundaries().iter().enumerate() {
+            let Some(run) = self.layout.runs().get(boundary.run_ix) else {
+                continue;
+            };
+            let Some(glyph) = run.glyphs.get(boundary.glyph_ix) else {
+                continue;
+            };
+            let end = glyph.index.min(self.visible_len);
+
+            if start < end {
+                ranges.push(WrappedVisualRange {
+                    row,
+                    range: TextRange::new(start, end),
+                    start_x,
+                });
+            }
+
+            start = end;
+            start_x = glyph.position.x;
+        }
+
+        ranges.push(WrappedVisualRange {
+            row: self.wrapped_row_count() - 1,
+            range: TextRange::new(start, self.visible_len),
+            start_x,
+        });
+
+        ranges
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -56,6 +182,13 @@ struct LineSegmentSnapshot {
     source_range: TextRange,
     source_outer_range: TextRange,
     uses_outer_caret_edges: bool,
+}
+
+#[derive(Clone, Copy)]
+struct WrappedVisualRange {
+    row: usize,
+    range: TextRange,
+    start_x: Pixels,
 }
 
 impl From<ProjectedVisibleSegment<'_>> for LineSegmentSnapshot {
