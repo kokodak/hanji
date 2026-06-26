@@ -70,6 +70,7 @@ actions!(
         ToggleStrong,
         ToggleItalic,
         ToggleCode,
+        InsertLink,
         SelectAll,
         IndentList,
         OutdentList,
@@ -345,6 +346,15 @@ impl Hanji {
         self.apply_markdown_command(
             MarkdownCommand::ToggleCode,
             "Could not toggle code text.",
+            window,
+            cx,
+        );
+    }
+
+    fn insert_link(&mut self, _: &InsertLink, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_markdown_command(
+            MarkdownCommand::InsertLink,
+            "Could not insert link.",
             window,
             cx,
         );
@@ -1208,6 +1218,7 @@ impl Render for Hanji {
             .on_action(cx.listener(Self::toggle_strong))
             .on_action(cx.listener(Self::toggle_italic))
             .on_action(cx.listener(Self::toggle_code))
+            .on_action(cx.listener(Self::insert_link))
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::cut))
@@ -1315,6 +1326,7 @@ fn main() {
             KeyBinding::new("cmd-b", ToggleStrong, None),
             KeyBinding::new("cmd-i", ToggleItalic, None),
             KeyBinding::new("cmd-e", ToggleCode, None),
+            KeyBinding::new("cmd-k", InsertLink, None),
             KeyBinding::new("cmd-a", SelectAll, None),
             KeyBinding::new("cmd-c", Copy, None),
             KeyBinding::new("cmd-x", Cut, None),

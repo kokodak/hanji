@@ -3,8 +3,8 @@ mod line;
 mod projection;
 
 pub use command::{
-    MarkdownCommand, MarkdownCommandError, execute_markdown_command, toggle_code, toggle_emphasis,
-    toggle_strong,
+    MarkdownCommand, MarkdownCommandError, execute_markdown_command, insert_link, toggle_code,
+    toggle_emphasis, toggle_strong,
 };
 pub use line::{
     MarkdownCodeBlockLine, MarkdownLine, MarkdownListItem, MarkdownListMarker, MarkdownTaskState,

@@ -7,6 +7,7 @@ pub enum MarkdownCommand {
     ToggleStrong,
     ToggleEmphasis,
     ToggleCode,
+    InsertLink,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +30,7 @@ pub fn execute_markdown_command(
         MarkdownCommand::ToggleStrong => toggle_strong(document),
         MarkdownCommand::ToggleEmphasis => toggle_emphasis(document),
         MarkdownCommand::ToggleCode => toggle_code(document),
+        MarkdownCommand::InsertLink => insert_link(document),
     }
 }
 
@@ -42,6 +44,29 @@ pub fn toggle_emphasis(document: &mut Document) -> Result<bool, MarkdownCommandE
 
 pub fn toggle_code(document: &mut Document) -> Result<bool, MarkdownCommandError> {
     toggle_delimited(document, "`")
+}
+
+pub fn insert_link(document: &mut Document) -> Result<bool, MarkdownCommandError> {
+    let range = single_selection_range(document)?;
+
+    if let Some(destination) = existing_link_destination_range(document.text(), range) {
+        document.set_selection(Selection::single(destination))?;
+        return Ok(true);
+    }
+
+    if range.is_empty() {
+        return Ok(false);
+    }
+
+    let Some((replacement, selection_after)) = link_replacement(document.text(), range) else {
+        return Ok(false);
+    };
+    document.apply(Transaction::new(
+        vec![TextEdit::replace(range, replacement)],
+        Some(Selection::single(selection_after)),
+    ))?;
+
+    Ok(true)
 }
 
 fn toggle_delimited(
@@ -182,6 +207,51 @@ fn remove_ranges(source: &str, mut ranges: Vec<TextRange>) -> String {
     text.push_str(&source[copied_until..]);
 
     text
+}
+
+fn existing_link_destination_range(text: &str, range: TextRange) -> Option<TextRange> {
+    let document = Document::new(text);
+    let projection = project_document(&document);
+
+    for line in projection.lines() {
+        for inline in &line.inlines {
+            let MarkdownInline::Link { markers } = inline.kind else {
+                continue;
+            };
+            let link_range = TextRange::new(markers.opening.start, markers.closing.end);
+            if range_targets_source(range, link_range) {
+                return Some(markers.destination);
+            }
+        }
+    }
+
+    None
+}
+
+fn range_targets_source(range: TextRange, source: TextRange) -> bool {
+    if range.is_empty() {
+        source.start <= range.start && range.start <= source.end
+    } else {
+        source.start <= range.start && range.end <= source.end
+    }
+}
+
+fn link_replacement(text: &str, range: TextRange) -> Option<(String, TextRange)> {
+    const PLACEHOLDER_DESTINATION: &str = "https://";
+
+    let selected = text.get(range.start..range.end)?;
+    if selected.contains('\n') {
+        return None;
+    }
+
+    let replacement = format!("[{selected}]({PLACEHOLDER_DESTINATION})");
+    let destination_start = range.start + "[".len() + selected.len() + "](".len();
+    let destination_end = destination_start + PLACEHOLDER_DESTINATION.len();
+
+    Some((
+        replacement,
+        TextRange::new(destination_start, destination_end),
+    ))
 }
 
 fn single_selection_range(document: &Document) -> Result<TextRange, MarkdownCommandError> {
@@ -499,6 +569,88 @@ mod tests {
         execute_markdown_command(&mut document, MarkdownCommand::ToggleCode).unwrap();
 
         assert_eq!(document.text(), "Use `code`");
+    }
+
+    #[test]
+    fn insert_link_wraps_selection_and_selects_destination_placeholder() {
+        let mut document = Document::new("Read Hanji");
+        document
+            .set_selection(Selection::single(TextRange::new(5, 10)))
+            .unwrap();
+
+        insert_link(&mut document).unwrap();
+
+        assert_eq!(document.text(), "Read [Hanji](https://)");
+        assert_eq!(
+            document.selection().primary(),
+            TextRange::new("Read [Hanji](".len(), "Read [Hanji](https://".len())
+        );
+    }
+
+    #[test]
+    fn insert_link_handles_korean_selection() {
+        let text = "Read 한지";
+        let mut document = Document::new(text);
+        document
+            .set_selection(Selection::single(TextRange::new("Read ".len(), text.len())))
+            .unwrap();
+
+        insert_link(&mut document).unwrap();
+
+        assert_eq!(document.text(), "Read [한지](https://)");
+    }
+
+    #[test]
+    fn insert_link_selects_existing_link_destination_without_changing_text() {
+        let source = "Read [Hanji](https://hanji.local) today";
+        let mut document = Document::new(source);
+        document
+            .set_selection(Selection::single(TextRange::new(
+                "Read [".len(),
+                "Read [Hanji".len(),
+            )))
+            .unwrap();
+
+        insert_link(&mut document).unwrap();
+
+        assert_eq!(document.text(), source);
+        assert_eq!(
+            document.selection().primary(),
+            TextRange::new(
+                "Read [Hanji](".len(),
+                "Read [Hanji](https://hanji.local".len()
+            )
+        );
+    }
+
+    #[test]
+    fn insert_link_noops_without_selection_or_for_multiline_selection() {
+        let mut document = Document::new("Read Hanji");
+        document.set_selection(Selection::caret(5)).unwrap();
+
+        assert!(!insert_link(&mut document).unwrap());
+        assert_eq!(document.text(), "Read Hanji");
+        assert_eq!(document.selection().primary(), TextRange::caret(5));
+
+        let mut multiline = Document::new("Read\nHanji");
+        multiline
+            .set_selection(Selection::single(TextRange::new(0, "Read\nHanji".len())))
+            .unwrap();
+
+        assert!(!insert_link(&mut multiline).unwrap());
+        assert_eq!(multiline.text(), "Read\nHanji");
+    }
+
+    #[test]
+    fn execute_markdown_command_dispatches_insert_link() {
+        let mut document = Document::new("Read Hanji");
+        document
+            .set_selection(Selection::single(TextRange::new(5, 10)))
+            .unwrap();
+
+        execute_markdown_command(&mut document, MarkdownCommand::InsertLink).unwrap();
+
+        assert_eq!(document.text(), "Read [Hanji](https://)");
     }
 
     #[test]
