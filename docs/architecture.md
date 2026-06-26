@@ -1,14 +1,8 @@
 # Architecture
 
-Hanji is moving toward a pure Rust WYSIWYG Markdown editor while keeping the existing TypeScript and Tauri implementation available as a working track.
+Hanji is a Rust WYSIWYG Markdown editor built around small crates with clear ownership. GPUI is the native UI direction, but the editor core should not depend on GPUI.
 
-The Rust track should be built around small crates with clear ownership. GPUI is the chosen UI direction for the first native editor spike, but the editor core should not depend on GPUI.
-
-## Tracks
-
-- The TypeScript and Tauri track remains useful for current experiments and reference behavior.
-- The Rust and GPUI track becomes the place where the long-term editor engine is designed.
-- Shared product decisions live in `docs/`, not inside either implementation track.
+Shared product decisions live in `docs/`, outside implementation-specific modules.
 
 ## Rust Workspace
 
@@ -53,7 +47,7 @@ This means:
 
 ## First Spike
 
-The first GPUI spike should prove the smallest useful loop:
+The first GPUI spike proved the smallest useful loop:
 
 - Open one Markdown file.
 - Render plain paragraphs and headings.

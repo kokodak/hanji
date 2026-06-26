@@ -19,17 +19,14 @@ Hanji is a light, local-first Markdown editor. It should feel simple enough for 
 - Put design documents under `docs/`.
 - Put core editor concepts under `docs/design/`.
 - Keep the Rust and GPUI architecture direction in `docs/architecture.md` until a dedicated ADR structure exists.
-- Keep renderer UI code in `src/renderer/`.
-- Keep Tauri app shell and native commands in `src-tauri/`.
+- Keep GPUI app code in `apps/hanji-rust/`.
 - Add tests alongside the feature once test infrastructure is introduced.
 - Start commit messages with an English imperative verb and make the scope broad enough to describe the full change.
 
 ## Initial Commands
 
 ```sh
-npm install
-npm run dev
-npm run typecheck
-npm run build
+make app
+make check-app
 cargo test --workspace --exclude hanji-rust
 ```
