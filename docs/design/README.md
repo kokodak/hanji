@@ -8,6 +8,7 @@ Design notes should describe durable concepts before implementation details. Whe
 
 - [Editor Core](editor-core.md)
 - [Document Model](document-model.md)
+- [Large Document Performance](large-document-performance.md)
 - [Source-Backed WYSIWYG](source-backed-wysiwyg.md)
 
 ## Future Notes
