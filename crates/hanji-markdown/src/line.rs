@@ -6,10 +6,20 @@ pub enum MarkdownLine {
         level: u8,
     },
     Blockquote,
+    CodeBlock {
+        role: MarkdownCodeBlockLine,
+    },
     ListItem {
         marker: MarkdownListMarker,
         task: Option<MarkdownTaskState>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkdownCodeBlockLine {
+    OpeningFence,
+    Content,
+    ClosingFence,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

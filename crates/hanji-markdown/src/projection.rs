@@ -1,8 +1,8 @@
 use hanji_core::{Document, TextRange};
 
 use crate::{
-    MarkdownLine, blockquote_content_start, classify_line, heading_content_start,
-    list_item_content_start,
+    MarkdownCodeBlockLine, MarkdownLine, blockquote_content_start, classify_line,
+    heading_content_start, list_item_content_start,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +29,8 @@ pub enum ProjectedSegmentKind {
     EmphasisContent,
     CodeMarker,
     CodeContent,
+    CodeBlockFence,
+    CodeBlockContent,
     LinkMarker,
     LinkText,
     LinkDestination,
@@ -93,6 +95,7 @@ pub struct ProjectedInline<'a> {
 pub struct ProjectedLine<'a> {
     pub range: TextRange,
     pub marker_range: Option<TextRange>,
+    pub code_block_range: Option<TextRange>,
     pub source: &'a str,
     pub kind: MarkdownLine,
     pub inlines: Vec<ProjectedInline<'a>>,
@@ -129,6 +132,10 @@ impl<'a> ProjectedLine<'a> {
     ) -> Vec<ProjectedVisibleSegment<'a>> {
         if matches!(self.kind, MarkdownLine::Heading { .. }) {
             return self.heading_visible_segments_revealing_source_in(reveal_range);
+        }
+
+        if matches!(self.kind, MarkdownLine::CodeBlock { .. }) {
+            return self.code_block_visible_segments_revealing_source_in(reveal_range);
         }
 
         let mut segments = Vec::new();
@@ -249,6 +256,10 @@ impl<'a> ProjectedLine<'a> {
     pub fn source_visible_segments(&self) -> Vec<ProjectedSegment<'a>> {
         if matches!(self.kind, MarkdownLine::Heading { .. }) {
             return self.heading_source_visible_segments();
+        }
+
+        if matches!(self.kind, MarkdownLine::CodeBlock { .. }) {
+            return self.code_block_source_visible_segments();
         }
 
         let mut segments = Vec::new();
@@ -390,6 +401,134 @@ impl<'a> ProjectedLine<'a> {
         push_inline_source_segments(&mut segments, self.source, self.range.start, &self.inlines);
 
         segments
+    }
+
+    fn code_block_visible_segments_revealing_source_in(
+        &self,
+        reveal_range: Option<TextRange>,
+    ) -> Vec<ProjectedVisibleSegment<'a>> {
+        let MarkdownLine::CodeBlock { role } = self.kind else {
+            return Vec::new();
+        };
+
+        match role {
+            MarkdownCodeBlockLine::Content => self.code_block_content_visible_segments(),
+            MarkdownCodeBlockLine::OpeningFence | MarkdownCodeBlockLine::ClosingFence => {
+                if !self.should_reveal_code_block_source(reveal_range) {
+                    return Vec::new();
+                }
+
+                self.code_block_fence_visible_segments()
+            }
+        }
+    }
+
+    fn code_block_content_visible_segments(&self) -> Vec<ProjectedVisibleSegment<'a>> {
+        let mut segments = Vec::new();
+        let mut visible_start = 0;
+
+        push_visible_segment(
+            &mut segments,
+            self.source,
+            self.range.start,
+            &mut visible_start,
+            self.range,
+            self.range,
+            ProjectedSegmentKind::CodeBlockContent,
+        );
+
+        segments
+    }
+
+    fn code_block_fence_visible_segments(&self) -> Vec<ProjectedVisibleSegment<'a>> {
+        let mut segments = Vec::new();
+        let mut visible_start = 0;
+
+        if let Some(marker_range) = self.marker_range {
+            push_visible_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                &mut visible_start,
+                TextRange::new(self.range.start, marker_range.start),
+                TextRange::new(self.range.start, marker_range.start),
+                ProjectedSegmentKind::Text,
+            );
+            push_visible_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                &mut visible_start,
+                marker_range,
+                marker_range,
+                ProjectedSegmentKind::CodeBlockFence,
+            );
+            push_visible_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                &mut visible_start,
+                TextRange::new(marker_range.end, self.range.end),
+                TextRange::new(marker_range.end, self.range.end),
+                ProjectedSegmentKind::Text,
+            );
+        }
+
+        segments
+    }
+
+    fn code_block_source_visible_segments(&self) -> Vec<ProjectedSegment<'a>> {
+        let MarkdownLine::CodeBlock { role } = self.kind else {
+            return Vec::new();
+        };
+
+        let mut segments = Vec::new();
+
+        match role {
+            MarkdownCodeBlockLine::Content => push_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                self.range,
+                ProjectedSegmentKind::CodeBlockContent,
+            ),
+            MarkdownCodeBlockLine::OpeningFence | MarkdownCodeBlockLine::ClosingFence => {
+                if let Some(marker_range) = self.marker_range {
+                    push_segment(
+                        &mut segments,
+                        self.source,
+                        self.range.start,
+                        TextRange::new(self.range.start, marker_range.start),
+                        ProjectedSegmentKind::Text,
+                    );
+                    push_segment(
+                        &mut segments,
+                        self.source,
+                        self.range.start,
+                        marker_range,
+                        ProjectedSegmentKind::CodeBlockFence,
+                    );
+                    push_segment(
+                        &mut segments,
+                        self.source,
+                        self.range.start,
+                        TextRange::new(marker_range.end, self.range.end),
+                        ProjectedSegmentKind::Text,
+                    );
+                }
+            }
+        }
+
+        segments
+    }
+
+    fn should_reveal_code_block_source(&self, reveal_range: Option<TextRange>) -> bool {
+        let Some(reveal_range) = reveal_range else {
+            return false;
+        };
+        let block_range = self.code_block_range.unwrap_or(self.range);
+
+        should_reveal_line_source(block_range, reveal_range)
     }
 
     fn hidden_source_outer_range(
@@ -562,36 +701,105 @@ fn previous_char_with_start(source: &str, end: usize) -> Option<(usize, char)> {
 
 pub fn project_document(document: &Document) -> MarkdownProjection<'_> {
     let mut lines = Vec::new();
+    let mut line_index = 0;
 
-    for line_index in 0..document.line_count() {
-        let range = document
-            .line_range(line_index)
-            .unwrap_or_else(|| TextRange::caret(document.len()));
-        let source = &document.text()[range.start..range.end];
-        let kind = classify_line(source);
-        let content_start = match kind {
-            MarkdownLine::Heading { .. } => heading_content_start(source).unwrap_or(0),
-            MarkdownLine::Blockquote => blockquote_content_start(source).unwrap_or(0),
-            MarkdownLine::ListItem { .. } => list_item_content_start(source).unwrap_or(0),
-            MarkdownLine::Blank | MarkdownLine::Paragraph => 0,
-        };
-        let marker_range = match kind {
-            MarkdownLine::Heading { .. } => heading_marker_range(source, range.start),
-            MarkdownLine::Blockquote | MarkdownLine::ListItem { .. } => (content_start > 0)
-                .then_some(TextRange::new(range.start, range.start + content_start)),
-            MarkdownLine::Blank | MarkdownLine::Paragraph => None,
-        };
+    while line_index < document.line_count() {
+        let (range, source) = document_line(document, line_index);
 
-        lines.push(ProjectedLine {
-            range,
-            marker_range,
-            source,
-            kind,
-            inlines: project_inlines(&source[content_start..], range.start + content_start),
-        });
+        if let Some(opening_fence) = opening_code_fence(source, range.start)
+            && let Some((closing_line_index, closing_fence)) =
+                find_closing_code_fence(document, line_index + 1, opening_fence.marker_len)
+        {
+            let code_block_range = TextRange::new(range.start, closing_fence.line_range.end);
+
+            lines.push(project_code_block_line(
+                range,
+                source,
+                MarkdownCodeBlockLine::OpeningFence,
+                Some(opening_fence.marker_range),
+                code_block_range,
+            ));
+
+            for content_line_index in line_index + 1..closing_line_index {
+                let (content_range, content_source) = document_line(document, content_line_index);
+                lines.push(project_code_block_line(
+                    content_range,
+                    content_source,
+                    MarkdownCodeBlockLine::Content,
+                    None,
+                    code_block_range,
+                ));
+            }
+
+            let (closing_range, closing_source) = document_line(document, closing_line_index);
+            lines.push(project_code_block_line(
+                closing_range,
+                closing_source,
+                MarkdownCodeBlockLine::ClosingFence,
+                Some(closing_fence.marker_range),
+                code_block_range,
+            ));
+
+            line_index = closing_line_index + 1;
+            continue;
+        }
+
+        lines.push(project_normal_line(range, source));
+        line_index += 1;
     }
 
     MarkdownProjection { lines }
+}
+
+fn document_line(document: &Document, line_index: usize) -> (TextRange, &str) {
+    let range = document
+        .line_range(line_index)
+        .unwrap_or_else(|| TextRange::caret(document.len()));
+
+    (range, &document.text()[range.start..range.end])
+}
+
+fn project_normal_line<'a>(range: TextRange, source: &'a str) -> ProjectedLine<'a> {
+    let kind = classify_line(source);
+    let content_start = match kind {
+        MarkdownLine::Heading { .. } => heading_content_start(source).unwrap_or(0),
+        MarkdownLine::Blockquote => blockquote_content_start(source).unwrap_or(0),
+        MarkdownLine::ListItem { .. } => list_item_content_start(source).unwrap_or(0),
+        MarkdownLine::Blank | MarkdownLine::Paragraph | MarkdownLine::CodeBlock { .. } => 0,
+    };
+    let marker_range = match kind {
+        MarkdownLine::Heading { .. } => heading_marker_range(source, range.start),
+        MarkdownLine::Blockquote | MarkdownLine::ListItem { .. } => {
+            (content_start > 0).then_some(TextRange::new(range.start, range.start + content_start))
+        }
+        MarkdownLine::Blank | MarkdownLine::Paragraph | MarkdownLine::CodeBlock { .. } => None,
+    };
+
+    ProjectedLine {
+        range,
+        marker_range,
+        code_block_range: None,
+        source,
+        kind,
+        inlines: project_inlines(&source[content_start..], range.start + content_start),
+    }
+}
+
+fn project_code_block_line<'a>(
+    range: TextRange,
+    source: &'a str,
+    role: MarkdownCodeBlockLine,
+    marker_range: Option<TextRange>,
+    code_block_range: TextRange,
+) -> ProjectedLine<'a> {
+    ProjectedLine {
+        range,
+        marker_range,
+        code_block_range: Some(code_block_range),
+        source,
+        kind: MarkdownLine::CodeBlock { role },
+        inlines: Vec::new(),
+    }
 }
 
 fn block_marker_kind(kind: MarkdownLine) -> ProjectedSegmentKind {
@@ -599,8 +807,76 @@ fn block_marker_kind(kind: MarkdownLine) -> ProjectedSegmentKind {
         MarkdownLine::Heading { .. } => ProjectedSegmentKind::HeadingMarker,
         MarkdownLine::Blockquote => ProjectedSegmentKind::BlockquoteMarker,
         MarkdownLine::ListItem { .. } => ProjectedSegmentKind::ListMarker,
-        MarkdownLine::Blank | MarkdownLine::Paragraph => ProjectedSegmentKind::Text,
+        MarkdownLine::Blank | MarkdownLine::Paragraph | MarkdownLine::CodeBlock { .. } => {
+            ProjectedSegmentKind::Text
+        }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CodeFence {
+    marker_len: usize,
+    marker_range: TextRange,
+    line_range: TextRange,
+}
+
+fn opening_code_fence(source: &str, line_start: usize) -> Option<CodeFence> {
+    code_fence(source, line_start, 3, false)
+}
+
+fn closing_code_fence(source: &str, line_start: usize, min_marker_len: usize) -> Option<CodeFence> {
+    code_fence(source, line_start, min_marker_len, true)
+}
+
+fn code_fence(
+    source: &str,
+    line_start: usize,
+    min_marker_len: usize,
+    require_trailing_whitespace: bool,
+) -> Option<CodeFence> {
+    let indent = source
+        .bytes()
+        .take_while(|byte| *byte == b' ')
+        .take(4)
+        .count();
+    if indent >= 4 {
+        return None;
+    }
+
+    let content = &source[indent..];
+    let marker_len = content.bytes().take_while(|byte| *byte == b'`').count();
+    if marker_len < min_marker_len {
+        return None;
+    }
+
+    if require_trailing_whitespace
+        && !content[marker_len..]
+            .bytes()
+            .all(|byte| matches!(byte, b' ' | b'\t'))
+    {
+        return None;
+    }
+
+    Some(CodeFence {
+        marker_len,
+        marker_range: TextRange::new(line_start + indent, line_start + indent + marker_len),
+        line_range: TextRange::new(line_start, line_start + source.len()),
+    })
+}
+
+fn find_closing_code_fence(
+    document: &Document,
+    start_line_index: usize,
+    marker_len: usize,
+) -> Option<(usize, CodeFence)> {
+    for line_index in start_line_index..document.line_count() {
+        let (range, source) = document_line(document, line_index);
+        if let Some(fence) = closing_code_fence(source, range.start, marker_len) {
+            return Some((line_index, fence));
+        }
+    }
+
+    None
 }
 
 fn heading_marker_range(source: &str, line_start: usize) -> Option<TextRange> {
@@ -1959,6 +2235,98 @@ mod tests {
         assert_eq!(line.kind, MarkdownLine::Paragraph);
         assert_eq!(line.marker_range, None);
         assert_eq!(line.visible_text(), "- [ ]");
+    }
+
+    #[test]
+    fn projects_closed_fenced_code_blocks_without_inline_markdown() {
+        let document = Document::new("Before\n```rust\n**literal**\n```\nAfter");
+        let projection = project_document(&document);
+        let lines = projection.lines();
+
+        assert_eq!(lines[0].kind, MarkdownLine::Paragraph);
+        assert_eq!(
+            lines[1].kind,
+            MarkdownLine::CodeBlock {
+                role: MarkdownCodeBlockLine::OpeningFence,
+            }
+        );
+        assert_eq!(
+            lines[2].kind,
+            MarkdownLine::CodeBlock {
+                role: MarkdownCodeBlockLine::Content,
+            }
+        );
+        assert_eq!(
+            lines[3].kind,
+            MarkdownLine::CodeBlock {
+                role: MarkdownCodeBlockLine::ClosingFence,
+            }
+        );
+        assert_eq!(lines[4].kind, MarkdownLine::Paragraph);
+        assert_eq!(lines[1].visible_text(), "");
+        assert_eq!(lines[2].visible_text(), "**literal**");
+        assert_eq!(lines[3].visible_text(), "");
+        assert_eq!(
+            lines[2].visible_segments(),
+            vec![ProjectedVisibleSegment {
+                visible_range: TextRange::new(0, "**literal**".len()),
+                source_range: lines[2].range,
+                source_outer_range: lines[2].range,
+                source: "**literal**",
+                kind: ProjectedSegmentKind::CodeBlockContent,
+            }]
+        );
+        assert!(lines[2].inlines.is_empty());
+    }
+
+    #[test]
+    fn reveals_fenced_code_fences_when_caret_is_inside_block() {
+        let source = "```rust\nlet value = `literal`;\n```";
+        let document = Document::new(source);
+        let projection = project_document(&document);
+        let lines = projection.lines();
+        let caret = TextRange::caret(source.find("value").unwrap());
+
+        assert_eq!(
+            lines[0].visible_text_revealing_source_in(Some(caret)),
+            "```rust"
+        );
+        assert_eq!(
+            lines[2].visible_text_revealing_source_in(Some(caret)),
+            "```"
+        );
+        assert_eq!(
+            lines[0].visible_segments_revealing_source_in(Some(caret))[0],
+            ProjectedVisibleSegment {
+                visible_range: TextRange::new(0, 3),
+                source_range: TextRange::new(0, 3),
+                source_outer_range: TextRange::new(0, 3),
+                source: "```",
+                kind: ProjectedSegmentKind::CodeBlockFence,
+            }
+        );
+    }
+
+    #[test]
+    fn keeps_unclosed_fence_as_plain_source() {
+        let document = Document::new("```rust\nlet value = 1;");
+        let projection = project_document(&document);
+        let lines = projection.lines();
+
+        assert_eq!(lines[0].kind, MarkdownLine::Paragraph);
+        assert_eq!(lines[0].visible_text(), "```rust");
+        assert_eq!(lines[1].kind, MarkdownLine::Paragraph);
+    }
+
+    #[test]
+    fn closing_fence_requires_only_whitespace_after_marker() {
+        let document = Document::new("```\ncode\n```tail");
+        let projection = project_document(&document);
+        let lines = projection.lines();
+
+        assert_eq!(lines[0].kind, MarkdownLine::Paragraph);
+        assert_eq!(lines[1].kind, MarkdownLine::Paragraph);
+        assert_eq!(lines[2].kind, MarkdownLine::Paragraph);
     }
 
     #[test]

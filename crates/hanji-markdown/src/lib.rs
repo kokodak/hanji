@@ -7,9 +7,9 @@ pub use command::{
     toggle_strong,
 };
 pub use line::{
-    MarkdownLine, MarkdownListItem, MarkdownListMarker, MarkdownTaskState, OrderedListDelimiter,
-    blockquote_content_start, classify_line, first_heading, heading_content_start, list_item,
-    list_item_content_start,
+    MarkdownCodeBlockLine, MarkdownLine, MarkdownListItem, MarkdownListMarker, MarkdownTaskState,
+    OrderedListDelimiter, blockquote_content_start, classify_line, first_heading,
+    heading_content_start, list_item, list_item_content_start,
 };
 pub use projection::{
     MarkdownInline, MarkdownLinkRanges, MarkdownMarkerRanges, MarkdownProjection, ProjectedInline,

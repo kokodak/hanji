@@ -27,6 +27,9 @@ const CHECKBOX_BOX_SIZE: f32 = 16.0;
 const CHECKBOX_CHECK_FONT_SIZE: f32 = 17.0;
 const CHECKBOX_CONTENT_GAP: f32 = 5.0;
 const MARKDOWN_MARKER_COLOR: u32 = 0x238636;
+const CODE_BLOCK_BACKGROUND_COLOR: u32 = 0x25231f14;
+const CODE_BLOCK_CORNER_RADIUS: f32 = 5.0;
+const CODE_BLOCK_TEXT_INSET: f32 = 12.0;
 
 pub(crate) struct EditorElement {
     pub(crate) editor: Entity<Hanji>,
@@ -116,6 +119,7 @@ pub(crate) struct LinePresentation {
     pub(crate) line_height: f32,
     pub(crate) is_heading: bool,
     pub(crate) is_blockquote: bool,
+    pub(crate) is_code_block: bool,
     pub(crate) is_checked_task: bool,
     pub(crate) text_indent: f32,
 }
@@ -181,6 +185,8 @@ impl Element for EditorElement {
         let mut task_marker_hitboxes = Vec::new();
         let mut link_hitboxes = Vec::new();
         let mut code_backgrounds = Vec::new();
+        let mut code_block_background_runs = Vec::new();
+        let mut code_block_background_run = None;
         let mut top = 0.0;
 
         let document = editor.session.document();
@@ -230,6 +236,12 @@ impl Element for EditorElement {
                 &mut blockquote_bar_run,
                 container_bounds,
                 presentation.is_blockquote,
+            );
+            record_code_block_background_run(
+                &mut code_block_background_runs,
+                &mut code_block_background_run,
+                container_bounds,
+                presentation.is_code_block,
             );
             if let MarkdownLine::ListItem { marker, task } = line.kind
                 && !line_marker_is_revealed(&visible_segments)
@@ -281,10 +293,19 @@ impl Element for EditorElement {
             ));
         }
         flush_blockquote_bar_run(&mut blockquote_bar_runs, &mut blockquote_bar_run);
+        flush_code_block_background_run(
+            &mut code_block_background_runs,
+            &mut code_block_background_run,
+        );
         let blockquote_bars = blockquote_bar_runs
             .into_iter()
             .map(blockquote_bar_quad)
             .collect();
+        code_backgrounds.extend(
+            code_block_background_runs
+                .into_iter()
+                .map(code_block_background_quad),
+        );
 
         let cursor = if selection.is_empty() {
             caret_quad(&lines, selection.start)
@@ -651,6 +672,7 @@ fn line_text_runs(
             ProjectedSegmentKind::StrongContent => InlineRunStyle::Strong,
             ProjectedSegmentKind::EmphasisContent => InlineRunStyle::Emphasis,
             ProjectedSegmentKind::CodeContent => InlineRunStyle::Code,
+            ProjectedSegmentKind::CodeBlockContent => InlineRunStyle::CodeBlock,
             ProjectedSegmentKind::LinkText => InlineRunStyle::Link,
             ProjectedSegmentKind::LinkDestination => InlineRunStyle::Plain,
             ProjectedSegmentKind::EscapeMarker => InlineRunStyle::EscapeMarker,
@@ -660,6 +682,7 @@ fn line_text_runs(
             | ProjectedSegmentKind::StrongMarker
             | ProjectedSegmentKind::EmphasisMarker
             | ProjectedSegmentKind::CodeMarker
+            | ProjectedSegmentKind::CodeBlockFence
             | ProjectedSegmentKind::LinkMarker => InlineRunStyle::Marker,
             ProjectedSegmentKind::Text => InlineRunStyle::Plain,
         };
@@ -683,6 +706,7 @@ enum InlineRunStyle {
     Strong,
     Emphasis,
     Code,
+    CodeBlock,
     Link,
     EscapeMarker,
 }
@@ -729,6 +753,7 @@ fn push_text_run(
         InlineRunStyle::Plain
         | InlineRunStyle::Marker
         | InlineRunStyle::Code
+        | InlineRunStyle::CodeBlock
         | InlineRunStyle::EscapeMarker => None,
     };
 
@@ -776,6 +801,8 @@ fn code_background_ranges(segments: &[ProjectedVisibleSegment<'_>]) -> Vec<TextR
             | ProjectedSegmentKind::StrongContent
             | ProjectedSegmentKind::EmphasisMarker
             | ProjectedSegmentKind::EmphasisContent
+            | ProjectedSegmentKind::CodeBlockFence
+            | ProjectedSegmentKind::CodeBlockContent
             | ProjectedSegmentKind::LinkMarker
             | ProjectedSegmentKind::LinkText
             | ProjectedSegmentKind::LinkDestination => None,
@@ -836,6 +863,42 @@ fn merge_blockquote_bar_bounds(start: Bounds<Pixels>, end: Bounds<Pixels>) -> Bo
     )
 }
 
+fn record_code_block_background_run(
+    runs: &mut Vec<Bounds<Pixels>>,
+    current_run: &mut Option<Bounds<Pixels>>,
+    bounds: Bounds<Pixels>,
+    is_code_block: bool,
+) {
+    if is_code_block {
+        let bounds = match current_run.take() {
+            Some(run) => merge_code_block_background_bounds(run, bounds),
+            None => bounds,
+        };
+        *current_run = Some(bounds);
+    } else {
+        flush_code_block_background_run(runs, current_run);
+    }
+}
+
+fn flush_code_block_background_run(
+    runs: &mut Vec<Bounds<Pixels>>,
+    current_run: &mut Option<Bounds<Pixels>>,
+) {
+    if let Some(run) = current_run.take() {
+        runs.push(run);
+    }
+}
+
+fn merge_code_block_background_bounds(
+    start: Bounds<Pixels>,
+    end: Bounds<Pixels>,
+) -> Bounds<Pixels> {
+    Bounds::from_corners(
+        point(start.left(), start.top()),
+        point(start.right(), end.bottom()),
+    )
+}
+
 #[cfg(test)]
 fn collect_blockquote_bar_bounds(lines: &[(Bounds<Pixels>, bool)]) -> Vec<Bounds<Pixels>> {
     let mut runs = Vec::new();
@@ -849,6 +912,19 @@ fn collect_blockquote_bar_bounds(lines: &[(Bounds<Pixels>, bool)]) -> Vec<Bounds
     runs
 }
 
+#[cfg(test)]
+fn collect_code_block_background_bounds(lines: &[(Bounds<Pixels>, bool)]) -> Vec<Bounds<Pixels>> {
+    let mut runs = Vec::new();
+    let mut current_run = None;
+
+    for (bounds, is_code_block) in lines {
+        record_code_block_background_run(&mut runs, &mut current_run, *bounds, *is_code_block);
+    }
+
+    flush_code_block_background_run(&mut runs, &mut current_run);
+    runs
+}
+
 fn code_background_quads(
     segments: &[ProjectedVisibleSegment<'_>],
     layout: &ShapedLine,
@@ -858,6 +934,17 @@ fn code_background_quads(
         .into_iter()
         .filter_map(|range| code_background_quad(layout, bounds, range))
         .collect()
+}
+
+fn code_block_background_quad(bounds: Bounds<Pixels>) -> PaintQuad {
+    quad(
+        bounds,
+        px(CODE_BLOCK_CORNER_RADIUS),
+        rgba(CODE_BLOCK_BACKGROUND_COLOR),
+        px(0.0),
+        rgba(0x00000000),
+        BorderStyle::Solid,
+    )
 }
 
 fn link_hitboxes_for_segments(
@@ -945,6 +1032,7 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
                 line_height: font_size + 12.0,
                 is_heading: true,
                 is_blockquote: false,
+                is_code_block: false,
                 is_checked_task: false,
                 text_indent: 0.0,
             }
@@ -954,6 +1042,7 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
             line_height: LINE_HEIGHT,
             is_heading: false,
             is_blockquote: true,
+            is_code_block: false,
             is_checked_task: false,
             text_indent: 18.0,
         },
@@ -962,14 +1051,25 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
             line_height: LINE_HEIGHT,
             is_heading: false,
             is_blockquote: false,
+            is_code_block: false,
             is_checked_task: matches!(task, Some(MarkdownTaskState::Checked)),
             text_indent: 0.0,
+        },
+        MarkdownLine::CodeBlock { .. } => LinePresentation {
+            font_size: FONT_SIZE,
+            line_height: LINE_HEIGHT,
+            is_heading: false,
+            is_blockquote: false,
+            is_code_block: true,
+            is_checked_task: false,
+            text_indent: CODE_BLOCK_TEXT_INSET,
         },
         MarkdownLine::Blank | MarkdownLine::Paragraph => LinePresentation {
             font_size: FONT_SIZE,
             line_height: LINE_HEIGHT,
             is_heading: false,
             is_blockquote: false,
+            is_code_block: false,
             is_checked_task: false,
             text_indent: 0.0,
         },
@@ -1031,7 +1131,7 @@ mod tests {
     use super::*;
     use gpui::FontStyle;
     use hanji_core::Document;
-    use hanji_markdown::OrderedListDelimiter;
+    use hanji_markdown::{MarkdownCodeBlockLine, OrderedListDelimiter};
 
     #[test]
     fn inline_code_background_ranges_survive_without_strong_runs() {
@@ -1093,11 +1193,89 @@ mod tests {
     }
 
     #[test]
+    fn fenced_code_block_lines_use_block_presentation() {
+        let presentation = line_presentation(MarkdownLine::CodeBlock {
+            role: MarkdownCodeBlockLine::Content,
+        });
+
+        assert!(!presentation.is_heading);
+        assert!(!presentation.is_blockquote);
+        assert!(presentation.is_code_block);
+        assert_eq!(presentation.font_size, FONT_SIZE);
+        assert_eq!(presentation.line_height, LINE_HEIGHT);
+        assert_eq!(presentation.text_indent, CODE_BLOCK_TEXT_INSET);
+    }
+
+    #[test]
+    fn fenced_code_block_content_uses_line_background_not_inline_ranges() {
+        let document = Document::new("```\nlet value = `literal`;\n```");
+        let projection = project_document(&document);
+        let line = &projection.lines()[1];
+        let segments = line.visible_segments();
+
+        assert!(line_presentation(line.kind).is_code_block);
+        assert!(
+            segments
+                .iter()
+                .all(|segment| matches!(segment.kind, ProjectedSegmentKind::CodeBlockContent))
+        );
+        assert!(code_background_ranges(&segments).is_empty());
+    }
+
+    #[test]
+    fn consecutive_fenced_code_lines_share_one_background_run() {
+        let lines = [
+            (
+                Bounds::new(point(px(0.0), px(0.0)), size(px(100.0), px(24.0))),
+                true,
+            ),
+            (
+                Bounds::new(point(px(0.0), px(24.0)), size(px(100.0), px(24.0))),
+                true,
+            ),
+            (
+                Bounds::new(point(px(0.0), px(48.0)), size(px(100.0), px(24.0))),
+                true,
+            ),
+            (
+                Bounds::new(point(px(0.0), px(72.0)), size(px(100.0), px(24.0))),
+                false,
+            ),
+        ];
+
+        let runs = collect_code_block_background_bounds(&lines);
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].top(), px(0.0));
+        assert_eq!(runs[0].bottom(), px(72.0));
+    }
+
+    #[test]
+    fn revealed_fenced_code_marker_uses_green_syntax_color() {
+        let source = "```rust\nlet value = 1;\n```";
+        let document = Document::new(source);
+        let projection = project_document(&document);
+        let line = &projection.lines()[0];
+        let segments = line.visible_segments_revealing_source_in(Some(TextRange::caret(
+            source.find("value").unwrap(),
+        )));
+        let runs = line_text_runs(
+            &segments,
+            line_presentation(line.kind),
+            &TextStyle::default(),
+        );
+
+        assert_eq!(segments[0].kind, ProjectedSegmentKind::CodeBlockFence);
+        assert_eq!(runs[0].color, rgb(MARKDOWN_MARKER_COLOR).into());
+    }
+
+    #[test]
     fn blockquote_lines_use_indented_presentation() {
         let presentation = line_presentation(MarkdownLine::Blockquote);
 
         assert!(!presentation.is_heading);
         assert!(presentation.is_blockquote);
+        assert!(!presentation.is_code_block);
         assert_eq!(presentation.font_size, FONT_SIZE);
         assert_eq!(presentation.line_height, LINE_HEIGHT);
         assert!(!presentation.is_checked_task);
@@ -1113,6 +1291,7 @@ mod tests {
 
         assert!(!presentation.is_heading);
         assert!(!presentation.is_blockquote);
+        assert!(!presentation.is_code_block);
         assert_eq!(presentation.font_size, FONT_SIZE);
         assert_eq!(presentation.line_height, LINE_HEIGHT);
         assert!(!presentation.is_checked_task);
