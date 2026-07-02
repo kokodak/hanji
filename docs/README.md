@@ -17,6 +17,7 @@ Hanji is a light, local-first WYSIWYG Markdown editor built around simple plain 
 - [Philosophy](philosophy.md): product values and boundaries.
 - [Architecture](architecture.md): Rust track shape and GPUI boundary.
 - [Design Notes](design/README.md): core editor concepts.
+- [Releasing](releasing.md): versioning, changelog, packaging, and GitHub Release flow.
 
 ## Rust Commands
 

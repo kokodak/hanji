@@ -1,7 +1,8 @@
-.PHONY: help app check-app build-app test metal
+.PHONY: help app check-app build-app package-macos test metal
 
 METAL_TOOLCHAIN ?=
 FILE ?=
+VERSION ?=
 export HANJI_FILE = $(value FILE)
 export HANJI_METAL_TOOLCHAIN = $(value METAL_TOOLCHAIN)
 
@@ -11,6 +12,8 @@ help:
 	@printf "  make app FILE=note.md  Run the Rust GPUI app with a Markdown file\n"
 	@printf "  make check-app         Check the Rust GPUI app\n"
 	@printf "  make build-app         Build the Rust GPUI app\n"
+	@printf "  make package-macos     Build a macOS app bundle and DMG\n"
+	@printf "  make package-macos VERSION=0.1.0\n"
 	@printf "  make test              Test Rust core crates\n"
 	@printf "  make metal             Install/show the Metal Toolchain\n"
 
@@ -53,6 +56,9 @@ build-app:
 	fi; \
 	printf "Using Metal Toolchain: %s\n" "$$metal_toolchain"; \
 	TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo build -p hanji
+
+package-macos:
+	@VERSION="$(VERSION)" scripts/package-macos.sh
 
 test:
 	cargo test --workspace --exclude hanji

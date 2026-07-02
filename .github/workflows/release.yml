@@ -1,0 +1,121 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    name: Build macOS DMG
+    runs-on: macos-15
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+
+      - name: Resolve release metadata
+        id: release
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must look like v0.1.0." >&2
+            exit 1
+          fi
+
+          version="${tag#v}"
+          manifest_version="$(
+            awk '
+              /^\[workspace\.package\]/ {
+                in_workspace_package = 1
+                next
+              }
+              /^\[/ {
+                in_workspace_package = 0
+              }
+              in_workspace_package && $1 == "version" {
+                gsub(/"/, "", $3)
+                print $3
+                exit
+              }
+            ' Cargo.toml
+          )"
+
+          if [ "$version" != "$manifest_version" ]; then
+            echo "Tag version $version does not match Cargo.toml workspace version $manifest_version." >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Show Rust toolchain
+        shell: bash
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: Install Metal Toolchain if missing
+        shell: bash
+        run: |
+          if ! xcodebuild -showComponent MetalToolchain >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain -exportPath /tmp/HanjiMetalToolchain
+          fi
+          xcodebuild -showComponent MetalToolchain
+
+      - name: Test core crates
+        run: make test
+
+      - name: Check GPUI app
+        run: make check-app
+
+      - name: Package macOS DMG
+        run: make package-macos VERSION="${{ steps.release.outputs.version }}"
+
+      - name: Prepare release notes
+        run: scripts/extract-changelog-section.sh "${{ steps.release.outputs.version }}" > release-notes.md
+
+      - name: Create or update draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          title="Hanji $RELEASE_VERSION"
+          shopt -s nullglob
+          assets=(
+            dist/Hanji-"$RELEASE_VERSION"-macos-*.dmg
+            dist/Hanji-"$RELEASE_VERSION"-macos-*.dmg.sha256
+          )
+
+          if [ "${#assets[@]}" -ne 2 ]; then
+            echo "Expected one DMG and one checksum asset, found ${#assets[@]}." >&2
+            printf '%s\n' "${assets[@]}"
+            exit 1
+          fi
+
+          if release_is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            if [ "$release_is_draft" != "true" ]; then
+              echo "Release $RELEASE_TAG already exists and is published. Refusing to mutate published release assets." >&2
+              exit 1
+            fi
+            gh release edit "$RELEASE_TAG" \
+              --title "$title" \
+              --notes-file release-notes.md \
+              --draft
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" \
+              --title "$title" \
+              --notes-file release-notes.md \
+              --draft \
+              --verify-tag
+          fi
