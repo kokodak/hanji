@@ -97,13 +97,16 @@ if [ -z "$metal_toolchain" ]; then
 	metal_toolchain="$(xcodebuild -showComponent MetalToolchain 2>/dev/null | sed -n 's/^Toolchain Identifier: //p' | head -n 1 || true)"
 fi
 
-if [ -z "$metal_toolchain" ]; then
-	printf "Metal Toolchain was not found. Run 'make metal' first.\n" >&2
+if [ -n "$metal_toolchain" ]; then
+	printf "Using Metal Toolchain: %s\n" "$metal_toolchain"
+	TOOLCHAINS="$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo build -p "$binary_name" --release
+elif metal_path="$(xcrun --find metal 2>/dev/null)"; then
+	printf "Using Metal compiler: %s\n" "$metal_path"
+	cargo build -p "$binary_name" --release
+else
+	printf "Metal compiler was not found. Install full Xcode or run 'make metal' if your Xcode supports Metal Toolchain downloads.\n" >&2
 	exit 1
 fi
-
-printf "Using Metal Toolchain: %s\n" "$metal_toolchain"
-TOOLCHAINS="$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo build -p "$binary_name" --release
 
 rm -rf "$app_dir" "$dmg_root"
 mkdir -p "$macos_dir" "$resources_dir" "$dmg_root"

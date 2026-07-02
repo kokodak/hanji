@@ -22,15 +22,23 @@ app:
 	if [ -z "$$metal_toolchain" ]; then \
 		metal_toolchain="$$(xcodebuild -showComponent MetalToolchain 2>/dev/null | sed -n 's/^Toolchain Identifier: //p')"; \
 	fi; \
-	if [ -z "$$metal_toolchain" ]; then \
-		printf "Metal Toolchain was not found. Run 'make metal' first.\n"; \
-		exit 1; \
-	fi; \
-	printf "Using Metal Toolchain: %s\n" "$$metal_toolchain"; \
-	if [ -n "$$HANJI_FILE" ]; then \
-		TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo run -p hanji -- "$$HANJI_FILE"; \
+	if [ -n "$$metal_toolchain" ]; then \
+		printf "Using Metal Toolchain: %s\n" "$$metal_toolchain"; \
+		if [ -n "$$HANJI_FILE" ]; then \
+			TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo run -p hanji -- "$$HANJI_FILE"; \
+		else \
+			TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo run -p hanji; \
+		fi; \
+	elif metal_path="$$(xcrun --find metal 2>/dev/null)"; then \
+		printf "Using Metal compiler: %s\n" "$$metal_path"; \
+		if [ -n "$$HANJI_FILE" ]; then \
+			cargo run -p hanji -- "$$HANJI_FILE"; \
+		else \
+			cargo run -p hanji; \
+		fi; \
 	else \
-		TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo run -p hanji; \
+		printf "Metal compiler was not found. Install full Xcode or run 'make metal' if your Xcode supports Metal Toolchain downloads.\n"; \
+		exit 1; \
 	fi
 
 check-app:
@@ -38,24 +46,32 @@ check-app:
 	if [ -z "$$metal_toolchain" ]; then \
 		metal_toolchain="$$(xcodebuild -showComponent MetalToolchain 2>/dev/null | sed -n 's/^Toolchain Identifier: //p')"; \
 	fi; \
-	if [ -z "$$metal_toolchain" ]; then \
-		printf "Metal Toolchain was not found. Run 'make metal' first.\n"; \
+	if [ -n "$$metal_toolchain" ]; then \
+		printf "Using Metal Toolchain: %s\n" "$$metal_toolchain"; \
+		TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo check -p hanji; \
+	elif metal_path="$$(xcrun --find metal 2>/dev/null)"; then \
+		printf "Using Metal compiler: %s\n" "$$metal_path"; \
+		cargo check -p hanji; \
+	else \
+		printf "Metal compiler was not found. Install full Xcode or run 'make metal' if your Xcode supports Metal Toolchain downloads.\n"; \
 		exit 1; \
-	fi; \
-	printf "Using Metal Toolchain: %s\n" "$$metal_toolchain"; \
-	TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo check -p hanji
+	fi
 
 build-app:
 	@metal_toolchain="$$HANJI_METAL_TOOLCHAIN"; \
 	if [ -z "$$metal_toolchain" ]; then \
 		metal_toolchain="$$(xcodebuild -showComponent MetalToolchain 2>/dev/null | sed -n 's/^Toolchain Identifier: //p')"; \
 	fi; \
-	if [ -z "$$metal_toolchain" ]; then \
-		printf "Metal Toolchain was not found. Run 'make metal' first.\n"; \
+	if [ -n "$$metal_toolchain" ]; then \
+		printf "Using Metal Toolchain: %s\n" "$$metal_toolchain"; \
+		TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo build -p hanji; \
+	elif metal_path="$$(xcrun --find metal 2>/dev/null)"; then \
+		printf "Using Metal compiler: %s\n" "$$metal_path"; \
+		cargo build -p hanji; \
+	else \
+		printf "Metal compiler was not found. Install full Xcode or run 'make metal' if your Xcode supports Metal Toolchain downloads.\n"; \
 		exit 1; \
-	fi; \
-	printf "Using Metal Toolchain: %s\n" "$$metal_toolchain"; \
-	TOOLCHAINS="$$metal_toolchain,com.apple.dt.toolchain.XcodeDefault" cargo build -p hanji
+	fi
 
 package-macos:
 	@VERSION="$(VERSION)" scripts/package-macos.sh

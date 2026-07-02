@@ -62,13 +62,23 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Install Metal Toolchain if missing
+      - name: Verify Metal toolchain availability
         shell: bash
         run: |
-          if ! xcodebuild -showComponent MetalToolchain >/dev/null 2>&1; then
-            xcodebuild -downloadComponent MetalToolchain -exportPath /tmp/HanjiMetalToolchain
+          set -euo pipefail
+
+          if [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+            sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
           fi
-          xcodebuild -showComponent MetalToolchain
+
+          xcodebuild -version
+          xcrun --find metal || true
+
+          if ! xcrun --find metal >/dev/null 2>&1; then
+            echo "Metal compiler (metal) is not available on this runner." >&2
+            echo "Use a macOS runner image with full Xcode/Metal installed." >&2
+            exit 1
+          fi
 
       - name: Test core crates
         run: make test
