@@ -70,6 +70,8 @@ After the workflow succeeds:
 
 ## Signing
 
-The current packaging script can codesign the app when `CODESIGN_IDENTITY` is provided. It does not yet import certificates or notarize the DMG in CI.
+The packaging script ad-hoc signs the app bundle when `CODESIGN_IDENTITY` is not provided. This keeps the app bundle internally consistent, but it does not identify Hanji as a trusted developer build.
+
+The packaging script can Developer ID sign the app when `CODESIGN_IDENTITY` is provided. It does not yet import certificates or notarize the DMG in CI.
 
 Before linking a public website download to the DMG, add Developer ID signing and notarization to the release workflow.

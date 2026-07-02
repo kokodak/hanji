@@ -135,7 +135,8 @@ plutil -lint "$contents_dir/Info.plist"
 if [ -n "${CODESIGN_IDENTITY:-}" ]; then
 	codesign --force --deep --options runtime --timestamp --sign "$CODESIGN_IDENTITY" "$app_dir"
 else
-	printf "Skipping codesign because CODESIGN_IDENTITY is not set.\n"
+	printf "Ad-hoc signing app bundle because CODESIGN_IDENTITY is not set.\n"
+	codesign --force --deep --sign - "$app_dir"
 fi
 
 ditto "$app_dir" "$dmg_root/$app_name.app"
