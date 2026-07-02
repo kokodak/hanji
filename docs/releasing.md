@@ -1,6 +1,6 @@
 # Releasing Hanji
 
-Hanji releases are distributed through GitHub Releases. The release source is an annotated Git tag, the release notes come from `CHANGELOG.md`, and the macOS download artifact is a DMG.
+Hanji releases are distributed through GitHub Releases. The release source is an annotated Git tag, the release notes come from `CHANGELOG.md`, and the macOS download artifact is a DMG built by GitHub Actions.
 
 ## Versioning
 
@@ -20,7 +20,7 @@ Keep `CHANGELOG.md` as the human-edited release source, using the Keep a Changel
 
 Use the standard change groups: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, and `Security`.
 
-The GitHub Actions workflow extracts that section and uses it as the GitHub Release body.
+The GitHub Actions workflow extracts that section into `release-notes.md`. Use that file as the GitHub Release body when publishing the release manually.
 
 ## Local Package
 
@@ -57,9 +57,16 @@ Pushing a `v*.*.*` tag starts `.github/workflows/release.yml`. The workflow:
 - runs Rust tests and the GPUI app check,
 - builds a macOS DMG,
 - writes a SHA-256 checksum file,
-- creates or updates a draft GitHub Release with the DMG assets.
+- uploads the DMG, checksum, and `release-notes.md` as a workflow artifact.
 
-Review the draft release before publishing it.
+After the workflow succeeds:
+
+1. Download the `Hanji-<version>-macos` artifact from the workflow run.
+2. Open GitHub Releases and draft a new release for the existing tag.
+3. Use `Hanji <version>` as the release title.
+4. Paste `release-notes.md` into the release body.
+5. Upload the DMG and `.sha256` files.
+6. Publish the release manually.
 
 ## Signing
 
