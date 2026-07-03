@@ -15,10 +15,10 @@ use std::{
 
 use gpui::{
     App, Application, Bounds, ClipboardItem, Context, CursorStyle, EntityInputHandler, FocusHandle,
-    Focusable, IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    PathPromptOptions, Pixels, PromptButton, PromptLevel, Render, ScrollHandle, SharedString,
-    Timer, TitlebarOptions, UTF16Selection, Window, WindowBounds, WindowOptions, actions, div,
-    point, prelude::*, px, rgb, size,
+    Focusable, IntoElement, KeyBinding, Menu, MenuItem, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, PathPromptOptions, Pixels, PromptButton, PromptLevel, Render,
+    ScrollHandle, SharedString, SystemMenuType, Timer, TitlebarOptions, UTF16Selection, Window,
+    WindowBounds, WindowOptions, actions, div, point, prelude::*, px, rgb, size,
 };
 use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
 use hanji_markdown::{
@@ -113,6 +113,134 @@ fn document_path_label(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
+fn window_title_for_session(session: &DocumentSession) -> String {
+    format!("{} - Hanji", document_path_label(session.path()))
+}
+
+fn window_options_for_session(session: &DocumentSession, cx: &mut App) -> WindowOptions {
+    let bounds = Bounds::centered(None, size(px(720.0), px(520.0)), cx);
+
+    WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        titlebar: Some(TitlebarOptions {
+            title: Some(window_title_for_session(session).into()),
+            appears_transparent: true,
+            traffic_light_position: Some(point(px(14.0), px(14.0))),
+        }),
+        ..Default::default()
+    }
+}
+
+fn focus_front_window(cx: &mut App) -> bool {
+    let handle = cx
+        .window_stack()
+        .and_then(|windows| windows.into_iter().next())
+        .or_else(|| cx.windows().into_iter().next());
+
+    let Some(handle) = handle else {
+        return false;
+    };
+
+    handle
+        .update(cx, |_, window, cx| {
+            window.activate_window();
+            cx.activate(true);
+        })
+        .is_ok()
+}
+
+fn open_editor_window(session: DocumentSession, cx: &mut App) -> Result<(), String> {
+    let options = window_options_for_session(&session, cx);
+    let window = cx
+        .open_window(options, move |window, cx| {
+            cx.new(|cx| {
+                let mut editor = Hanji::new(session, cx);
+                editor.update_window_title(window);
+                editor.start_caret_blink(window, cx);
+                editor
+            })
+        })
+        .map_err(|error| format!("Could not open window: {error}"))?;
+
+    window
+        .update(cx, |view, window, cx| {
+            window.focus(&view.focus_handle(cx));
+            cx.activate(true);
+        })
+        .map_err(|error| format!("Could not focus window: {error}"))?;
+
+    Ok(())
+}
+
+fn reopen_or_focus_editor(cx: &mut App) {
+    if focus_front_window(cx) {
+        return;
+    }
+
+    match open_initial_session() {
+        Ok(session) => {
+            if let Err(error) = open_editor_window(session, cx) {
+                eprintln!("{error}");
+            }
+        }
+        Err(error) => eprintln!("Could not open document: {error}"),
+    }
+}
+
+fn configure_app_actions(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("backspace", Backspace, None),
+        KeyBinding::new("delete", Delete, None),
+        KeyBinding::new("left", Left, None),
+        KeyBinding::new("right", Right, None),
+        KeyBinding::new("shift-left", ShiftLeft, None),
+        KeyBinding::new("shift-right", ShiftRight, None),
+        KeyBinding::new("tab", IndentList, None),
+        KeyBinding::new("shift-tab", OutdentList, None),
+        KeyBinding::new("alt-left", OptionLeft, None),
+        KeyBinding::new("alt-right", OptionRight, None),
+        KeyBinding::new("alt-shift-left", ShiftOptionLeft, None),
+        KeyBinding::new("alt-shift-right", ShiftOptionRight, None),
+        KeyBinding::new("up", Up, None),
+        KeyBinding::new("down", Down, None),
+        KeyBinding::new("shift-up", ShiftUp, None),
+        KeyBinding::new("shift-down", ShiftDown, None),
+        KeyBinding::new("home", Home, None),
+        KeyBinding::new("end", End, None),
+        KeyBinding::new("cmd-left", Home, None),
+        KeyBinding::new("cmd-right", End, None),
+        KeyBinding::new("cmd-up", CmdUp, None),
+        KeyBinding::new("cmd-down", CmdDown, None),
+        KeyBinding::new("cmd-shift-left", ShiftCmdLeft, None),
+        KeyBinding::new("cmd-shift-right", ShiftCmdRight, None),
+        KeyBinding::new("cmd-shift-up", ShiftCmdUp, None),
+        KeyBinding::new("cmd-shift-down", ShiftCmdDown, None),
+        KeyBinding::new("enter", Newline, None),
+        KeyBinding::new("cmd-b", ToggleStrong, None),
+        KeyBinding::new("cmd-i", ToggleItalic, None),
+        KeyBinding::new("cmd-e", ToggleCode, None),
+        KeyBinding::new("cmd-k", InsertLink, None),
+        KeyBinding::new("cmd-a", SelectAll, None),
+        KeyBinding::new("cmd-c", Copy, None),
+        KeyBinding::new("cmd-x", Cut, None),
+        KeyBinding::new("cmd-v", Paste, None),
+        KeyBinding::new("cmd-z", Undo, None),
+        KeyBinding::new("cmd-shift-z", Redo, None),
+        KeyBinding::new("cmd-o", OpenDocument, None),
+        KeyBinding::new("cmd-s", Save, None),
+        KeyBinding::new("cmd-q", Quit, None),
+    ]);
+    cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.set_menus(vec![Menu {
+        name: "Hanji".into(),
+        items: vec![
+            MenuItem::os_submenu("Services", SystemMenuType::Services),
+            MenuItem::separator(),
+            MenuItem::action("Quit Hanji", Quit),
+        ],
+    }]);
+}
+
 actions!(
     hanji,
     [
@@ -182,6 +310,30 @@ struct Hanji {
 }
 
 impl Hanji {
+    fn new(session: DocumentSession, cx: &mut Context<Self>) -> Self {
+        Self {
+            focus_handle: cx.focus_handle(),
+            last_edited_at: document_modified_time(session.path()),
+            session,
+            marked_range: None,
+            last_lines: Vec::new(),
+            last_task_markers: Vec::new(),
+            last_link_hitboxes: Vec::new(),
+            editor_scroll: ScrollHandle::new(),
+            hovered_link_url: None,
+            preferred_column: None,
+            preferred_visual_x: None,
+            selection_anchor: None,
+            selection_head: None,
+            is_selecting: false,
+            selection_drag_origin: None,
+            status_message: None,
+            caret_opacity: 1.0,
+            caret_last_activity_at: Instant::now(),
+            caret_blink_started: false,
+        }
+    }
+
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
         self.clear_selection_tracking();
@@ -1774,103 +1926,15 @@ fn main() {
         eprintln!("Could not open document: {error}");
         process::exit(1);
     });
-    let initial_window_title = format!("{} - Hanji", document_path_label(session.path()));
 
-    Application::new().run(move |cx: &mut App| {
-        cx.bind_keys([
-            KeyBinding::new("backspace", Backspace, None),
-            KeyBinding::new("delete", Delete, None),
-            KeyBinding::new("left", Left, None),
-            KeyBinding::new("right", Right, None),
-            KeyBinding::new("shift-left", ShiftLeft, None),
-            KeyBinding::new("shift-right", ShiftRight, None),
-            KeyBinding::new("tab", IndentList, None),
-            KeyBinding::new("shift-tab", OutdentList, None),
-            KeyBinding::new("alt-left", OptionLeft, None),
-            KeyBinding::new("alt-right", OptionRight, None),
-            KeyBinding::new("alt-shift-left", ShiftOptionLeft, None),
-            KeyBinding::new("alt-shift-right", ShiftOptionRight, None),
-            KeyBinding::new("up", Up, None),
-            KeyBinding::new("down", Down, None),
-            KeyBinding::new("shift-up", ShiftUp, None),
-            KeyBinding::new("shift-down", ShiftDown, None),
-            KeyBinding::new("home", Home, None),
-            KeyBinding::new("end", End, None),
-            KeyBinding::new("cmd-left", Home, None),
-            KeyBinding::new("cmd-right", End, None),
-            KeyBinding::new("cmd-up", CmdUp, None),
-            KeyBinding::new("cmd-down", CmdDown, None),
-            KeyBinding::new("cmd-shift-left", ShiftCmdLeft, None),
-            KeyBinding::new("cmd-shift-right", ShiftCmdRight, None),
-            KeyBinding::new("cmd-shift-up", ShiftCmdUp, None),
-            KeyBinding::new("cmd-shift-down", ShiftCmdDown, None),
-            KeyBinding::new("enter", Newline, None),
-            KeyBinding::new("cmd-b", ToggleStrong, None),
-            KeyBinding::new("cmd-i", ToggleItalic, None),
-            KeyBinding::new("cmd-e", ToggleCode, None),
-            KeyBinding::new("cmd-k", InsertLink, None),
-            KeyBinding::new("cmd-a", SelectAll, None),
-            KeyBinding::new("cmd-c", Copy, None),
-            KeyBinding::new("cmd-x", Cut, None),
-            KeyBinding::new("cmd-v", Paste, None),
-            KeyBinding::new("cmd-z", Undo, None),
-            KeyBinding::new("cmd-shift-z", Redo, None),
-            KeyBinding::new("cmd-o", OpenDocument, None),
-            KeyBinding::new("cmd-s", Save, None),
-            KeyBinding::new("cmd-q", Quit, None),
-        ]);
-        cx.on_action(|_: &Quit, cx| cx.quit());
+    let app = Application::new();
+    app.on_reopen(reopen_or_focus_editor);
+    app.run(move |cx: &mut App| {
+        configure_app_actions(cx);
 
-        let mut session = Some(session);
-        let bounds = Bounds::centered(None, size(px(720.0), px(520.0)), cx);
-        let window = cx
-            .open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    titlebar: Some(TitlebarOptions {
-                        title: Some(initial_window_title.clone().into()),
-                        appears_transparent: true,
-                        traffic_light_position: Some(point(px(14.0), px(14.0))),
-                    }),
-                    ..Default::default()
-                },
-                move |window, cx| {
-                    cx.new(|cx| {
-                        let session = session.take().expect("initial session was already opened");
-                        let mut editor = Hanji {
-                            focus_handle: cx.focus_handle(),
-                            last_edited_at: document_modified_time(session.path()),
-                            session,
-                            marked_range: None,
-                            last_lines: Vec::new(),
-                            last_task_markers: Vec::new(),
-                            last_link_hitboxes: Vec::new(),
-                            editor_scroll: ScrollHandle::new(),
-                            hovered_link_url: None,
-                            preferred_column: None,
-                            preferred_visual_x: None,
-                            selection_anchor: None,
-                            selection_head: None,
-                            is_selecting: false,
-                            selection_drag_origin: None,
-                            status_message: None,
-                            caret_opacity: 1.0,
-                            caret_last_activity_at: Instant::now(),
-                            caret_blink_started: false,
-                        };
-                        editor.update_window_title(window);
-                        editor.start_caret_blink(window, cx);
-                        editor
-                    })
-                },
-            )
-            .unwrap();
-
-        window
-            .update(cx, |view, window, cx| {
-                window.focus(&view.focus_handle(cx));
-                cx.activate(true);
-            })
-            .unwrap();
+        if let Err(error) = open_editor_window(session, cx) {
+            eprintln!("{error}");
+            cx.quit();
+        }
     });
 }
