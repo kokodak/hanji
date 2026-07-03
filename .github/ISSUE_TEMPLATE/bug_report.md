@@ -6,7 +6,7 @@ labels: bug
 assignees: ""
 ---
 
-Thank you for contributing to Hanji.
+<!-- Thank you for contributing to Hanji. -->
 
 ## Summary
 
