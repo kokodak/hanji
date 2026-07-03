@@ -38,7 +38,7 @@ use editing::{
 };
 use encoding::byte_offset_to_utf16;
 use external::external_url_command;
-use file_browser::{MarkdownFile, folder_label, markdown_files_in};
+use file_browser::{MarkdownFile, folder_label, is_markdown_file, markdown_files_in};
 use renderer::{
     EditorElement, FONT_SIZE, LINE_HEIGHT, LINK_TEXT_COLOR, LinkHitbox, MARKDOWN_MARKER_COLOR,
     TaskMarkerHitbox,
@@ -155,6 +155,18 @@ fn file_browser_root_for_document(path: &Path) -> Option<PathBuf> {
     path.parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .map(Path::to_path_buf)
+}
+
+fn validate_open_document_path(path: &Path) -> Result<(), &'static str> {
+    if path.is_dir() {
+        return Err("Open folders with Open Folder.");
+    }
+
+    if !is_markdown_file(path) {
+        return Err(OPEN_MARKDOWN_FILE_REQUIRED_MESSAGE);
+    }
+
+    Ok(())
 }
 
 fn window_title_for_session(session: &DocumentSession) -> String {
@@ -342,6 +354,7 @@ actions!(
 );
 
 const OPEN_WITHOUT_SAVING_PROMPT_INDEX: usize = 1;
+const OPEN_MARKDOWN_FILE_REQUIRED_MESSAGE: &str = "Only Markdown files can be opened.";
 
 struct Hanji {
     focus_handle: FocusHandle,
@@ -1068,6 +1081,16 @@ impl Hanji {
                 return;
             };
 
+            if let Err(message) = validate_open_document_path(&path) {
+                editor
+                    .update_in(cx, |editor, _, cx| {
+                        editor.status_message = Some(message.to_string());
+                        cx.notify();
+                    })
+                    .ok();
+                return;
+            }
+
             let opened_session = DocumentSession::open(path);
             editor
                 .update_in(cx, |editor, window, cx| match opened_session {
@@ -1091,6 +1114,12 @@ impl Hanji {
         self.marked_range = None;
         self.clear_selection_tracking();
         self.reset_caret_blink();
+
+        if let Err(message) = validate_open_document_path(&path) {
+            self.status_message = Some(message.to_string());
+            cx.notify();
+            return;
+        }
 
         let discard_changes = if self.session.is_dirty() {
             Some(window.prompt(
@@ -2662,6 +2691,20 @@ mod tests {
         let session = new_scratch_session();
 
         assert_eq!(document_path_label(session.path()), "Untitled");
+    }
+
+    #[test]
+    fn open_document_path_validation_accepts_markdown_files_only() {
+        assert!(validate_open_document_path(Path::new("/tmp/note.md")).is_ok());
+        assert!(validate_open_document_path(Path::new("/tmp/note.MD")).is_ok());
+        assert_eq!(
+            validate_open_document_path(Path::new("/tmp/note.txt")),
+            Err(OPEN_MARKDOWN_FILE_REQUIRED_MESSAGE)
+        );
+        assert_eq!(
+            validate_open_document_path(Path::new("/tmp/note.markdown")),
+            Err(OPEN_MARKDOWN_FILE_REQUIRED_MESSAGE)
+        );
     }
 }
 

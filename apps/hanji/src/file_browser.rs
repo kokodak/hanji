@@ -55,7 +55,7 @@ fn collect_markdown_files(
     Ok(())
 }
 
-fn is_markdown_file(path: &Path) -> bool {
+pub(crate) fn is_markdown_file(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
@@ -97,6 +97,15 @@ mod tests {
 
         assert_eq!(labels, vec!["c.MD", "nested/a.md"]);
         fs::remove_dir_all(temp).unwrap();
+    }
+
+    #[test]
+    fn markdown_file_detection_requires_md_extension() {
+        assert!(is_markdown_file(Path::new("note.md")));
+        assert!(is_markdown_file(Path::new("note.MD")));
+        assert!(!is_markdown_file(Path::new("note.markdown")));
+        assert!(!is_markdown_file(Path::new("note.txt")));
+        assert!(!is_markdown_file(Path::new("note")));
     }
 
     fn unique_test_dir() -> PathBuf {
