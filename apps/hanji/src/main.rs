@@ -52,6 +52,16 @@ const CARET_BLINK_HIDDEN_HOLD_MS: u64 = 420;
 const CARET_BLINK_CYCLE_MS: u64 =
     CARET_BLINK_VISIBLE_HOLD_MS + CARET_BLINK_FADE_MS * 2 + CARET_BLINK_HIDDEN_HOLD_MS;
 const CARET_OPACITY_EPSILON: f32 = 0.01;
+const STATUS_BAR_HEIGHT: f32 = 40.0;
+const STATUS_BAR_CONTROL_HEIGHT: f32 = 24.0;
+const STATUS_BAR_TRAFFIC_LIGHT_X: f32 = 14.0;
+const STATUS_BAR_TRAFFIC_LIGHT_Y: f32 = 13.0;
+const STATUS_BAR_LEFT_CONTENT_X: f32 = 96.0;
+const APP_DIVIDER_COLOR: u32 = 0xe5e7eb;
+const FILE_BROWSER_WIDTH: f32 = 248.0;
+const FILE_BROWSER_ANIMATION_FRAME_MS: u64 = 8;
+const FILE_BROWSER_ANIMATION_DURATION_MS: u64 = 100;
+const FILE_BROWSER_ANIMATION_EPSILON: f32 = 0.25;
 
 fn caret_blink_idle_delay_elapsed(idle_for: Duration) -> bool {
     idle_for >= Duration::from_millis(CARET_BLINK_IDLE_DELAY_MS)
@@ -108,6 +118,20 @@ fn editor_cursor_style(is_hovering_link: bool) -> CursorStyle {
     }
 }
 
+fn animated_file_browser_width(start: f32, target: f32, elapsed: Duration) -> f32 {
+    let duration = Duration::from_millis(FILE_BROWSER_ANIMATION_DURATION_MS);
+    let progress = (elapsed.as_secs_f32() / duration.as_secs_f32()).clamp(0.0, 1.0);
+    let eased = ease_out_cubic(progress);
+
+    start + (target - start) * eased
+}
+
+fn ease_out_cubic(progress: f32) -> f32 {
+    let remaining = 1.0 - progress.clamp(0.0, 1.0);
+
+    1.0 - remaining * remaining * remaining
+}
+
 fn document_path_label(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -137,7 +161,10 @@ fn window_options_for_session(session: &DocumentSession, cx: &mut App) -> Window
         titlebar: Some(TitlebarOptions {
             title: Some(window_title_for_session(session).into()),
             appears_transparent: true,
-            traffic_light_position: Some(point(px(14.0), px(14.0))),
+            traffic_light_position: Some(point(
+                px(STATUS_BAR_TRAFFIC_LIGHT_X),
+                px(STATUS_BAR_TRAFFIC_LIGHT_Y),
+            )),
         }),
         ..Default::default()
     }
@@ -312,6 +339,8 @@ struct Hanji {
     editor_scroll: ScrollHandle,
     file_browser_scroll: ScrollHandle,
     file_browser_visible: bool,
+    file_browser_width: f32,
+    file_browser_animation_generation: u64,
     file_browser_root: Option<PathBuf>,
     file_browser_files: Vec<MarkdownFile>,
     file_browser_status: Option<String>,
@@ -343,6 +372,8 @@ impl Hanji {
             editor_scroll: ScrollHandle::new(),
             file_browser_scroll: ScrollHandle::new(),
             file_browser_visible: false,
+            file_browser_width: 0.0,
+            file_browser_animation_generation: 0,
             file_browser_root,
             file_browser_files: Vec::new(),
             file_browser_status: None,
@@ -624,13 +655,14 @@ impl Hanji {
     fn toggle_file_browser(
         &mut self,
         _: &ToggleFileBrowser,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.file_browser_visible = !self.file_browser_visible;
         if self.file_browser_visible && self.file_browser_files.is_empty() {
             self.refresh_file_browser_files();
         }
+        self.animate_file_browser_width(window, cx);
         cx.notify();
     }
 
@@ -1804,7 +1836,64 @@ impl Hanji {
         .detach();
     }
 
+    fn target_file_browser_width(&self) -> f32 {
+        if self.file_browser_visible {
+            FILE_BROWSER_WIDTH
+        } else {
+            0.0
+        }
+    }
+
+    fn animate_file_browser_width(&mut self, window: &Window, cx: &mut Context<Self>) {
+        self.file_browser_animation_generation =
+            self.file_browser_animation_generation.wrapping_add(1);
+        let generation = self.file_browser_animation_generation;
+        let start_width = self.file_browser_width;
+        let target_width = self.target_file_browser_width();
+        let started_at = Instant::now();
+
+        cx.spawn_in(window, async move |editor, cx| {
+            loop {
+                let should_continue = match editor.update_in(cx, |editor, _, cx| {
+                    if editor.file_browser_animation_generation != generation {
+                        return false;
+                    }
+
+                    let elapsed = started_at.elapsed();
+                    let next = animated_file_browser_width(start_width, target_width, elapsed);
+                    let should_continue =
+                        elapsed < Duration::from_millis(FILE_BROWSER_ANIMATION_DURATION_MS);
+
+                    if should_continue
+                        && (editor.file_browser_width - next).abs() > FILE_BROWSER_ANIMATION_EPSILON
+                    {
+                        editor.file_browser_width = next;
+                        cx.notify();
+                    } else if !should_continue
+                        && (editor.file_browser_width - target_width).abs() > f32::EPSILON
+                    {
+                        editor.file_browser_width = target_width;
+                        cx.notify();
+                    }
+
+                    should_continue
+                }) {
+                    Ok(should_continue) => should_continue,
+                    Err(_) => break,
+                };
+
+                if !should_continue {
+                    break;
+                }
+
+                Timer::after(Duration::from_millis(FILE_BROWSER_ANIMATION_FRAME_MS)).await;
+            }
+        })
+        .detach();
+    }
+
     fn render_file_browser(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let panel_width = self.file_browser_width.clamp(0.0, FILE_BROWSER_WIDTH);
         let root_label = self
             .file_browser_root
             .as_deref()
@@ -1841,48 +1930,57 @@ impl Hanji {
 
         div()
             .flex()
-            .flex_col()
             .flex_shrink_0()
-            .w(px(248.0))
+            .w(px(panel_width))
             .h_full()
             .min_h(px(0.0))
-            .border_r_1()
-            .border_color(rgb(0xe5e7eb))
-            .bg(rgb(0xffffff))
-            .px_3()
-            .py_3()
-            .gap_3()
+            .overflow_hidden()
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap_1()
+                    .flex_shrink_0()
+                    .w(px(FILE_BROWSER_WIDTH))
+                    .h_full()
+                    .min_h(px(0.0))
+                    .border_r_1()
+                    .border_color(rgb(APP_DIVIDER_COLOR))
+                    .bg(rgb(0xffffff))
+                    .px_3()
+                    .py_3()
+                    .gap_3()
                     .child(
                         div()
-                            .text_xs()
-                            .line_height(px(14.0))
-                            .text_color(rgb(0x9ca3af))
-                            .child("Folder"),
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .line_height(px(14.0))
+                                    .text_color(rgb(0x9ca3af))
+                                    .child("Folder"),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .line_height(px(18.0))
+                                    .text_color(rgb(0x111111))
+                                    .whitespace_nowrap()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .child(root_label),
+                            ),
                     )
                     .child(
                         div()
-                            .text_sm()
-                            .line_height(px(18.0))
-                            .text_color(rgb(0x111111))
-                            .whitespace_nowrap()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(root_label),
-                    ),
+                            .flex()
+                            .gap_2()
+                            .child(self.render_file_browser_button("Open File", OpenDocument, cx))
+                            .child(self.render_file_browser_button("Open Folder", OpenFolder, cx)),
+                    )
+                    .child(files),
             )
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(self.render_file_browser_button("Open File", OpenDocument, cx))
-                    .child(self.render_file_browser_button("Open Folder", OpenFolder, cx)),
-            )
-            .child(files)
     }
 
     fn render_file_browser_button(
@@ -1937,6 +2035,46 @@ impl Hanji {
                 editor.open_file_from_browser(path.clone(), window, cx);
             }))
             .child(label)
+    }
+
+    fn render_file_browser_toggle_button(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let panel_color = if self.file_browser_visible {
+            rgb(0x22c55e)
+        } else {
+            rgb(0x9ca3af)
+        };
+        let icon_border_color = if self.file_browser_visible {
+            rgb(0x16a34a)
+        } else {
+            rgb(0x9ca3af)
+        };
+
+        div()
+            .id("file-browser-toggle")
+            .w(px(28.0))
+            .h(px(STATUS_BAR_CONTROL_HEIGHT))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(5.0))
+            .cursor_pointer()
+            .hover(|style| style.bg(rgb(0xf3f4f6)))
+            .when(self.file_browser_visible, |button| button.bg(rgb(0xecfdf5)))
+            .on_click(cx.listener(|editor, _, window, cx| {
+                editor.toggle_file_browser(&ToggleFileBrowser, window, cx);
+            }))
+            .child(
+                div()
+                    .flex()
+                    .w(px(18.0))
+                    .h(px(14.0))
+                    .rounded(px(3.0))
+                    .border_1()
+                    .border_color(icon_border_color)
+                    .overflow_hidden()
+                    .child(div().w(px(6.0)).h_full().bg(panel_color))
+                    .child(div().flex_1().h_full().bg(rgb(0xffffff))),
+            )
     }
 }
 
@@ -2086,7 +2224,7 @@ impl Render for Hanji {
         let editor_cursor = editor_cursor_style(self.hovered_link_url.is_some());
         let mut body = div().flex().flex_1().min_h(px(0.0)).w_full();
 
-        if self.file_browser_visible {
+        if self.file_browser_visible || self.file_browser_width > FILE_BROWSER_ANIMATION_EPSILON {
             body = body.child(self.render_file_browser(cx));
         }
 
@@ -2174,20 +2312,32 @@ impl Render for Hanji {
                 div()
                     .flex()
                     .flex_shrink_0()
-                    .h(px(38.0))
+                    .h(px(STATUS_BAR_HEIGHT))
                     .w_full()
                     .items_center()
                     .justify_between()
                     .bg(rgb(0xffffff))
-                    .pl(px(76.0))
+                    .pl(px(STATUS_BAR_LEFT_CONTENT_X))
                     .pr(px(18.0))
-                    .child(div().text_sm().text_color(rgb(0x111111)).child("Hanji"))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .child(self.render_file_browser_toggle_button(cx)),
+                    )
                     .child(
                         div()
                             .text_sm()
                             .text_color(rgb(0x6b7280))
                             .child(status_detail),
                     ),
+            )
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .h(px(1.0))
+                    .w_full()
+                    .bg(rgb(APP_DIVIDER_COLOR)),
             )
             .child(body)
     }
@@ -2201,6 +2351,26 @@ mod tests {
     fn editor_cursor_uses_pointing_hand_when_hovering_link() {
         assert_eq!(editor_cursor_style(true), CursorStyle::PointingHand);
         assert_eq!(editor_cursor_style(false), CursorStyle::IBeam);
+    }
+
+    #[test]
+    fn file_browser_width_animation_uses_time_based_easing() {
+        let midpoint = Duration::from_millis(FILE_BROWSER_ANIMATION_DURATION_MS / 2);
+        let opening = animated_file_browser_width(0.0, FILE_BROWSER_WIDTH, midpoint);
+        let closing = animated_file_browser_width(FILE_BROWSER_WIDTH, 0.0, midpoint);
+
+        assert!(opening > FILE_BROWSER_WIDTH / 2.0);
+        assert!(opening < FILE_BROWSER_WIDTH);
+        assert!(closing > 0.0);
+        assert!(closing < FILE_BROWSER_WIDTH / 2.0);
+        assert_eq!(
+            animated_file_browser_width(
+                0.0,
+                FILE_BROWSER_WIDTH,
+                Duration::from_millis(FILE_BROWSER_ANIMATION_DURATION_MS),
+            ),
+            FILE_BROWSER_WIDTH
+        );
     }
 
     #[test]
