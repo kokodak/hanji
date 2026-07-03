@@ -103,6 +103,17 @@ impl DocumentSession {
         Ok(())
     }
 
+    pub fn save_as(&mut self, path: impl Into<PathBuf>) -> io::Result<()> {
+        let path = path.into();
+        let text = self.document.text().to_owned();
+
+        write_markdown(&path, &text)?;
+        self.path = path;
+        self.saved_text = text;
+        self.saved_revision = self.revision;
+        Ok(())
+    }
+
     fn mark_changed_if(&mut self, changed: bool) {
         if changed {
             self.mark_changed();
@@ -321,6 +332,37 @@ mod tests {
 
         assert!(!session.is_dirty());
         assert_eq!(read_markdown(&path).unwrap(), " notesHanji");
+    }
+
+    #[test]
+    fn session_save_as_updates_path_and_clears_dirty_state() {
+        let directory = TestDirectory::new("session-save-as");
+        let old_path = directory.path().join("scratch.md");
+        let new_path = directory.path().join("note.md");
+        let mut session = DocumentSession::new(&old_path, "Hanji");
+
+        session
+            .execute(EditorCommand::insert_text(" notes"))
+            .unwrap();
+        session.save_as(&new_path).unwrap();
+
+        assert_eq!(session.path(), new_path.as_path());
+        assert!(!session.is_dirty());
+        assert_eq!(read_markdown(&new_path).unwrap(), " notesHanji");
+    }
+
+    #[test]
+    fn session_save_as_keeps_path_when_write_fails() {
+        let directory = TestDirectory::new("session-save-as-failure");
+        let old_path = directory.path().join("scratch.md");
+        let missing_parent = directory.path().join("missing");
+        let new_path = missing_parent.join("note.md");
+        let mut session = DocumentSession::new(&old_path, "Hanji");
+
+        let error = session.save_as(&new_path).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert_eq!(session.path(), old_path.as_path());
     }
 
     #[test]

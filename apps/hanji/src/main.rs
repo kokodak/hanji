@@ -8,6 +8,7 @@ mod snapshot;
 mod time_label;
 
 use std::{
+    env,
     ops::Range,
     path::{Path, PathBuf},
     process,
@@ -16,7 +17,7 @@ use std::{
 
 use gpui::{
     App, Application, Bounds, ClipboardItem, Context, CursorStyle, EntityInputHandler, FocusHandle,
-    Focusable, IntoElement, KeyBinding, Menu, MenuItem, MouseButton, MouseDownEvent,
+    Focusable, FontWeight, IntoElement, KeyBinding, Menu, MenuItem, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, PathPromptOptions, Pixels, PromptButton, PromptLevel, Render,
     ScrollHandle, SharedString, SystemMenuType, Timer, TitlebarOptions, UTF16Selection, Window,
     WindowBounds, WindowOptions, actions, div, point, prelude::*, px, rgb, size,
@@ -38,8 +39,11 @@ use editing::{
 use encoding::byte_offset_to_utf16;
 use external::external_url_command;
 use file_browser::{MarkdownFile, folder_label, markdown_files_in};
-use renderer::{EditorElement, FONT_SIZE, LINE_HEIGHT, LinkHitbox, TaskMarkerHitbox};
-use session::{is_scratch_document_path, open_initial_session};
+use renderer::{
+    EditorElement, FONT_SIZE, LINE_HEIGHT, LINK_TEXT_COLOR, LinkHitbox, MARKDOWN_MARKER_COLOR,
+    TaskMarkerHitbox,
+};
+use session::{is_scratch_document_path, new_scratch_session, open_initial_session};
 use snapshot::{LineSnapshot, line_for_offset};
 use time_label::{document_modified_time, format_last_edited_time};
 
@@ -133,6 +137,10 @@ fn ease_out_cubic(progress: f32) -> f32 {
 }
 
 fn document_path_label(path: &Path) -> String {
+    if is_scratch_document_path(path) {
+        return "Untitled".to_string();
+    }
+
     path.file_name()
         .and_then(|name| name.to_str())
         .map(str::to_owned)
@@ -150,6 +158,10 @@ fn file_browser_root_for_document(path: &Path) -> Option<PathBuf> {
 }
 
 fn window_title_for_session(session: &DocumentSession) -> String {
+    if is_scratch_document_path(session.path()) {
+        return "Hanji".to_string();
+    }
+
     format!("{} - Hanji", document_path_label(session.path()))
 }
 
@@ -266,6 +278,7 @@ fn configure_app_actions(cx: &mut App) {
         KeyBinding::new("cmd-v", Paste, None),
         KeyBinding::new("cmd-z", Undo, None),
         KeyBinding::new("cmd-shift-z", Redo, None),
+        KeyBinding::new("cmd-n", NewDocument, None),
         KeyBinding::new("cmd-o", OpenDocument, None),
         KeyBinding::new("cmd-s", Save, None),
         KeyBinding::new("cmd-q", Quit, None),
@@ -321,6 +334,7 @@ actions!(
         Paste,
         Undo,
         Redo,
+        NewDocument,
         OpenDocument,
         Save,
         Quit
@@ -345,6 +359,7 @@ struct Hanji {
     file_browser_files: Vec<MarkdownFile>,
     file_browser_status: Option<String>,
     hovered_link_url: Option<String>,
+    welcome_visible: bool,
     preferred_column: Option<usize>,
     preferred_visual_x: Option<Pixels>,
     selection_anchor: Option<usize>,
@@ -361,6 +376,8 @@ struct Hanji {
 impl Hanji {
     fn new(session: DocumentSession, cx: &mut Context<Self>) -> Self {
         let file_browser_root = file_browser_root_for_document(session.path());
+        let welcome_visible =
+            is_scratch_document_path(session.path()) && session.document().text().is_empty();
         let mut editor = Self {
             focus_handle: cx.focus_handle(),
             last_edited_at: document_modified_time(session.path()),
@@ -378,6 +395,7 @@ impl Hanji {
             file_browser_files: Vec::new(),
             file_browser_status: None,
             hovered_link_url: None,
+            welcome_visible,
             preferred_column: None,
             preferred_visual_x: None,
             selection_anchor: None,
@@ -850,8 +868,52 @@ impl Hanji {
         }
     }
 
+    fn new_document(&mut self, _: &NewDocument, window: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        self.clear_selection_tracking();
+        self.reset_caret_blink();
+
+        let discard_changes = if self.session.is_dirty() {
+            Some(window.prompt(
+                PromptLevel::Warning,
+                "Create a new document?",
+                Some("Unsaved changes in the current document will be lost."),
+                &[PromptButton::cancel("Cancel"), PromptButton::ok("Create")],
+                cx,
+            ))
+        } else {
+            None
+        };
+
+        cx.spawn_in(window, async move |editor, cx| {
+            if let Some(discard_changes) = discard_changes {
+                let Ok(answer) = discard_changes.await else {
+                    return;
+                };
+
+                if answer != OPEN_WITHOUT_SAVING_PROMPT_INDEX {
+                    return;
+                }
+            }
+
+            editor
+                .update_in(cx, |editor, window, cx| {
+                    editor.replace_session(new_scratch_session(), window, cx);
+                    editor.status_message = None;
+                    cx.notify();
+                })
+                .ok();
+        })
+        .detach();
+    }
+
     fn save(&mut self, _: &Save, window: &mut Window, cx: &mut Context<Self>) {
         self.reset_caret_blink();
+
+        if is_scratch_document_path(self.session.path()) {
+            self.save_untitled_document(window, cx);
+            return;
+        }
 
         match self.session.save() {
             Ok(()) => {
@@ -865,6 +927,70 @@ impl Hanji {
         }
 
         cx.notify();
+    }
+
+    fn save_untitled_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let initial_directory = self.save_dialog_initial_directory();
+
+        cx.spawn_in(window, async move |editor, cx| {
+            let selected_path = match cx
+                .update(|_, app| app.prompt_for_new_path(&initial_directory, Some("Untitled.md")))
+            {
+                Ok(selected_path) => selected_path,
+                Err(error) => {
+                    editor
+                        .update_in(cx, |editor, _, cx| {
+                            editor.status_message = Some(format!("Save failed: {error}"));
+                            cx.notify();
+                        })
+                        .ok();
+                    return;
+                }
+            };
+
+            let selected_path = match selected_path.await {
+                Ok(Ok(Some(path))) => path,
+                Ok(Ok(None)) => return,
+                Ok(Err(error)) => {
+                    editor
+                        .update_in(cx, |editor, _, cx| {
+                            editor.status_message = Some(format!("Save failed: {error}"));
+                            cx.notify();
+                        })
+                        .ok();
+                    return;
+                }
+                Err(error) => {
+                    editor
+                        .update_in(cx, |editor, _, cx| {
+                            editor.status_message = Some(format!("Save failed: {error}"));
+                            cx.notify();
+                        })
+                        .ok();
+                    return;
+                }
+            };
+
+            editor
+                .update_in(cx, |editor, window, cx| {
+                    match editor.session.save_as(selected_path) {
+                        Ok(()) => {
+                            editor.welcome_visible = false;
+                            editor.status_message = Some("Saved.".to_string());
+                            editor.last_edited_at = SystemTime::now();
+                            editor.update_file_browser_root_for_session();
+                            editor.update_window_title(window);
+                        }
+                        Err(error) => {
+                            editor.status_message = Some(format!("Save failed: {error}"));
+                        }
+                    }
+
+                    cx.notify();
+                })
+                .ok();
+        })
+        .detach();
     }
 
     fn open_document(&mut self, _: &OpenDocument, window: &mut Window, cx: &mut Context<Self>) {
@@ -1023,6 +1149,21 @@ impl Hanji {
         }
 
         self.refresh_file_browser_files();
+    }
+
+    fn save_dialog_initial_directory(&self) -> PathBuf {
+        if let Some(root) = &self.file_browser_root {
+            return root.clone();
+        }
+
+        if !is_scratch_document_path(self.session.path())
+            && let Some(parent) = self.session.path().parent()
+            && !parent.as_os_str().is_empty()
+        {
+            return parent.to_path_buf();
+        }
+
+        env::current_dir().unwrap_or_else(|_| env::temp_dir())
     }
 
     fn refresh_file_browser_files(&mut self) {
@@ -1465,6 +1606,7 @@ impl Hanji {
         let opened_name = document_path_label(session.path());
 
         self.session = session;
+        self.welcome_visible = false;
         self.marked_range = None;
         self.last_lines.clear();
         self.last_task_markers.clear();
@@ -1779,6 +1921,7 @@ impl Hanji {
     }
 
     fn document_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.welcome_visible = false;
         self.status_message = None;
         self.last_edited_at = SystemTime::now();
         self.reset_caret_blink();
@@ -1792,6 +1935,10 @@ impl Hanji {
     }
 
     fn window_title(&self) -> String {
+        if self.welcome_visible {
+            return "Hanji".to_string();
+        }
+
         format!("{} - Hanji", self.document_label())
     }
 
@@ -1800,6 +1947,27 @@ impl Hanji {
         let dirty = if self.session.is_dirty() { " *" } else { "" };
 
         format!("{name}{dirty}")
+    }
+
+    fn status_detail(&self) -> String {
+        let mut status_detail = if self.welcome_visible {
+            String::new()
+        } else {
+            self.document_label()
+        };
+
+        if let Some(message) = self
+            .status_message
+            .as_deref()
+            .filter(|message| !message.is_empty())
+        {
+            if !status_detail.is_empty() {
+                status_detail.push_str(" · ");
+            }
+            status_detail.push_str(message);
+        }
+
+        status_detail
     }
 
     fn reset_caret_blink(&mut self) {
@@ -1890,6 +2058,71 @@ impl Hanji {
             }
         })
         .detach();
+    }
+
+    fn render_welcome_view(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("welcome")
+            .flex()
+            .flex_1()
+            .w_full()
+            .min_h(px(0.0))
+            .justify_center()
+            .items_start()
+            .pt(px(112.0))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_8()
+                    .font_family("Menlo")
+                    .child(
+                        div()
+                            .flex()
+                            .items_baseline()
+                            .gap_3()
+                            .text_size(px(42.0))
+                            .line_height(px(52.0))
+                            .font_weight(FontWeight::BOLD)
+                            .child(div().text_color(rgb(MARKDOWN_MARKER_COLOR)).child("#"))
+                            .child(div().text_color(rgb(0x111111)).child("Hanji")),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .gap_3()
+                            .text_size(px(15.0))
+                            .line_height(px(22.0))
+                            .child(self.render_welcome_action("Create", "⌘ N", NewDocument, cx))
+                            .child(self.render_welcome_action("Open", "⌘ O", OpenDocument, cx)),
+                    ),
+            )
+    }
+
+    fn render_welcome_action(
+        &mut self,
+        label: &'static str,
+        shortcut: &'static str,
+        action: impl gpui::Action + 'static,
+        _cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let text = format!("{label} ({shortcut})");
+
+        div()
+            .id(label)
+            .flex()
+            .items_center()
+            .text_color(rgb(LINK_TEXT_COLOR))
+            .underline()
+            .text_decoration_1()
+            .text_decoration_color(rgb(LINK_TEXT_COLOR))
+            .cursor_pointer()
+            .hover(|style| style.text_color(rgb(0xd1a900)))
+            .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
+            .child(text)
     }
 
     fn render_file_browser(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2210,16 +2443,7 @@ impl Focusable for Hanji {
 
 impl Render for Hanji {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut status_detail = self.document_label();
-        if let Some(message) = self
-            .status_message
-            .as_deref()
-            .filter(|message| !message.is_empty())
-        {
-            status_detail.push_str(" · ");
-            status_detail.push_str(message);
-        }
-        let status_detail: SharedString = status_detail.into();
+        let status_detail: SharedString = self.status_detail().into();
         let last_edited_label: SharedString = format_last_edited_time(self.last_edited_at).into();
         let editor_cursor = editor_cursor_style(self.hovered_link_url.is_some());
         let mut body = div().flex().flex_1().min_h(px(0.0)).w_full();
@@ -2228,38 +2452,42 @@ impl Render for Hanji {
             body = body.child(self.render_file_browser(cx));
         }
 
-        body = body.child(
-            div()
-                .id("editor-scroll")
-                .flex_1()
-                .w_full()
-                .min_h(px(0.0))
-                .p_4()
-                .overflow_y_scroll()
-                .overflow_x_hidden()
-                .scrollbar_width(px(8.0))
-                .track_scroll(&self.editor_scroll)
-                .line_height(px(LINE_HEIGHT))
-                .text_size(px(FONT_SIZE))
-                .font_family("Menlo")
-                .cursor(editor_cursor)
-                .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
-                .on_mouse_move(cx.listener(Self::on_mouse_move))
-                .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
-                .child(
-                    div()
-                        .id("document-last-edited")
-                        .w_full()
-                        .h(px(22.0))
-                        .text_size(px(12.0))
-                        .line_height(px(16.0))
-                        .text_color(rgb(0x9ca3af))
-                        .child(last_edited_label),
-                )
-                .child(EditorElement {
-                    editor: cx.entity(),
-                }),
-        );
+        if self.welcome_visible {
+            body = body.child(self.render_welcome_view(cx));
+        } else {
+            body = body.child(
+                div()
+                    .id("editor-scroll")
+                    .flex_1()
+                    .w_full()
+                    .min_h(px(0.0))
+                    .p_4()
+                    .overflow_y_scroll()
+                    .overflow_x_hidden()
+                    .scrollbar_width(px(8.0))
+                    .track_scroll(&self.editor_scroll)
+                    .line_height(px(LINE_HEIGHT))
+                    .text_size(px(FONT_SIZE))
+                    .font_family("Menlo")
+                    .cursor(editor_cursor)
+                    .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+                    .on_mouse_move(cx.listener(Self::on_mouse_move))
+                    .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+                    .child(
+                        div()
+                            .id("document-last-edited")
+                            .w_full()
+                            .h(px(22.0))
+                            .text_size(px(12.0))
+                            .line_height(px(16.0))
+                            .text_color(rgb(0x9ca3af))
+                            .child(last_edited_label),
+                    )
+                    .child(EditorElement {
+                        editor: cx.entity(),
+                    }),
+            );
+        }
 
         div()
             .track_focus(&self.focus_handle(cx))
@@ -2301,6 +2529,7 @@ impl Render for Hanji {
             .on_action(cx.listener(Self::outdent_list))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
+            .on_action(cx.listener(Self::new_document))
             .on_action(cx.listener(Self::open_document))
             .on_action(cx.listener(Self::save))
             .flex()
@@ -2428,6 +2657,13 @@ mod tests {
             "hanji.md"
         );
         assert_eq!(document_path_label(Path::new("/")), "/");
+    }
+
+    #[test]
+    fn document_path_label_hides_scratch_file_name() {
+        let session = new_scratch_session();
+
+        assert_eq!(document_path_label(session.path()), "Untitled");
     }
 }
 
