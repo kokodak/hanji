@@ -1,5 +1,7 @@
 # Hanji <sub><sub>한지 韓紙</sub></sub>
 
+### <img width="218" height="63" alt="image" src="https://github.com/user-attachments/assets/3834beb8-19f0-49f5-8c85-775bd3be582a" /> 
+
 Capture the thought.
 
 Hanji is a lightweight, local-first Markdown editor built in Rust. It uses local Markdown files as the source of truth and presents them through a source-backed WYSIWYG view.
