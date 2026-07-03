@@ -1603,8 +1603,6 @@ impl Hanji {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let opened_name = document_path_label(session.path());
-
         self.session = session;
         self.welcome_visible = false;
         self.marked_range = None;
@@ -1618,7 +1616,7 @@ impl Hanji {
         self.clear_preferred_vertical_target();
         self.clear_selection_tracking();
         self.reset_caret_blink();
-        self.status_message = Some(format!("Opened {opened_name}."));
+        self.status_message = None;
 
         window.focus(&self.focus_handle);
         self.update_window_title(window);
