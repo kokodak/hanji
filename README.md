@@ -2,15 +2,9 @@
 
 Capture the thought.
 
-Hanji is a light, local-first Markdown text editor.
+Hanji is a lightweight, local-first Markdown editor built in Rust. It uses local Markdown files as the source of truth and presents them through a source-backed WYSIWYG view.
 
-## Principles
-
-- Light by default: fast startup, minimal chrome, and a quiet editing surface.
-- Local first: offline editing is the core workflow, not a fallback.
-- Markdown native: plain text files should remain readable outside the app.
-- Extensible by design: plugins should be easy to author, inspect, install, and remove.
-- Collaboration when online: real-time editing should feel optional, direct, and unobtrusive.
+The editor is designed for simple writing: open a Markdown file, edit it directly, and keep the saved document readable outside Hanji.
 
 ## Getting Started
 
@@ -27,14 +21,27 @@ make app
 make app FILE=/path/to/note.md
 ```
 
-For product philosophy and editor design notes, see [Hanji Docs](docs/README.md).
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for issue, pull request, and development guidelines.
 
 ## Project Layout
 
-```text
-docs/                 Product and engineering design notes
-docs/design/          Core editor concepts and design vocabulary
-crates/               Rust editor crates
-apps/                 Rust desktop applications
-AGENTS.md            Guidance for coding agents working in this repo
-```
+- [docs/](docs/) contains product and engineering design notes.
+- [docs/design/](docs/design/) contains core editor concepts and design vocabulary.
+- [crates/hanji-core](crates/hanji-core/) owns text editing primitives.
+- [crates/hanji-markdown](crates/hanji-markdown/) owns Markdown projection and commands.
+- [crates/hanji-storage](crates/hanji-storage/) owns local file and document session behavior.
+- [crates/hanji-plugin-api](crates/hanji-plugin-api/) is reserved for future plugin contracts.
+- [apps/hanji](apps/hanji/) contains the GPUI desktop app.
+- [AGENTS.md](AGENTS.md) contains guidance for coding agents working in this repo.
+
+## Documentation
+
+- [Hanji Docs](docs/README.md)
+- [Architecture](docs/architecture.md)
+- [Design Notes](docs/design/README.md)
+
+## License
+
+Hanji is released under the [MIT License](LICENSE).
