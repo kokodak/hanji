@@ -1,6 +1,7 @@
 mod editing;
 mod encoding;
 mod external;
+mod file_browser;
 mod renderer;
 mod session;
 mod snapshot;
@@ -8,7 +9,7 @@ mod time_label;
 
 use std::{
     ops::Range,
-    path::Path,
+    path::{Path, PathBuf},
     process,
     time::{Duration, Instant, SystemTime},
 };
@@ -36,8 +37,9 @@ use editing::{
 };
 use encoding::byte_offset_to_utf16;
 use external::external_url_command;
+use file_browser::{MarkdownFile, folder_label, markdown_files_in};
 use renderer::{EditorElement, FONT_SIZE, LINE_HEIGHT, LinkHitbox, TaskMarkerHitbox};
-use session::open_initial_session;
+use session::{is_scratch_document_path, open_initial_session};
 use snapshot::{LineSnapshot, line_for_offset};
 use time_label::{document_modified_time, format_last_edited_time};
 
@@ -111,6 +113,16 @@ fn document_path_label(path: &Path) -> String {
         .and_then(|name| name.to_str())
         .map(str::to_owned)
         .unwrap_or_else(|| path.display().to_string())
+}
+
+fn file_browser_root_for_document(path: &Path) -> Option<PathBuf> {
+    if is_scratch_document_path(path) {
+        return None;
+    }
+
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(Path::to_path_buf)
 }
 
 fn window_title_for_session(session: &DocumentSession) -> String {
@@ -220,6 +232,7 @@ fn configure_app_actions(cx: &mut App) {
         KeyBinding::new("cmd-i", ToggleItalic, None),
         KeyBinding::new("cmd-e", ToggleCode, None),
         KeyBinding::new("cmd-k", InsertLink, None),
+        KeyBinding::new("cmd-shift-e", ToggleFileBrowser, None),
         KeyBinding::new("cmd-a", SelectAll, None),
         KeyBinding::new("cmd-c", Copy, None),
         KeyBinding::new("cmd-x", Cut, None),
@@ -271,6 +284,8 @@ actions!(
         ToggleItalic,
         ToggleCode,
         InsertLink,
+        ToggleFileBrowser,
+        OpenFolder,
         SelectAll,
         IndentList,
         OutdentList,
@@ -295,6 +310,11 @@ struct Hanji {
     last_task_markers: Vec<TaskMarkerHitbox>,
     last_link_hitboxes: Vec<LinkHitbox>,
     editor_scroll: ScrollHandle,
+    file_browser_scroll: ScrollHandle,
+    file_browser_visible: bool,
+    file_browser_root: Option<PathBuf>,
+    file_browser_files: Vec<MarkdownFile>,
+    file_browser_status: Option<String>,
     hovered_link_url: Option<String>,
     preferred_column: Option<usize>,
     preferred_visual_x: Option<Pixels>,
@@ -311,7 +331,8 @@ struct Hanji {
 
 impl Hanji {
     fn new(session: DocumentSession, cx: &mut Context<Self>) -> Self {
-        Self {
+        let file_browser_root = file_browser_root_for_document(session.path());
+        let mut editor = Self {
             focus_handle: cx.focus_handle(),
             last_edited_at: document_modified_time(session.path()),
             session,
@@ -320,6 +341,11 @@ impl Hanji {
             last_task_markers: Vec::new(),
             last_link_hitboxes: Vec::new(),
             editor_scroll: ScrollHandle::new(),
+            file_browser_scroll: ScrollHandle::new(),
+            file_browser_visible: false,
+            file_browser_root,
+            file_browser_files: Vec::new(),
+            file_browser_status: None,
             hovered_link_url: None,
             preferred_column: None,
             preferred_visual_x: None,
@@ -331,7 +357,9 @@ impl Hanji {
             caret_opacity: 1.0,
             caret_last_activity_at: Instant::now(),
             caret_blink_started: false,
-        }
+        };
+        editor.refresh_file_browser_files();
+        editor
     }
 
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
@@ -593,6 +621,80 @@ impl Hanji {
         );
     }
 
+    fn toggle_file_browser(
+        &mut self,
+        _: &ToggleFileBrowser,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.file_browser_visible = !self.file_browser_visible;
+        if self.file_browser_visible && self.file_browser_files.is_empty() {
+            self.refresh_file_browser_files();
+        }
+        cx.notify();
+    }
+
+    fn open_folder(&mut self, _: &OpenFolder, window: &mut Window, cx: &mut Context<Self>) {
+        self.reset_caret_blink();
+
+        cx.spawn_in(window, async move |editor, cx| {
+            let selected_paths = match cx.update(|_, app| {
+                app.prompt_for_paths(PathPromptOptions {
+                    files: false,
+                    directories: true,
+                    multiple: false,
+                    prompt: Some("Open Folder".into()),
+                })
+            }) {
+                Ok(selected_paths) => selected_paths,
+                Err(error) => {
+                    editor
+                        .update_in(cx, |editor, _, cx| {
+                            editor.status_message = Some(format!("Open folder failed: {error}"));
+                            cx.notify();
+                        })
+                        .ok();
+                    return;
+                }
+            };
+
+            let selected_paths = match selected_paths.await {
+                Ok(Ok(Some(paths))) => paths,
+                Ok(Ok(None)) => return,
+                Ok(Err(error)) => {
+                    editor
+                        .update_in(cx, |editor, _, cx| {
+                            editor.status_message = Some(format!("Open folder failed: {error}"));
+                            cx.notify();
+                        })
+                        .ok();
+                    return;
+                }
+                Err(error) => {
+                    editor
+                        .update_in(cx, |editor, _, cx| {
+                            editor.status_message = Some(format!("Open folder failed: {error}"));
+                            cx.notify();
+                        })
+                        .ok();
+                    return;
+                }
+            };
+
+            let Some(path) = selected_paths.into_iter().next() else {
+                return;
+            };
+
+            editor
+                .update_in(cx, |editor, _, cx| {
+                    editor.set_file_browser_root(path);
+                    cx.notify();
+                })
+                .ok();
+        })
+        .detach();
+    }
+
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
         self.is_selecting = false;
@@ -820,6 +922,99 @@ impl Hanji {
                 .ok();
         })
         .detach();
+    }
+
+    fn open_file_from_browser(
+        &mut self,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.marked_range = None;
+        self.clear_selection_tracking();
+        self.reset_caret_blink();
+
+        let discard_changes = if self.session.is_dirty() {
+            Some(window.prompt(
+                PromptLevel::Warning,
+                "Open another file?",
+                Some("Unsaved changes in the current document will be lost."),
+                &[PromptButton::cancel("Cancel"), PromptButton::ok("Open")],
+                cx,
+            ))
+        } else {
+            None
+        };
+
+        cx.spawn_in(window, async move |editor, cx| {
+            if let Some(discard_changes) = discard_changes {
+                let Ok(answer) = discard_changes.await else {
+                    return;
+                };
+
+                if answer != OPEN_WITHOUT_SAVING_PROMPT_INDEX {
+                    return;
+                }
+            }
+
+            let opened_session = DocumentSession::open(path);
+            editor
+                .update_in(cx, |editor, window, cx| match opened_session {
+                    Ok(session) => editor.replace_session(session, window, cx),
+                    Err(error) => {
+                        editor.status_message = Some(format!("Open failed: {error}"));
+                        cx.notify();
+                    }
+                })
+                .ok();
+        })
+        .detach();
+    }
+
+    fn set_file_browser_root(&mut self, root: PathBuf) {
+        self.file_browser_visible = true;
+        self.file_browser_root = Some(root);
+        self.file_browser_scroll.set_offset(point(px(0.0), px(0.0)));
+        self.refresh_file_browser_files();
+    }
+
+    fn update_file_browser_root_for_session(&mut self) {
+        let path = self.session.path();
+        let preserves_root = self
+            .file_browser_root
+            .as_ref()
+            .is_some_and(|root| path.starts_with(root));
+
+        if !preserves_root {
+            self.file_browser_root = file_browser_root_for_document(path);
+            self.file_browser_scroll.set_offset(point(px(0.0), px(0.0)));
+        }
+
+        self.refresh_file_browser_files();
+    }
+
+    fn refresh_file_browser_files(&mut self) {
+        let Some(root) = self.file_browser_root.as_deref() else {
+            self.file_browser_files.clear();
+            self.file_browser_status = Some("Open a folder to browse Markdown files.".to_string());
+            return;
+        };
+
+        match markdown_files_in(root) {
+            Ok(files) if files.is_empty() => {
+                self.file_browser_files = files;
+                self.file_browser_status = Some("No Markdown files found.".to_string());
+            }
+            Ok(files) => {
+                self.file_browser_files = files;
+                self.file_browser_status = None;
+            }
+            Err(error) => {
+                self.file_browser_files.clear();
+                self.file_browser_status = Some(format!("Could not read folder: {error}"));
+                self.status_message = Some(format!("Could not read folder: {error}"));
+            }
+        }
     }
 
     fn on_mouse_down(
@@ -1245,6 +1440,7 @@ impl Hanji {
         self.last_edited_at = document_modified_time(self.session.path());
         self.editor_scroll.set_offset(point(px(0.0), px(0.0)));
         self.hovered_link_url = None;
+        self.update_file_browser_root_for_session();
         self.clear_preferred_vertical_target();
         self.clear_selection_tracking();
         self.reset_caret_blink();
@@ -1607,6 +1803,141 @@ impl Hanji {
         })
         .detach();
     }
+
+    fn render_file_browser(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let root_label = self
+            .file_browser_root
+            .as_deref()
+            .map(folder_label)
+            .unwrap_or_else(|| "No folder".to_string());
+        let mut files = div()
+            .id("file-browser-files")
+            .flex()
+            .flex_1()
+            .flex_col()
+            .gap_1()
+            .min_h(px(0.0))
+            .overflow_y_scroll()
+            .scrollbar_width(px(6.0))
+            .track_scroll(&self.file_browser_scroll);
+
+        if let Some(status) = self.file_browser_status.clone() {
+            files = files.child(
+                div()
+                    .px_2()
+                    .py_1()
+                    .text_xs()
+                    .line_height(px(16.0))
+                    .text_color(rgb(0x9ca3af))
+                    .child(status),
+            );
+        } else {
+            let current_path = self.session.path().to_path_buf();
+            for file in self.file_browser_files.clone() {
+                let is_active = file.path == current_path;
+                files = files.child(self.render_file_browser_file(file, is_active, cx));
+            }
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .flex_shrink_0()
+            .w(px(248.0))
+            .h_full()
+            .min_h(px(0.0))
+            .border_r_1()
+            .border_color(rgb(0xe5e7eb))
+            .bg(rgb(0xffffff))
+            .px_3()
+            .py_3()
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xs()
+                            .line_height(px(14.0))
+                            .text_color(rgb(0x9ca3af))
+                            .child("Folder"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .line_height(px(18.0))
+                            .text_color(rgb(0x111111))
+                            .whitespace_nowrap()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(root_label),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(self.render_file_browser_button("Open File", OpenDocument, cx))
+                    .child(self.render_file_browser_button("Open Folder", OpenFolder, cx)),
+            )
+            .child(files)
+    }
+
+    fn render_file_browser_button(
+        &mut self,
+        label: &'static str,
+        action: impl gpui::Action + 'static,
+        _cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        div()
+            .id(label)
+            .px_2()
+            .py_1()
+            .rounded(px(5.0))
+            .border_1()
+            .border_color(rgb(0xd1d5db))
+            .text_xs()
+            .line_height(px(16.0))
+            .text_color(rgb(0x111111))
+            .cursor_pointer()
+            .hover(|style| style.bg(rgb(0xf3f4f6)))
+            .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
+            .child(label)
+    }
+
+    fn render_file_browser_file(
+        &mut self,
+        file: MarkdownFile,
+        is_active: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let label = file.label.clone();
+        let id = SharedString::from(format!("file-browser-file:{label}"));
+        let path = file.path.clone();
+
+        div()
+            .id(id)
+            .px_2()
+            .py_1()
+            .rounded(px(5.0))
+            .line_height(px(18.0))
+            .text_sm()
+            .text_color(rgb(0x374151))
+            .cursor_pointer()
+            .whitespace_nowrap()
+            .overflow_hidden()
+            .text_ellipsis()
+            .hover(|style| style.bg(rgb(0xf3f4f6)))
+            .when(is_active, |row| {
+                row.bg(rgb(0xecfdf5)).text_color(rgb(0x111111))
+            })
+            .on_click(cx.listener(move |editor, _, window, cx| {
+                editor.open_file_from_browser(path.clone(), window, cx);
+            }))
+            .child(label)
+    }
 }
 
 impl EntityInputHandler for Hanji {
@@ -1753,6 +2084,44 @@ impl Render for Hanji {
         let status_detail: SharedString = status_detail.into();
         let last_edited_label: SharedString = format_last_edited_time(self.last_edited_at).into();
         let editor_cursor = editor_cursor_style(self.hovered_link_url.is_some());
+        let mut body = div().flex().flex_1().min_h(px(0.0)).w_full();
+
+        if self.file_browser_visible {
+            body = body.child(self.render_file_browser(cx));
+        }
+
+        body = body.child(
+            div()
+                .id("editor-scroll")
+                .flex_1()
+                .w_full()
+                .min_h(px(0.0))
+                .p_4()
+                .overflow_y_scroll()
+                .overflow_x_hidden()
+                .scrollbar_width(px(8.0))
+                .track_scroll(&self.editor_scroll)
+                .line_height(px(LINE_HEIGHT))
+                .text_size(px(FONT_SIZE))
+                .font_family("Menlo")
+                .cursor(editor_cursor)
+                .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+                .on_mouse_move(cx.listener(Self::on_mouse_move))
+                .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+                .child(
+                    div()
+                        .id("document-last-edited")
+                        .w_full()
+                        .h(px(22.0))
+                        .text_size(px(12.0))
+                        .line_height(px(16.0))
+                        .text_color(rgb(0x9ca3af))
+                        .child(last_edited_label),
+                )
+                .child(EditorElement {
+                    editor: cx.entity(),
+                }),
+        );
 
         div()
             .track_focus(&self.focus_handle(cx))
@@ -1784,6 +2153,8 @@ impl Render for Hanji {
             .on_action(cx.listener(Self::toggle_italic))
             .on_action(cx.listener(Self::toggle_code))
             .on_action(cx.listener(Self::insert_link))
+            .on_action(cx.listener(Self::toggle_file_browser))
+            .on_action(cx.listener(Self::open_folder))
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::cut))
@@ -1818,38 +2189,7 @@ impl Render for Hanji {
                             .child(status_detail),
                     ),
             )
-            .child(
-                div()
-                    .id("editor-scroll")
-                    .flex_1()
-                    .w_full()
-                    .min_h(px(0.0))
-                    .p_4()
-                    .overflow_y_scroll()
-                    .overflow_x_hidden()
-                    .scrollbar_width(px(8.0))
-                    .track_scroll(&self.editor_scroll)
-                    .line_height(px(LINE_HEIGHT))
-                    .text_size(px(FONT_SIZE))
-                    .font_family("Menlo")
-                    .cursor(editor_cursor)
-                    .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
-                    .on_mouse_move(cx.listener(Self::on_mouse_move))
-                    .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
-                    .child(
-                        div()
-                            .id("document-last-edited")
-                            .w_full()
-                            .h(px(22.0))
-                            .text_size(px(12.0))
-                            .line_height(px(16.0))
-                            .text_color(rgb(0x9ca3af))
-                            .child(last_edited_label),
-                    )
-                    .child(EditorElement {
-                        editor: cx.entity(),
-                    }),
-            )
+            .child(body)
     }
 }
 

@@ -1,4 +1,7 @@
-use std::{env, io, path::PathBuf};
+use std::{
+    env, io,
+    path::{Path, PathBuf},
+};
 
 use hanji_storage::DocumentSession;
 
@@ -17,6 +20,10 @@ pub(crate) fn open_initial_session() -> io::Result<DocumentSession> {
     } else {
         Ok(DocumentSession::new(path, ""))
     }
+}
+
+pub(crate) fn is_scratch_document_path(path: &Path) -> bool {
+    path == scratch_document_path()
 }
 
 fn scratch_document_path() -> PathBuf {
