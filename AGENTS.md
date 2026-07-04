@@ -1,10 +1,24 @@
 # AGENTS.md
 
-This repository is built in English only. Keep code, comments, docs, commit messages, issue templates, and user-facing strings in English unless a future localization system explicitly scopes another language.
+## Project Overview
+
+Hanji is a lightweight, local-first Markdown editor built in Rust. It keeps local Markdown files as the source of truth and presents them through a focused visual editing surface.
+
+The editor is designed for simple writing: open a Markdown file, edit it directly, and keep the saved document readable outside Hanji.
 
 ## Product North Star
 
 Hanji is a light, local-first Markdown editor. It should feel simple enough for notes, durable enough for plain text writing, and open enough for user plugins.
+
+## Project Structure
+
+- [docs/](docs/) contains product and engineering design notes.
+- [docs/design/](docs/design/) contains core editor concepts and design vocabulary.
+- [crates/hanji-core](crates/hanji-core/) owns text editing primitives: text buffers, selections, transactions, undo, and core commands.
+- [crates/hanji-markdown](crates/hanji-markdown/) owns Markdown parsing, source mapping, projection, and formatting commands.
+- [crates/hanji-storage](crates/hanji-storage/) owns local file and document session behavior.
+- [crates/hanji-plugin-api](crates/hanji-plugin-api/) is reserved for future public plugin contracts.
+- [apps/hanji](apps/hanji/) contains the GPUI desktop application.
 
 ## Engineering Guidelines
 
@@ -20,13 +34,25 @@ Hanji is a light, local-first Markdown editor. It should feel simple enough for 
 - Put core editor concepts under `docs/design/`.
 - Keep the Rust and GPUI architecture direction in `docs/architecture.md` until a dedicated ADR structure exists.
 - Keep GPUI app code in `apps/hanji/`.
-- Add tests alongside the feature once test infrastructure is introduced.
-- Start commit messages with an English imperative verb and make the scope broad enough to describe the full change.
+- Add or update focused tests alongside behavior changes when practical.
+- Start commit messages with an imperative verb and make the scope broad enough to describe the full change.
+
+## Contribution Workflow
+
+- Agents MUST read [CONTRIBUTING.md](CONTRIBUTING.md) before starting contribution work, including issues, pull requests, documentation edits, and implementation changes.
+- Before opening an issue, read the available templates under [.github/ISSUE_TEMPLATE/](.github/ISSUE_TEMPLATE/) and use the closest match: [Common issue](.github/ISSUE_TEMPLATE/common_issue.md) for ideas, tasks, and small issues, or [Bug report](.github/ISSUE_TEMPLATE/bug_report.md) for broken or confusing behavior.
+- Before opening a pull request, read [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md) and fill it with the actual changes, related issue, tests, and skipped checks.
+- Keep issue and pull request titles concise and specific.
+- Prefer small, focused issues and pull requests that describe one user-visible behavior, engineering task, or cleanup.
+- When a request is exploratory, draft the issue or pull request body for review before creating it.
+- Do not claim that checks, tests, screenshots, or manual verification passed unless they were actually run or captured.
+- Link related issues, pull requests, design documents, or code paths when they clarify the scope.
 
 ## Initial Commands
 
 ```sh
 make app
 make check-app
-cargo test --workspace --exclude hanji
+make test
+cargo test -p hanji
 ```
