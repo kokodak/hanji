@@ -6,7 +6,7 @@ use gpui::{
 };
 use hanji_core::TextRange;
 use hanji_markdown::{
-    MarkdownLine, MarkdownListMarker, MarkdownTaskState, ProjectedInlineStyle,
+    MarkdownLine, MarkdownListMarker, MarkdownTableLine, MarkdownTaskState, ProjectedInlineStyle,
     ProjectedSegmentKind, ProjectedVisibleSegment, project_document,
 };
 
@@ -35,6 +35,12 @@ const CODE_BLOCK_TEXT_INSET: f32 = 12.0;
 const HORIZONTAL_RULE_COLOR: u32 = 0xd8d3c7;
 const HORIZONTAL_RULE_INSET: f32 = 4.0;
 const HORIZONTAL_RULE_HEIGHT: f32 = 1.0;
+const TABLE_TEXT_INSET: f32 = 8.0;
+const TABLE_DELIMITER_HEIGHT: f32 = 8.0;
+const TABLE_MIN_WIDTH: f32 = 120.0;
+const TABLE_BORDER_COLOR: u32 = 0xd8d3c7;
+const TABLE_HEADER_BACKGROUND_COLOR: u32 = 0x25231f12;
+const TABLE_BODY_BACKGROUND_COLOR: u32 = 0x25231f08;
 const EDITOR_CHROME_HORIZONTAL_PADDING: f32 = 32.0;
 const EDITOR_SCROLL_HORIZONTAL_PADDING: f32 = 32.0;
 const MIN_WRAP_WIDTH: f32 = 120.0;
@@ -51,8 +57,17 @@ pub(crate) struct EditorPrepaintState {
     link_hitboxes: Vec<LinkHitbox>,
     code_backgrounds: Vec<PaintQuad>,
     horizontal_rules: Vec<PaintQuad>,
+    table_quads: Vec<PaintQuad>,
     cursor: Option<PaintQuad>,
     selections: Vec<PaintQuad>,
+}
+
+#[derive(Clone, Copy)]
+struct TablePreviewRow {
+    table_range: TextRange,
+    container_bounds: Bounds<Pixels>,
+    content_width: Pixels,
+    role: MarkdownTableLine,
 }
 
 enum ListMarkerSnapshot {
@@ -130,6 +145,8 @@ pub(crate) struct LinePresentation {
     pub(crate) is_blockquote: bool,
     pub(crate) is_code_block: bool,
     pub(crate) is_checked_task: bool,
+    pub(crate) is_table_header: bool,
+    pub(crate) is_table_preview: bool,
     pub(crate) text_indent: f32,
 }
 
@@ -169,8 +186,11 @@ impl Element for EditorElement {
         let wrap_container_width = request_layout_wrap_width(editor, window);
 
         for line in projection.lines() {
-            let presentation = line_presentation(line.kind);
             let visible_segments = line.visible_segments_revealing_source_in(Some(selection));
+            let presentation = line_presentation_for_table_state(
+                line.kind,
+                line.table_source_is_revealed(Some(selection)),
+            );
             let line_text: SharedString = visible_text_from_segments(&visible_segments).into();
             let runs = line_text_runs(&visible_segments, presentation, &text_style);
             let content_offset_width = hidden_list_content_offset_width_for_layout(
@@ -216,6 +236,7 @@ impl Element for EditorElement {
         let mut link_hitboxes = Vec::new();
         let mut code_backgrounds = Vec::new();
         let mut horizontal_rules = Vec::new();
+        let mut table_preview_rows = Vec::new();
         let mut code_block_background_runs = Vec::new();
         let mut code_block_background_run = None;
         let mut top = 0.0;
@@ -226,8 +247,11 @@ impl Element for EditorElement {
         let projection = project_document(document);
 
         for line in projection.lines() {
-            let presentation = line_presentation(line.kind);
             let visible_segments = line.visible_segments_revealing_source_in(Some(selection));
+            let presentation = line_presentation_for_table_state(
+                line.kind,
+                line.table_source_is_revealed(Some(selection)),
+            );
             let marker_container_bounds = Bounds::new(
                 point(bounds.left(), bounds.top() + px(top)),
                 size(bounds.size.width, px(presentation.line_height)),
@@ -250,6 +274,7 @@ impl Element for EditorElement {
             let wrap_width = line_wrap_width(bounds.size.width, presentation, content_offset_width);
             let layout = shape_wrapped_line(line_text, presentation, &runs, wrap_width, window);
             let wrapped_height = layout.size(px(presentation.line_height)).height;
+            let content_width = layout.size(px(presentation.line_height)).width;
             let container_bounds = Bounds::new(
                 point(bounds.left(), bounds.top() + px(top)),
                 size(bounds.size.width, wrapped_height),
@@ -301,6 +326,17 @@ impl Element for EditorElement {
             {
                 horizontal_rules.push(horizontal_rule_quad(container_bounds));
             }
+            if let MarkdownLine::Table { role } = line.kind
+                && presentation.is_table_preview
+                && let Some(table_range) = line.table_range()
+            {
+                table_preview_rows.push(TablePreviewRow {
+                    table_range,
+                    container_bounds,
+                    content_width,
+                    role,
+                });
+            }
             top += f32::from(wrapped_height);
             let visible_len = visible_segments
                 .last()
@@ -338,6 +374,7 @@ impl Element for EditorElement {
                 .into_iter()
                 .map(code_block_background_quad),
         );
+        let table_quads = table_preview_quads(&table_preview_rows);
 
         let cursor = if selection.is_empty() && editor.caret_opacity > 0.0 {
             caret_quad(&lines, selection.start, editor.caret_opacity)
@@ -354,6 +391,7 @@ impl Element for EditorElement {
             link_hitboxes,
             code_backgrounds,
             horizontal_rules,
+            table_quads,
             cursor,
             selections,
         }
@@ -386,6 +424,10 @@ impl Element for EditorElement {
 
         for background in prepaint.code_backgrounds.drain(..) {
             window.paint_quad(background);
+        }
+
+        for table_quad in prepaint.table_quads.drain(..) {
+            window.paint_quad(table_quad);
         }
 
         for rule in prepaint.horizontal_rules.drain(..) {
@@ -502,6 +544,81 @@ fn horizontal_rule_quad(bounds: Bounds<Pixels>) -> PaintQuad {
         ),
         rgb(HORIZONTAL_RULE_COLOR),
     )
+}
+
+fn table_preview_quads(rows: &[TablePreviewRow]) -> Vec<PaintQuad> {
+    let mut quads = Vec::new();
+    let mut group_start = 0;
+
+    while group_start < rows.len() {
+        let table_range = rows[group_start].table_range;
+        let mut group_end = group_start + 1;
+        while group_end < rows.len() && rows[group_end].table_range == table_range {
+            group_end += 1;
+        }
+
+        let group = &rows[group_start..group_end];
+        let max_content_width = group
+            .iter()
+            .map(|row| row.content_width)
+            .fold(px(0.0), Pixels::max);
+        let available_width = group[0].container_bounds.size.width;
+        let table_width = (max_content_width + px(TABLE_TEXT_INSET * 2.0))
+            .max(px(TABLE_MIN_WIDTH))
+            .min(available_width);
+        let left = group[0].container_bounds.left();
+
+        for row in group {
+            let row_bounds = Bounds::new(
+                point(left, row.container_bounds.top()),
+                size(table_width, row.container_bounds.size.height),
+            );
+            match row.role {
+                MarkdownTableLine::Header => {
+                    quads.push(fill(row_bounds, rgba(TABLE_HEADER_BACKGROUND_COLOR)));
+                }
+                MarkdownTableLine::Delimiter => {
+                    let rule_height = px(1.0);
+                    let rule_top = row_bounds.top()
+                        + (row_bounds.bottom() - row_bounds.top() - rule_height) / 2.0;
+                    quads.push(fill(
+                        Bounds::new(point(left, rule_top), size(table_width, rule_height)),
+                        rgb(TABLE_BORDER_COLOR),
+                    ));
+                }
+                MarkdownTableLine::Body => {
+                    quads.push(fill(row_bounds, rgba(TABLE_BODY_BACKGROUND_COLOR)));
+                    quads.push(fill(
+                        Bounds::new(
+                            point(left, row_bounds.bottom() - px(1.0)),
+                            size(table_width, px(1.0)),
+                        ),
+                        rgb(TABLE_BORDER_COLOR),
+                    ));
+                }
+            }
+        }
+
+        let outer_bounds = Bounds::from_corners(
+            point(left, group[0].container_bounds.top()),
+            point(
+                left + table_width,
+                group[group.len() - 1].container_bounds.bottom(),
+            ),
+        );
+        quads.push(quad(
+            outer_bounds,
+            px(4.0),
+            rgba(0x00000000),
+            px(1.0),
+            rgb(TABLE_BORDER_COLOR),
+            BorderStyle::Solid,
+        ));
+
+        group_start = group_end;
+    }
+
+    quads
 }
 
 fn list_marker_snapshot(
@@ -818,6 +935,9 @@ fn line_text_runs(
             }
             ProjectedSegmentKind::LinkDestination => RunStyle::Inline(InlineRunStyle::plain()),
             ProjectedSegmentKind::EscapeMarker => RunStyle::EscapeMarker,
+            ProjectedSegmentKind::TableMarker if presentation.is_table_preview => {
+                RunStyle::TableBorder
+            }
             ProjectedSegmentKind::HeadingMarker
             | ProjectedSegmentKind::HorizontalRuleMarker
             | ProjectedSegmentKind::BlockquoteMarker
@@ -827,6 +947,7 @@ fn line_text_runs(
             | ProjectedSegmentKind::StrikethroughMarker
             | ProjectedSegmentKind::CodeMarker
             | ProjectedSegmentKind::CodeBlockFence
+            | ProjectedSegmentKind::TableMarker
             | ProjectedSegmentKind::LinkMarker => RunStyle::Marker,
         };
 
@@ -878,6 +999,7 @@ impl InlineRunStyle {
 #[derive(Clone, Copy)]
 enum RunStyle {
     Marker,
+    TableBorder,
     Strikethrough(InlineRunStyle),
     CodeBlock,
     EscapeMarker,
@@ -901,7 +1023,7 @@ fn push_text_run(
         RunStyle::Strikethrough(style) => style,
         _ => InlineRunStyle::default(),
     };
-    if presentation.is_heading || inline.is_strong {
+    if presentation.is_heading || presentation.is_table_header || inline.is_strong {
         font.weight = if inline.is_strong {
             FontWeight::BLACK
         } else {
@@ -913,6 +1035,8 @@ fn push_text_run(
     }
     let color = if matches!(style, RunStyle::EscapeMarker) {
         rgb(0x8f8a82).into()
+    } else if matches!(style, RunStyle::TableBorder) {
+        rgb(TABLE_BORDER_COLOR).into()
     } else if matches!(style, RunStyle::Marker) {
         rgb(MARKDOWN_MARKER_COLOR).into()
     } else if inline.is_link {
@@ -996,6 +1120,7 @@ fn code_background_ranges(segments: &[ProjectedVisibleSegment<'_>]) -> Vec<TextR
             | ProjectedSegmentKind::StrikethroughContent
             | ProjectedSegmentKind::CodeBlockFence
             | ProjectedSegmentKind::CodeBlockContent
+            | ProjectedSegmentKind::TableMarker
             | ProjectedSegmentKind::LinkMarker
             | ProjectedSegmentKind::LinkText
             | ProjectedSegmentKind::LinkDestination => None,
@@ -1244,7 +1369,29 @@ fn code_background_quads_for_range(line: &LineSnapshot, range: TextRange) -> Vec
         .collect()
 }
 
+#[cfg(test)]
 fn line_presentation(line: MarkdownLine) -> LinePresentation {
+    line_presentation_for_table_state(line, false)
+}
+
+fn line_presentation_for_table_state(
+    line: MarkdownLine,
+    table_source_revealed: bool,
+) -> LinePresentation {
+    if matches!(line, MarkdownLine::Table { .. }) && table_source_revealed {
+        return LinePresentation {
+            font_size: FONT_SIZE,
+            line_height: LINE_HEIGHT,
+            is_heading: false,
+            is_blockquote: false,
+            is_code_block: false,
+            is_checked_task: false,
+            is_table_header: false,
+            is_table_preview: false,
+            text_indent: 0.0,
+        };
+    }
+
     match line {
         MarkdownLine::Heading { level } => {
             let font_size = match level {
@@ -1261,6 +1408,8 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
                 is_blockquote: false,
                 is_code_block: false,
                 is_checked_task: false,
+                is_table_header: false,
+                is_table_preview: false,
                 text_indent: 0.0,
             }
         }
@@ -1271,6 +1420,8 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
             is_blockquote: true,
             is_code_block: false,
             is_checked_task: false,
+            is_table_header: false,
+            is_table_preview: false,
             text_indent: 18.0,
         },
         MarkdownLine::HorizontalRule => LinePresentation {
@@ -1280,6 +1431,8 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
             is_blockquote: false,
             is_code_block: false,
             is_checked_task: false,
+            is_table_header: false,
+            is_table_preview: false,
             text_indent: 0.0,
         },
         MarkdownLine::ListItem { task, .. } => LinePresentation {
@@ -1289,6 +1442,8 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
             is_blockquote: false,
             is_code_block: false,
             is_checked_task: matches!(task, Some(MarkdownTaskState::Checked)),
+            is_table_header: false,
+            is_table_preview: false,
             text_indent: 0.0,
         },
         MarkdownLine::CodeBlock { .. } => LinePresentation {
@@ -1298,7 +1453,24 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
             is_blockquote: false,
             is_code_block: true,
             is_checked_task: false,
+            is_table_header: false,
+            is_table_preview: false,
             text_indent: CODE_BLOCK_TEXT_INSET,
+        },
+        MarkdownLine::Table { role } => LinePresentation {
+            font_size: FONT_SIZE,
+            line_height: if matches!(role, MarkdownTableLine::Delimiter) {
+                TABLE_DELIMITER_HEIGHT
+            } else {
+                LINE_HEIGHT
+            },
+            is_heading: false,
+            is_blockquote: false,
+            is_code_block: false,
+            is_checked_task: false,
+            is_table_header: matches!(role, MarkdownTableLine::Header),
+            is_table_preview: true,
+            text_indent: TABLE_TEXT_INSET,
         },
         MarkdownLine::Blank | MarkdownLine::Paragraph => LinePresentation {
             font_size: FONT_SIZE,
@@ -1307,6 +1479,8 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
             is_blockquote: false,
             is_code_block: false,
             is_checked_task: false,
+            is_table_header: false,
+            is_table_preview: false,
             text_indent: 0.0,
         },
     }
@@ -1472,6 +1646,82 @@ mod tests {
         assert_eq!(presentation.font_size, FONT_SIZE);
         assert_eq!(presentation.line_height, LINE_HEIGHT);
         assert_eq!(presentation.text_indent, 0.0);
+    }
+
+    #[test]
+    fn table_preview_uses_grid_presentation_until_source_is_revealed() {
+        let document = Document::new("| Name | Status |\n| --- | --- |\n| Hanji | Ready |");
+        let projection = project_document(&document);
+        let header = &projection.lines()[0];
+        let delimiter = &projection.lines()[1];
+        let preview = line_presentation(header.kind);
+
+        assert!(preview.is_table_preview);
+        assert!(preview.is_table_header);
+        assert_eq!(preview.text_indent, TABLE_TEXT_INSET);
+        assert_eq!(
+            line_presentation(delimiter.kind).line_height,
+            TABLE_DELIMITER_HEIGHT
+        );
+
+        let caret = TextRange::caret(projection.lines()[2].range.start + 2);
+        let revealed = line_presentation_for_table_state(
+            header.kind,
+            header.table_source_is_revealed(Some(caret)),
+        );
+        assert!(!revealed.is_table_preview);
+        assert!(!revealed.is_table_header);
+        assert_eq!(revealed.line_height, LINE_HEIGHT);
+        assert_eq!(revealed.text_indent, 0.0);
+    }
+
+    #[test]
+    fn table_preview_styles_header_and_pipe_markers() {
+        let document = Document::new("| Name | Status |\n| --- | --- |");
+        let projection = project_document(&document);
+        let header = &projection.lines()[0];
+        let segments = header.visible_segments();
+        let runs = line_text_runs(
+            &segments,
+            line_presentation(header.kind),
+            &TextStyle::default(),
+        );
+
+        assert_eq!(segments[1].kind, ProjectedSegmentKind::TableMarker);
+        assert_eq!(runs[0].font.weight, FontWeight::BOLD);
+        assert_eq!(runs[1].color, rgb(TABLE_BORDER_COLOR).into());
+    }
+
+    #[test]
+    fn table_preview_quads_share_the_widest_row_bounds() {
+        let table_range = TextRange::new(0, 50);
+        let rows = [
+            TablePreviewRow {
+                table_range,
+                container_bounds: Bounds::new(point(px(0.0), px(0.0)), size(px(300.0), px(24.0))),
+                content_width: px(120.0),
+                role: MarkdownTableLine::Header,
+            },
+            TablePreviewRow {
+                table_range,
+                container_bounds: Bounds::new(point(px(0.0), px(24.0)), size(px(300.0), px(8.0))),
+                content_width: px(0.0),
+                role: MarkdownTableLine::Delimiter,
+            },
+            TablePreviewRow {
+                table_range,
+                container_bounds: Bounds::new(point(px(0.0), px(32.0)), size(px(300.0), px(24.0))),
+                content_width: px(180.0),
+                role: MarkdownTableLine::Body,
+            },
+        ];
+
+        let quads = table_preview_quads(&rows);
+        let outline = quads.last().unwrap();
+
+        assert_eq!(quads.len(), 5);
+        assert_eq!(outline.bounds.size.width, px(196.0));
+        assert_eq!(outline.bounds.size.height, px(56.0));
     }
 
     #[test]

@@ -14,6 +14,16 @@ pub enum MarkdownLine {
         marker: MarkdownListMarker,
         task: Option<MarkdownTaskState>,
     },
+    Table {
+        role: MarkdownTableLine,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkdownTableLine {
+    Header,
+    Delimiter,
+    Body,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
