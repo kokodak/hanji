@@ -11,9 +11,9 @@ use hanji_markdown::{
     project_document,
 };
 
-use crate::Hanji;
 use crate::editing::ordered_list_delimiter;
-use crate::snapshot::{LineSnapshot, TableCellLayout, line_for_offset};
+use crate::snapshot::{LineSnapshot, TableCellLayout, TableCellLineLayout, line_for_offset};
+use crate::{Hanji, TableCellSelection};
 
 pub(crate) const LINE_HEIGHT: f32 = 24.0;
 pub(crate) const FONT_SIZE: f32 = 16.0;
@@ -36,12 +36,15 @@ const CODE_BLOCK_TEXT_INSET: f32 = 12.0;
 const HORIZONTAL_RULE_COLOR: u32 = 0xd8d3c7;
 const HORIZONTAL_RULE_INSET: f32 = 4.0;
 const HORIZONTAL_RULE_HEIGHT: f32 = 1.0;
-const TABLE_TEXT_INSET: f32 = 8.0;
-const TABLE_ROW_HEIGHT: f32 = 32.0;
+const TABLE_TEXT_HORIZONTAL_INSET: f32 = 8.0;
+const TABLE_TEXT_VERTICAL_INSET: f32 = 4.0;
+const TABLE_MIN_ROW_HEIGHT: f32 = 32.0;
 const TABLE_DELIMITER_HEIGHT: f32 = 0.0;
+const TABLE_LINE_BREAK_SOURCE: &str = "<br>";
 const TABLE_BORDER_COLOR: u32 = 0xd8d3c7;
 const TABLE_HEADER_BACKGROUND_COLOR: u32 = 0x25231f12;
 const TABLE_BODY_BACKGROUND_COLOR: u32 = 0x25231f08;
+const TABLE_SELECTION_BACKGROUND_COLOR: u32 = 0x23863618;
 const EDITOR_CHROME_HORIZONTAL_PADDING: f32 = 32.0;
 const EDITOR_SCROLL_HORIZONTAL_PADDING: f32 = 32.0;
 const MIN_WRAP_WIDTH: f32 = 120.0;
@@ -59,6 +62,8 @@ pub(crate) struct EditorPrepaintState {
     code_backgrounds: Vec<PaintQuad>,
     horizontal_rules: Vec<PaintQuad>,
     table_quads: Vec<PaintQuad>,
+    table_cell_selection_background: Option<PaintQuad>,
+    table_cell_selection_borders: Vec<PaintQuad>,
     cursor: Option<PaintQuad>,
     selections: Vec<PaintQuad>,
 }
@@ -190,7 +195,17 @@ impl Element for EditorElement {
             let visible_segments = line.visible_segments_revealing_source_in(Some(selection));
             let presentation = line_presentation(line.kind);
             if matches!(line.kind, MarkdownLine::Table { .. }) {
-                height += presentation.line_height;
+                let column_count = line.table_column_count().unwrap_or(1).max(1);
+                let (_, row_height) = table_cell_layouts(
+                    line,
+                    &visible_segments,
+                    column_count,
+                    Bounds::new(point(px(0.0), px(0.0)), size(wrap_container_width, px(0.0))),
+                    presentation,
+                    &text_style,
+                    window,
+                );
+                height += f32::from(row_height);
                 continue;
             }
             let line_text: SharedString = visible_text_from_segments(&visible_segments).into();
@@ -252,9 +267,22 @@ impl Element for EditorElement {
             let visible_segments = line.visible_segments_revealing_source_in(Some(selection));
             let presentation = line_presentation(line.kind);
             if let MarkdownLine::Table { role } = line.kind {
-                let row_height = px(presentation.line_height);
-                let container_bounds = Bounds::new(
+                let row_layout_bounds = Bounds::new(
                     point(bounds.left(), bounds.top() + px(top)),
+                    size(bounds.size.width, px(0.0)),
+                );
+                let column_count = line.table_column_count().unwrap_or(1).max(1);
+                let (cells, row_height) = table_cell_layouts(
+                    line,
+                    &visible_segments,
+                    column_count,
+                    row_layout_bounds,
+                    presentation,
+                    &text_style,
+                    window,
+                );
+                let container_bounds = Bounds::new(
+                    row_layout_bounds.origin,
                     size(bounds.size.width, row_height),
                 );
                 let empty_layout = shape_wrapped_line(
@@ -262,16 +290,6 @@ impl Element for EditorElement {
                     presentation,
                     &[],
                     bounds.size.width,
-                    window,
-                );
-                let column_count = line.table_column_count().unwrap_or(1).max(1);
-                let cells = table_cell_layouts(
-                    line,
-                    &visible_segments,
-                    column_count,
-                    container_bounds,
-                    presentation,
-                    &text_style,
                     window,
                 );
 
@@ -283,12 +301,13 @@ impl Element for EditorElement {
                 });
                 lines.push(LineSnapshot::new_table(
                     line.range,
+                    line.table_range().unwrap_or(line.range),
                     empty_layout,
-                    row_height,
+                    px(presentation.line_height),
                     container_bounds,
                     cells,
                 ));
-                top += presentation.line_height;
+                top += f32::from(row_height);
                 continue;
             }
             let marker_container_bounds = Bounds::new(
@@ -402,8 +421,16 @@ impl Element for EditorElement {
                 .map(code_block_background_quad),
         );
         let table_quads = table_preview_quads(&table_preview_rows);
+        let (table_cell_selection_background, table_cell_selection_borders) =
+            editor.table_cell_selection.map_or_else(
+                || (None, Vec::new()),
+                |selection| table_cell_selection_quads(&lines, selection),
+            );
 
-        let cursor = if selection.is_empty() && editor.caret_opacity > 0.0 {
+        let cursor = if selection.is_empty()
+            && editor.table_cell_selection.is_none()
+            && editor.caret_opacity > 0.0
+        {
             caret_quad(&lines, selection.start, editor.caret_opacity)
         } else {
             None
@@ -419,6 +446,8 @@ impl Element for EditorElement {
             code_backgrounds,
             horizontal_rules,
             table_quads,
+            table_cell_selection_background,
+            table_cell_selection_borders,
             cursor,
             selections,
         }
@@ -457,6 +486,10 @@ impl Element for EditorElement {
             window.paint_quad(table_quad);
         }
 
+        if let Some(background) = prepaint.table_cell_selection_background.take() {
+            window.paint_quad(background);
+        }
+
         for rule in prepaint.horizontal_rules.drain(..) {
             window.paint_quad(rule);
         }
@@ -467,6 +500,10 @@ impl Element for EditorElement {
 
         for line in &prepaint.lines {
             line.paint(window, cx);
+        }
+
+        for selection in prepaint.table_cell_selection_borders.drain(..) {
+            window.paint_quad(selection);
         }
 
         if focus_handle.is_focused(window)
@@ -535,20 +572,6 @@ fn shape_wrapped_line(
         .unwrap_or_default()
 }
 
-fn shape_unwrapped_line(
-    text: SharedString,
-    presentation: LinePresentation,
-    runs: &[TextRun],
-    window: &mut Window,
-) -> WrappedLine {
-    window
-        .text_system()
-        .shape_text(text, px(presentation.font_size), runs, None, None)
-        .ok()
-        .and_then(|mut lines| lines.pop())
-        .unwrap_or_default()
-}
-
 fn line_marker_is_revealed(segments: &[ProjectedVisibleSegment<'_>]) -> bool {
     segments
         .iter()
@@ -586,18 +609,19 @@ fn table_cell_layouts<'a>(
     presentation: LinePresentation,
     text_style: &TextStyle,
     window: &mut Window,
-) -> Vec<TableCellLayout<'a>> {
+) -> (Vec<TableCellLayout<'a>>, Pixels) {
     if matches!(
         line.kind,
         MarkdownLine::Table {
             role: MarkdownTableLine::Delimiter
         }
     ) {
-        return Vec::new();
+        return (Vec::new(), px(TABLE_DELIMITER_HEIGHT));
     }
 
     let cell_width = row_bounds.size.width / column_count as f32;
-    (0..column_count)
+    let content_width = (cell_width - px(TABLE_TEXT_HORIZONTAL_INSET * 2.0)).max(px(1.0));
+    let mut cells = (0..column_count)
         .map(|column| {
             let source_cell =
                 line.table_cells()
@@ -608,59 +632,126 @@ fn table_cell_layouts<'a>(
                         content_range: TextRange::caret(line.range.end),
                         source_outer_range: TextRange::caret(line.range.end),
                     });
-            let cell_segments = table_cell_visible_segments(source_cell, visible_segments);
-            let text: SharedString = visible_text_from_segments(&cell_segments).into();
-            let runs = line_text_runs(&cell_segments, presentation, text_style);
-            let cell_bounds = Bounds::new(
-                point(
-                    row_bounds.left() + cell_width * column as f32,
-                    row_bounds.top(),
-                ),
-                size(cell_width, row_bounds.size.height),
-            );
-            let content_bounds = Bounds::new(
-                point(cell_bounds.left() + px(TABLE_TEXT_INSET), cell_bounds.top()),
-                size(
-                    (cell_width - px(TABLE_TEXT_INSET * 2.0)).max(px(0.0)),
-                    cell_bounds.size.height,
-                ),
-            );
-            let layout = shape_unwrapped_line(text, presentation, &runs, window);
+            let cell_left = row_bounds.left() + cell_width * column as f32;
+            let content_left = cell_left + px(TABLE_TEXT_HORIZONTAL_INSET);
+            let lines = table_cell_line_ranges(line, source_cell)
+                .into_iter()
+                .map(|source_range| {
+                    let line_segments = table_cell_visible_segments(source_range, visible_segments);
+                    let text: SharedString = visible_text_from_segments(&line_segments).into();
+                    let runs = line_text_runs(&line_segments, presentation, text_style);
+                    let layout =
+                        shape_wrapped_line(text, presentation, &runs, content_width, window);
+                    let height = layout
+                        .size(px(presentation.line_height))
+                        .height
+                        .max(px(presentation.line_height));
+
+                    TableCellLineLayout {
+                        source_range,
+                        visible_segments: line_segments,
+                        layout,
+                        bounds: Bounds::new(
+                            point(content_left, row_bounds.top()),
+                            size(content_width, height),
+                        ),
+                    }
+                })
+                .collect();
 
             TableCellLayout {
                 source_range: source_cell.content_range,
-                visible_segments: cell_segments,
-                layout,
-                bounds: content_bounds,
-                hit_bounds: cell_bounds,
+                source_outer_range: source_cell.source_outer_range,
+                lines,
+                bounds: Bounds::new(
+                    point(
+                        content_left,
+                        row_bounds.top() + px(TABLE_TEXT_VERTICAL_INSET),
+                    ),
+                    size(content_width, px(0.0)),
+                ),
+                hit_bounds: Bounds::new(
+                    point(cell_left, row_bounds.top()),
+                    size(cell_width, px(0.0)),
+                ),
             }
         })
-        .collect()
+        .collect::<Vec<_>>();
+    let content_height = cells.iter().fold(px(0.0), |height, cell| {
+        height.max(
+            cell.lines
+                .iter()
+                .map(|line| line.bounds.size.height)
+                .fold(px(0.0), |total, line_height| total + line_height),
+        )
+    });
+    let row_height = table_row_height_for_content_height(content_height);
+
+    for cell in &mut cells {
+        cell.bounds.size.height = (row_height - px(TABLE_TEXT_VERTICAL_INSET * 2.0)).max(px(0.0));
+        cell.hit_bounds.size.height = row_height;
+        let mut line_top = cell.bounds.top();
+        for line in &mut cell.lines {
+            line.bounds.origin.y = line_top;
+            line_top += line.bounds.size.height;
+        }
+    }
+
+    (cells, row_height)
+}
+
+fn table_row_height_for_content_height(content_height: Pixels) -> Pixels {
+    (content_height + px(TABLE_TEXT_VERTICAL_INSET * 2.0)).max(px(TABLE_MIN_ROW_HEIGHT))
+}
+
+fn table_cell_line_ranges(line: &ProjectedLine<'_>, cell: ProjectedTableCell) -> Vec<TextRange> {
+    let local_start = cell.content_range.start - line.range.start;
+    let local_end = cell.content_range.end - line.range.start;
+    let cell_source = &line.source[local_start..local_end];
+    let mut ranges = Vec::new();
+    let mut line_start = cell.content_range.start;
+
+    for (break_start, _) in cell_source.match_indices(TABLE_LINE_BREAK_SOURCE) {
+        let break_start = cell.content_range.start + break_start;
+        ranges.push(TextRange::new(line_start, break_start));
+        line_start = break_start + TABLE_LINE_BREAK_SOURCE.len();
+    }
+    ranges.push(TextRange::new(line_start, cell.content_range.end));
+
+    ranges
 }
 
 fn table_cell_visible_segments<'a>(
-    cell: ProjectedTableCell,
+    source_range: TextRange,
     visible_segments: &[ProjectedVisibleSegment<'a>],
 ) -> Vec<ProjectedVisibleSegment<'a>> {
-    let mut cell_segments = visible_segments
-        .iter()
-        .copied()
-        .filter(|segment| {
-            segment.source_range.start >= cell.content_range.start
-                && segment.source_range.end <= cell.content_range.end
-        })
-        .collect::<Vec<_>>();
-    let visible_start = cell_segments
-        .first()
-        .map_or(0, |segment| segment.visible_range.start);
-    for segment in &mut cell_segments {
-        segment.visible_range = TextRange::new(
-            segment.visible_range.start - visible_start,
-            segment.visible_range.end - visible_start,
-        );
-    }
+    let mut visible_start = 0;
 
-    cell_segments
+    visible_segments
+        .iter()
+        .filter_map(|segment| {
+            let start = segment.source_range.start.max(source_range.start);
+            let end = segment.source_range.end.min(source_range.end);
+            if start >= end {
+                return None;
+            }
+
+            let source_start = start - segment.source_range.start;
+            let source_end = end - segment.source_range.start;
+            let len = end - start;
+            let clipped = ProjectedVisibleSegment {
+                visible_range: TextRange::new(visible_start, visible_start + len),
+                source_range: TextRange::new(start, end),
+                source_outer_range: TextRange::new(start, end),
+                source: &segment.source[source_start..source_end],
+                kind: segment.kind,
+                style: segment.style,
+            };
+            visible_start += len;
+
+            Some(clipped)
+        })
+        .collect()
 }
 
 fn table_preview_quads(rows: &[TablePreviewRow]) -> Vec<PaintQuad> {
@@ -1558,7 +1649,7 @@ fn line_presentation(line: MarkdownLine) -> LinePresentation {
             line_height: if matches!(role, MarkdownTableLine::Delimiter) {
                 TABLE_DELIMITER_HEIGHT
             } else {
-                TABLE_ROW_HEIGHT
+                LINE_HEIGHT
             },
             is_heading: false,
             is_blockquote: false,
@@ -1625,6 +1716,98 @@ fn selection_quads(lines: &[LineSnapshot], selection: TextRange) -> Vec<PaintQua
                 .collect()
         })
         .collect()
+}
+
+fn table_cell_selection_quads(
+    lines: &[LineSnapshot],
+    selection: TableCellSelection,
+) -> (Option<PaintQuad>, Vec<PaintQuad>) {
+    let cell_bounds = lines
+        .iter()
+        .flat_map(|line| {
+            line.table_cell_bounds_for_selection(
+                selection.table_range,
+                selection.row_start,
+                selection.row_end,
+                selection.column_start,
+                selection.column_end,
+            )
+        })
+        .collect::<Vec<_>>();
+    let Some(geometry) = table_cell_selection_geometry(&cell_bounds) else {
+        return (None, Vec::new());
+    };
+    let background = fill(
+        geometry.outer_bounds,
+        rgba(TABLE_SELECTION_BACKGROUND_COLOR),
+    );
+    let mut quads = geometry
+        .inner_lines
+        .into_iter()
+        .map(|bounds| fill(bounds, rgb(MARKDOWN_MARKER_COLOR)))
+        .collect::<Vec<_>>();
+    quads.push(quad(
+        geometry.outer_bounds,
+        px(0.0),
+        rgba(0x00000000),
+        px(2.0),
+        rgb(MARKDOWN_MARKER_COLOR),
+        BorderStyle::Solid,
+    ));
+
+    (Some(background), quads)
+}
+
+struct TableCellSelectionGeometry {
+    outer_bounds: Bounds<Pixels>,
+    inner_lines: Vec<Bounds<Pixels>>,
+}
+
+fn table_cell_selection_geometry(
+    cell_bounds: &[Bounds<Pixels>],
+) -> Option<TableCellSelectionGeometry> {
+    let first = *cell_bounds.first()?;
+    let left = cell_bounds
+        .iter()
+        .fold(first.left(), |left, bounds| left.min(bounds.left()));
+    let top = cell_bounds
+        .iter()
+        .fold(first.top(), |top, bounds| top.min(bounds.top()));
+    let right = cell_bounds
+        .iter()
+        .fold(first.right(), |right, bounds| right.max(bounds.right()));
+    let bottom = cell_bounds
+        .iter()
+        .fold(first.bottom(), |bottom, bounds| bottom.max(bounds.bottom()));
+    let outer_bounds = Bounds::from_corners(point(left, top), point(right, bottom));
+    let mut verticals = Vec::new();
+    let mut horizontals = Vec::new();
+
+    for bounds in cell_bounds {
+        let vertical = bounds.right();
+        if vertical > left && vertical < right && !verticals.contains(&vertical) {
+            verticals.push(vertical);
+        }
+        let horizontal = bounds.bottom();
+        if horizontal > top && horizontal < bottom && !horizontals.contains(&horizontal) {
+            horizontals.push(horizontal);
+        }
+    }
+
+    let mut inner_lines = verticals
+        .into_iter()
+        .map(|x| Bounds::new(point(x, top), size(px(1.0), bottom - top)))
+        .collect::<Vec<_>>();
+    inner_lines.extend(
+        horizontals
+            .into_iter()
+            .map(|y| Bounds::new(point(left, y), size(right - left, px(1.0)))),
+    );
+
+    Some(TableCellSelectionGeometry {
+        outer_bounds,
+        inner_lines,
+    })
 }
 
 #[cfg(test)]
@@ -1746,7 +1929,7 @@ mod tests {
 
         assert!(preview.is_table_preview);
         assert!(preview.is_table_header);
-        assert_eq!(preview.line_height, TABLE_ROW_HEIGHT);
+        assert_eq!(preview.line_height, LINE_HEIGHT);
         assert_eq!(preview.text_indent, 0.0);
         assert_eq!(
             line_presentation(delimiter.kind).line_height,
@@ -1761,6 +1944,34 @@ mod tests {
                 .iter()
                 .all(|segment| !matches!(segment.kind, ProjectedSegmentKind::TableMarker))
         );
+    }
+
+    #[test]
+    fn table_row_height_expands_for_wrapped_cell_content() {
+        assert_eq!(
+            table_row_height_for_content_height(px(LINE_HEIGHT)),
+            px(TABLE_MIN_ROW_HEIGHT)
+        );
+        assert_eq!(
+            table_row_height_for_content_height(px(LINE_HEIGHT * 2.0)),
+            px(LINE_HEIGHT * 2.0 + TABLE_TEXT_VERTICAL_INSET * 2.0)
+        );
+    }
+
+    #[test]
+    fn table_cell_breaks_create_independent_visual_source_ranges() {
+        let source = "| First<br>Second<br> | Status |\n| --- | --- |";
+        let document = Document::new(source);
+        let projection = project_document(&document);
+        let header = &projection.lines()[0];
+        let cell = header.table_cells()[0];
+        let ranges = table_cell_line_ranges(header, cell);
+        let visual_lines = ranges
+            .iter()
+            .map(|range| &document.text()[range.start..range.end])
+            .collect::<Vec<_>>();
+
+        assert_eq!(visual_lines, vec!["First", "Second", ""]);
     }
 
     #[test]
@@ -1814,6 +2025,31 @@ mod tests {
         assert_eq!(outline.bounds.size.height, px(64.0));
         assert_eq!(quads[5].bounds.left(), px(100.0));
         assert_eq!(quads[6].bounds.left(), px(200.0));
+    }
+
+    #[test]
+    fn table_cell_selection_keeps_internal_grid_lines_thin() {
+        let cells = vec![
+            Bounds::new(point(px(0.0), px(0.0)), size(px(100.0), px(32.0))),
+            Bounds::new(point(px(100.0), px(0.0)), size(px(100.0), px(32.0))),
+            Bounds::new(point(px(0.0), px(32.0)), size(px(100.0), px(40.0))),
+            Bounds::new(point(px(100.0), px(32.0)), size(px(100.0), px(40.0))),
+        ];
+        let geometry = table_cell_selection_geometry(&cells).unwrap();
+
+        assert_eq!(
+            geometry.outer_bounds,
+            Bounds::new(point(px(0.0), px(0.0)), size(px(200.0), px(72.0)))
+        );
+        assert_eq!(geometry.inner_lines.len(), 2);
+        assert!(geometry.inner_lines.contains(&Bounds::new(
+            point(px(100.0), px(0.0)),
+            size(px(1.0), px(72.0)),
+        )));
+        assert!(geometry.inner_lines.contains(&Bounds::new(
+            point(px(0.0), px(32.0)),
+            size(px(200.0), px(1.0)),
+        )));
     }
 
     #[test]
