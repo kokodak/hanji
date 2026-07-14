@@ -36,6 +36,7 @@ Hanji is a light, local-first Markdown editor. It should feel simple enough for 
 - Keep GPUI app code in `apps/hanji/`.
 - Add or update focused tests alongside behavior changes when practical.
 - Start commit messages with an imperative verb and make the scope broad enough to describe the full change.
+- Follow the AI-assisted contribution policy in [CONTRIBUTING.md](CONTRIBUTING.md), including `Assisted-by` commit trailers for material AI assistance.
 
 ## Contribution Workflow
 

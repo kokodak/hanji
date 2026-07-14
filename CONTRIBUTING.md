@@ -31,7 +31,25 @@ Each PR should include:
 - Screenshots or screen recordings for visible UI changes.
 - Follow-up work that should not block the PR.
 
-AI-assisted contributions are welcome, but the contributor is responsible for understanding, reviewing, and testing the result before submitting it.
+## AI-assisted contributions
+
+AI-assisted contributions are welcome, but the human contributor remains the author and is fully responsible for the contribution. Before submitting, review every AI-assisted change, understand and be able to explain it, run the relevant checks, and ensure that the contribution can be provided under Hanji's license.
+
+Disclose material AI assistance when a tool generates or rewrites code, documentation, tests, or design content, or materially shapes implementation decisions. Describe the tool, model when known, and scope of the assistance in the pull request. Add an `Assisted-by` trailer to each affected commit:
+
+```text
+Assisted-by: <tool or agent> (<model, if known>)
+```
+
+For example:
+
+```text
+Assisted-by: Codex (GPT-5)
+```
+
+Minor autocomplete, spelling corrections, search, and deterministic formatting do not need to be disclosed.
+
+Do not list an AI tool with `Co-authored-by` or `Signed-off-by`. `Co-authored-by` is reserved for human collaborators, and any legal certification must be made by a human. The human contributor should remain the Git author.
 
 ## Development setup
 

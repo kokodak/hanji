@@ -19,6 +19,10 @@ Closes #
 
 If skipped, explain why:
 
+## AI assistance
+
+None, or describe the tool, model when known, and scope of material assistance:
+
 ## Notes
 
 - User-visible behavior:
