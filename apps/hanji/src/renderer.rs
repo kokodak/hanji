@@ -1,8 +1,8 @@
 use gpui::{
-    App, BorderStyle, Bounds, Element, ElementId, ElementInputHandler, Entity, FontWeight,
-    GlobalElementId, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels, ShapedLine,
-    SharedString, StrikethroughStyle, Style, TextAlign, TextRun, TextStyle, UnderlineStyle, Window,
-    WrappedLine, fill, point, px, quad, relative, rgb, rgba, size,
+    App, AvailableSpace, BorderStyle, Bounds, Element, ElementId, ElementInputHandler, Entity,
+    FontWeight, GlobalElementId, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels,
+    ShapedLine, SharedString, StrikethroughStyle, Style, TextAlign, TextRun, TextStyle,
+    UnderlineStyle, Window, WrappedLine, fill, point, px, quad, relative, rgb, rgba, size,
 };
 use hanji_core::TextRange;
 use hanji_markdown::{
@@ -36,7 +36,6 @@ const HORIZONTAL_RULE_COLOR: u32 = 0xd8d3c7;
 const HORIZONTAL_RULE_INSET: f32 = 4.0;
 const HORIZONTAL_RULE_HEIGHT: f32 = 1.0;
 const EDITOR_CHROME_HORIZONTAL_PADDING: f32 = 32.0;
-const EDITOR_SCROLL_HORIZONTAL_PADDING: f32 = 32.0;
 const MIN_WRAP_WIDTH: f32 = 120.0;
 
 pub(crate) struct EditorElement {
@@ -158,43 +157,26 @@ impl Element for EditorElement {
         _id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
         window: &mut Window,
-        cx: &mut App,
+        _cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let editor = self.editor.read(cx);
-        let document = editor.session.document();
-        let selection = document.selection().primary();
-        let text_style = window.text_style();
-        let projection = project_document(document);
-        let mut height = 0.0;
-        let wrap_container_width = request_layout_wrap_width(editor, window);
-
-        for line in projection.lines() {
-            let presentation = line_presentation(line.kind);
-            let visible_segments = line.visible_segments_revealing_source_in(Some(selection));
-            let line_text: SharedString = visible_text_from_segments(&visible_segments).into();
-            let runs = line_text_runs(&visible_segments, presentation, &text_style);
-            let content_offset_width = hidden_list_content_offset_width_for_layout(
-                line.kind,
-                line.source,
-                line.range,
-                line.marker_range,
-                &visible_segments,
-                presentation,
-                &text_style,
-                window,
-            );
-            let wrap_width =
-                line_wrap_width(wrap_container_width, presentation, content_offset_width);
-            let layout = shape_wrapped_line(line_text, presentation, &runs, wrap_width, window);
-
-            height += f32::from(layout.size(px(presentation.line_height)).height);
-        }
-
         let mut style = Style::default();
         style.size.width = relative(1.0).into();
-        style.size.height = px(height.max(LINE_HEIGHT)).into();
+        let editor = self.editor.clone();
+        let layout_id = window.request_measured_layout(
+            style,
+            move |known_dimensions, available_space, window, cx| {
+                let container_width = measured_container_width(
+                    known_dimensions.width,
+                    available_space.width,
+                    window.viewport_size().width,
+                );
+                let height = document_height(editor.read(cx), container_width, window);
 
-        (window.request_layout(style, [], cx), ())
+                size(container_width, height)
+            },
+        );
+
+        (layout_id, ())
     }
 
     fn prepaint(
@@ -436,14 +418,51 @@ fn visible_text_from_segments(segments: &[ProjectedVisibleSegment<'_>]) -> Strin
     text
 }
 
-fn request_layout_wrap_width(editor: &Hanji, window: &Window) -> Pixels {
-    let scroll_width =
-        editor.editor_scroll.bounds().size.width - px(EDITOR_SCROLL_HORIZONTAL_PADDING);
-    if scroll_width > px(0.0) {
-        return scroll_width.max(px(MIN_WRAP_WIDTH));
+fn measured_container_width(
+    known_width: Option<Pixels>,
+    available_width: AvailableSpace,
+    viewport_width: Pixels,
+) -> Pixels {
+    if let Some(width) = known_width {
+        return width;
     }
 
-    (window.viewport_size().width - px(EDITOR_CHROME_HORIZONTAL_PADDING)).max(px(MIN_WRAP_WIDTH))
+    if let AvailableSpace::Definite(width) = available_width {
+        return width;
+    }
+
+    (viewport_width - px(EDITOR_CHROME_HORIZONTAL_PADDING)).max(px(MIN_WRAP_WIDTH))
+}
+
+fn document_height(editor: &Hanji, container_width: Pixels, window: &mut Window) -> Pixels {
+    let document = editor.session.document();
+    let selection = document.selection().primary();
+    let text_style = window.text_style();
+    let projection = project_document(document);
+    let mut height = 0.0;
+
+    for line in projection.lines() {
+        let presentation = line_presentation(line.kind);
+        let visible_segments = line.visible_segments_revealing_source_in(Some(selection));
+        let line_text: SharedString = visible_text_from_segments(&visible_segments).into();
+        let runs = line_text_runs(&visible_segments, presentation, &text_style);
+        let content_offset_width = hidden_list_content_offset_width_for_layout(
+            line.kind,
+            line.source,
+            line.range,
+            line.marker_range,
+            &visible_segments,
+            presentation,
+            &text_style,
+            window,
+        );
+        let wrap_width = line_wrap_width(container_width, presentation, content_offset_width);
+        let layout = shape_wrapped_line(line_text, presentation, &runs, wrap_width, window);
+
+        height += f32::from(layout.size(px(presentation.line_height)).height);
+    }
+
+    px(height.max(LINE_HEIGHT))
 }
 
 fn line_wrap_width(
@@ -1371,6 +1390,26 @@ mod tests {
     use gpui::FontStyle;
     use hanji_core::Document;
     use hanji_markdown::{MarkdownCodeBlockLine, OrderedListDelimiter};
+
+    #[test]
+    fn measured_container_width_uses_current_layout_constraints() {
+        assert_eq!(
+            measured_container_width(
+                Some(px(320.0)),
+                AvailableSpace::Definite(px(900.0)),
+                px(1200.0),
+            ),
+            px(320.0),
+        );
+        assert_eq!(
+            measured_container_width(None, AvailableSpace::Definite(px(360.0)), px(1200.0),),
+            px(360.0),
+        );
+        assert_eq!(
+            measured_container_width(None, AvailableSpace::MinContent, px(1000.0)),
+            px(968.0),
+        );
+    }
 
     #[test]
     fn inline_code_background_ranges_survive_without_strong_runs() {
