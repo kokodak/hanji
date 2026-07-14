@@ -1,8 +1,11 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use gpui::{
-    App, BorderStyle, Bounds, Element, ElementId, ElementInputHandler, Entity, FontWeight,
-    GlobalElementId, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels, ShapedLine,
-    SharedString, StrikethroughStyle, Style, TextRun, TextStyle, UnderlineStyle, Window,
-    WrappedLine, fill, point, px, quad, relative, rgb, rgba, size,
+    App, AvailableSpace, BorderStyle, Bounds, Element, ElementId, ElementInputHandler, Entity,
+    FontWeight, GlobalElementId, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels,
+    ShapedLine, SharedString, StrikethroughStyle, Style, TextRun, TextStyle, UnderlineStyle,
+    Window, WrappedLine, fill, point, px, quad, relative, rgb, rgba, size,
 };
 use hanji_core::TextRange;
 use hanji_markdown::{
@@ -46,11 +49,47 @@ const TABLE_HEADER_BACKGROUND_COLOR: u32 = 0x25231f12;
 const TABLE_BODY_BACKGROUND_COLOR: u32 = 0x25231f08;
 const TABLE_SELECTION_BACKGROUND_COLOR: u32 = 0x23863618;
 const EDITOR_CHROME_HORIZONTAL_PADDING: f32 = 32.0;
-const EDITOR_SCROLL_HORIZONTAL_PADDING: f32 = 32.0;
 const MIN_WRAP_WIDTH: f32 = 120.0;
 
 pub(crate) struct EditorElement {
     pub(crate) editor: Entity<Hanji>,
+}
+
+pub(crate) struct EditorRequestLayoutState(Rc<RefCell<Option<MeasuredDocumentLayout>>>);
+
+#[derive(Clone)]
+enum MeasuredLineLayout {
+    Text {
+        layout: WrappedLine,
+        wrap_width: Pixels,
+    },
+    Table(MeasuredTableLineLayout),
+}
+
+#[derive(Clone)]
+struct MeasuredTableLineLayout {
+    column_count: usize,
+    row_height: Pixels,
+    cells: Vec<MeasuredTableCellLayout>,
+}
+
+#[derive(Clone)]
+struct MeasuredTableCellLayout {
+    source_range: TextRange,
+    source_outer_range: TextRange,
+    lines: Vec<MeasuredTableCellLineLayout>,
+}
+
+#[derive(Clone)]
+struct MeasuredTableCellLineLayout {
+    source_range: TextRange,
+    layout: WrappedLine,
+    height: Pixels,
+}
+
+struct MeasuredDocumentLayout {
+    lines: Vec<MeasuredLineLayout>,
+    height: Pixels,
 }
 
 pub(crate) struct EditorPrepaintState {
@@ -165,7 +204,7 @@ impl IntoElement for EditorElement {
 }
 
 impl Element for EditorElement {
-    type RequestLayoutState = ();
+    type RequestLayoutState = EditorRequestLayoutState;
     type PrepaintState = EditorPrepaintState;
 
     fn id(&self) -> Option<ElementId> {
@@ -181,57 +220,30 @@ impl Element for EditorElement {
         _id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
         window: &mut Window,
-        cx: &mut App,
+        _cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let editor = self.editor.read(cx);
-        let document = editor.session.document();
-        let selection = document.selection().primary();
-        let text_style = window.text_style();
-        let projection = project_document(document);
-        let mut height = 0.0;
-        let wrap_container_width = request_layout_wrap_width(editor, window);
-
-        for line in projection.lines() {
-            let visible_segments = line.visible_segments_revealing_source_in(Some(selection));
-            let presentation = line_presentation(line.kind);
-            if matches!(line.kind, MarkdownLine::Table { .. }) {
-                let column_count = line.table_column_count().unwrap_or(1).max(1);
-                let (_, row_height) = table_cell_layouts(
-                    line,
-                    &visible_segments,
-                    column_count,
-                    Bounds::new(point(px(0.0), px(0.0)), size(wrap_container_width, px(0.0))),
-                    presentation,
-                    &text_style,
-                    window,
-                );
-                height += f32::from(row_height);
-                continue;
-            }
-            let line_text: SharedString = visible_text_from_segments(&visible_segments).into();
-            let runs = line_text_runs(&visible_segments, presentation, &text_style);
-            let content_offset_width = hidden_list_content_offset_width_for_layout(
-                line.kind,
-                line.source,
-                line.range,
-                line.marker_range,
-                &visible_segments,
-                presentation,
-                &text_style,
-                window,
-            );
-            let wrap_width =
-                line_wrap_width(wrap_container_width, presentation, content_offset_width);
-            let layout = shape_wrapped_line(line_text, presentation, &runs, wrap_width, window);
-
-            height += f32::from(layout.size(px(presentation.line_height)).height);
-        }
-
         let mut style = Style::default();
         style.size.width = relative(1.0).into();
-        style.size.height = px(height.max(LINE_HEIGHT)).into();
+        let editor = self.editor.clone();
+        let measured_layout = Rc::new(RefCell::new(None));
+        let request_layout_state = EditorRequestLayoutState(measured_layout.clone());
+        let layout_id = window.request_measured_layout(
+            style,
+            move |known_dimensions, available_space, window, cx| {
+                let container_width = measured_container_width(
+                    known_dimensions.width,
+                    available_space.width,
+                    window.viewport_size().width,
+                );
+                let document_layout = measure_document(editor.read(cx), container_width, window);
+                let measured_size = size(container_width, document_layout.height);
+                measured_layout.borrow_mut().replace(document_layout);
 
-        (window.request_layout(style, [], cx), ())
+                measured_size
+            },
+        );
+
+        (layout_id, request_layout_state)
     }
 
     fn prepaint(
@@ -239,7 +251,7 @@ impl Element for EditorElement {
         _id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
+        request_layout: &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
@@ -262,35 +274,30 @@ impl Element for EditorElement {
         let selection = document.selection().primary();
 
         let projection = project_document(document);
+        let measured_layout = request_layout.0.borrow();
+        let measured_document = measured_layout
+            .as_ref()
+            .expect("editor measurement has not been performed");
+        assert_eq!(measured_document.lines.len(), projection.lines().len());
 
-        for line in projection.lines() {
-            let visible_segments = line.visible_segments_revealing_source_in(Some(selection));
+        for (line_index, line) in projection.lines().iter().enumerate() {
             let presentation = line_presentation(line.kind);
+            let visible_segments = line.visible_segments_revealing_source_in(Some(selection));
             if let MarkdownLine::Table { role } = line.kind {
+                let MeasuredLineLayout::Table(table_layout) = &measured_document.lines[line_index]
+                else {
+                    panic!("measured text layout does not match projected table line");
+                };
                 let row_layout_bounds = Bounds::new(
                     point(bounds.left(), bounds.top() + px(top)),
                     size(bounds.size.width, px(0.0)),
                 );
-                let column_count = line.table_column_count().unwrap_or(1).max(1);
-                let (cells, row_height) = table_cell_layouts(
-                    line,
-                    &visible_segments,
-                    column_count,
-                    row_layout_bounds,
-                    presentation,
-                    &text_style,
-                    window,
-                );
+                let cells = table_cell_layouts(&visible_segments, table_layout, row_layout_bounds);
+                let column_count = table_layout.column_count;
+                let row_height = table_layout.row_height;
                 let container_bounds = Bounds::new(
                     row_layout_bounds.origin,
                     size(bounds.size.width, row_height),
-                );
-                let empty_layout = shape_wrapped_line(
-                    SharedString::default(),
-                    presentation,
-                    &[],
-                    bounds.size.width,
-                    window,
                 );
 
                 table_preview_rows.push(TablePreviewRow {
@@ -302,7 +309,7 @@ impl Element for EditorElement {
                 lines.push(LineSnapshot::new_table(
                     line.range,
                     line.table_range().unwrap_or(line.range),
-                    empty_layout,
+                    WrappedLine::default(),
                     px(presentation.line_height),
                     container_bounds,
                     cells,
@@ -325,12 +332,17 @@ impl Element for EditorElement {
                 &text_style,
                 window,
             );
-            let line_text: SharedString = visible_text_from_segments(&visible_segments).into();
-            let runs = line_text_runs(&visible_segments, presentation, &text_style);
             let content_offset_width =
                 list_marker_geometry.map_or(px(0.0), |geometry| geometry.content_offset_width);
-            let wrap_width = line_wrap_width(bounds.size.width, presentation, content_offset_width);
-            let layout = shape_wrapped_line(line_text, presentation, &runs, wrap_width, window);
+            // The scroll extent and painted rows must come from the same shaping pass.
+            // Re-shaping here against `bounds` can produce more rows than were measured.
+            let MeasuredLineLayout::Text { layout, wrap_width } =
+                &measured_document.lines[line_index]
+            else {
+                panic!("measured table layout does not match projected text line");
+            };
+            let layout = layout.clone();
+            let wrap_width = *wrap_width;
             let wrapped_height = layout.size(px(presentation.line_height)).height;
             let container_bounds = Bounds::new(
                 point(bounds.left(), bounds.top() + px(top)),
@@ -406,6 +418,7 @@ impl Element for EditorElement {
             ));
             lines.push(line_snapshot);
         }
+        debug_assert_eq!(px(top), measured_document.height);
         flush_blockquote_bar_run(&mut blockquote_bar_runs, &mut blockquote_bar_run);
         flush_code_block_background_run(
             &mut code_block_background_runs,
@@ -533,14 +546,74 @@ fn visible_text_from_segments(segments: &[ProjectedVisibleSegment<'_>]) -> Strin
     text
 }
 
-fn request_layout_wrap_width(editor: &Hanji, window: &Window) -> Pixels {
-    let scroll_width =
-        editor.editor_scroll.bounds().size.width - px(EDITOR_SCROLL_HORIZONTAL_PADDING);
-    if scroll_width > px(0.0) {
-        return scroll_width.max(px(MIN_WRAP_WIDTH));
+fn measured_container_width(
+    known_width: Option<Pixels>,
+    available_width: AvailableSpace,
+    viewport_width: Pixels,
+) -> Pixels {
+    if let Some(width) = known_width {
+        return width;
     }
 
-    (window.viewport_size().width - px(EDITOR_CHROME_HORIZONTAL_PADDING)).max(px(MIN_WRAP_WIDTH))
+    if let AvailableSpace::Definite(width) = available_width {
+        return width;
+    }
+
+    (viewport_width - px(EDITOR_CHROME_HORIZONTAL_PADDING)).max(px(MIN_WRAP_WIDTH))
+}
+
+fn measure_document(
+    editor: &Hanji,
+    container_width: Pixels,
+    window: &mut Window,
+) -> MeasuredDocumentLayout {
+    let document = editor.session.document();
+    let selection = document.selection().primary();
+    let text_style = window.text_style();
+    let projection = project_document(document);
+    let mut height = 0.0;
+    let mut lines = Vec::with_capacity(projection.lines().len());
+
+    for line in projection.lines() {
+        let presentation = line_presentation(line.kind);
+        let visible_segments = line.visible_segments_revealing_source_in(Some(selection));
+        if matches!(line.kind, MarkdownLine::Table { .. }) {
+            let table_layout = measure_table_line(
+                line,
+                &visible_segments,
+                line.table_column_count().unwrap_or(1).max(1),
+                container_width,
+                presentation,
+                &text_style,
+                window,
+            );
+            height += f32::from(table_layout.row_height);
+            lines.push(MeasuredLineLayout::Table(table_layout));
+            continue;
+        }
+        let line_text: SharedString = visible_text_from_segments(&visible_segments).into();
+        let runs = line_text_runs(&visible_segments, presentation, &text_style);
+        let content_offset_width = hidden_list_content_offset_width_for_layout(
+            line.kind,
+            line.source,
+            line.range,
+            line.marker_range,
+            &visible_segments,
+            presentation,
+            &text_style,
+            window,
+        );
+        let wrap_width = line_wrap_width(container_width, presentation, content_offset_width);
+        let layout = shape_wrapped_line(line_text, presentation, &runs, wrap_width, window);
+
+        height += f32::from(layout.size(px(presentation.line_height)).height);
+        lines.push(MeasuredLineLayout::Text { layout, wrap_width });
+    }
+
+    MeasuredDocumentLayout {
+        lines,
+        height: px(height.max(LINE_HEIGHT)),
+    }
 }
 
 fn line_wrap_width(
@@ -601,27 +674,31 @@ fn horizontal_rule_quad(bounds: Bounds<Pixels>) -> PaintQuad {
     )
 }
 
-fn table_cell_layouts<'a>(
-    line: &ProjectedLine<'a>,
-    visible_segments: &[ProjectedVisibleSegment<'a>],
+fn measure_table_line(
+    line: &ProjectedLine<'_>,
+    visible_segments: &[ProjectedVisibleSegment<'_>],
     column_count: usize,
-    row_bounds: Bounds<Pixels>,
+    container_width: Pixels,
     presentation: LinePresentation,
     text_style: &TextStyle,
     window: &mut Window,
-) -> (Vec<TableCellLayout<'a>>, Pixels) {
+) -> MeasuredTableLineLayout {
     if matches!(
         line.kind,
         MarkdownLine::Table {
             role: MarkdownTableLine::Delimiter
         }
     ) {
-        return (Vec::new(), px(TABLE_DELIMITER_HEIGHT));
+        return MeasuredTableLineLayout {
+            column_count,
+            row_height: px(TABLE_DELIMITER_HEIGHT),
+            cells: Vec::new(),
+        };
     }
 
-    let cell_width = row_bounds.size.width / column_count as f32;
+    let cell_width = container_width / column_count as f32;
     let content_width = (cell_width - px(TABLE_TEXT_HORIZONTAL_INSET * 2.0)).max(px(1.0));
-    let mut cells = (0..column_count)
+    let cells = (0..column_count)
         .map(|column| {
             let source_cell =
                 line.table_cells()
@@ -632,8 +709,6 @@ fn table_cell_layouts<'a>(
                         content_range: TextRange::caret(line.range.end),
                         source_outer_range: TextRange::caret(line.range.end),
                     });
-            let cell_left = row_bounds.left() + cell_width * column as f32;
-            let content_left = cell_left + px(TABLE_TEXT_HORIZONTAL_INSET);
             let lines = table_cell_line_ranges(line, source_cell)
                 .into_iter()
                 .map(|source_range| {
@@ -647,33 +722,18 @@ fn table_cell_layouts<'a>(
                         .height
                         .max(px(presentation.line_height));
 
-                    TableCellLineLayout {
+                    MeasuredTableCellLineLayout {
                         source_range,
-                        visible_segments: line_segments,
                         layout,
-                        bounds: Bounds::new(
-                            point(content_left, row_bounds.top()),
-                            size(content_width, height),
-                        ),
+                        height,
                     }
                 })
                 .collect();
 
-            TableCellLayout {
+            MeasuredTableCellLayout {
                 source_range: source_cell.content_range,
                 source_outer_range: source_cell.source_outer_range,
                 lines,
-                bounds: Bounds::new(
-                    point(
-                        content_left,
-                        row_bounds.top() + px(TABLE_TEXT_VERTICAL_INSET),
-                    ),
-                    size(content_width, px(0.0)),
-                ),
-                hit_bounds: Bounds::new(
-                    point(cell_left, row_bounds.top()),
-                    size(cell_width, px(0.0)),
-                ),
             }
         })
         .collect::<Vec<_>>();
@@ -681,23 +741,75 @@ fn table_cell_layouts<'a>(
         height.max(
             cell.lines
                 .iter()
-                .map(|line| line.bounds.size.height)
+                .map(|line| line.height)
                 .fold(px(0.0), |total, line_height| total + line_height),
         )
     });
-    let row_height = table_row_height_for_content_height(content_height);
 
-    for cell in &mut cells {
-        cell.bounds.size.height = (row_height - px(TABLE_TEXT_VERTICAL_INSET * 2.0)).max(px(0.0));
-        cell.hit_bounds.size.height = row_height;
-        let mut line_top = cell.bounds.top();
-        for line in &mut cell.lines {
-            line.bounds.origin.y = line_top;
-            line_top += line.bounds.size.height;
-        }
+    MeasuredTableLineLayout {
+        column_count,
+        row_height: table_row_height_for_content_height(content_height),
+        cells,
     }
+}
 
-    (cells, row_height)
+fn table_cell_layouts<'a>(
+    visible_segments: &[ProjectedVisibleSegment<'a>],
+    measured: &MeasuredTableLineLayout,
+    row_bounds: Bounds<Pixels>,
+) -> Vec<TableCellLayout<'a>> {
+    let cell_width = row_bounds.size.width / measured.column_count as f32;
+    let content_width = (cell_width - px(TABLE_TEXT_HORIZONTAL_INSET * 2.0)).max(px(1.0));
+    measured
+        .cells
+        .iter()
+        .enumerate()
+        .map(|(column, measured_cell)| {
+            let cell_left = row_bounds.left() + cell_width * column as f32;
+            let content_left = cell_left + px(TABLE_TEXT_HORIZONTAL_INSET);
+            let mut line_top = row_bounds.top() + px(TABLE_TEXT_VERTICAL_INSET);
+            let lines = measured_cell
+                .lines
+                .iter()
+                .map(|measured_line| {
+                    let bounds = Bounds::new(
+                        point(content_left, line_top),
+                        size(content_width, measured_line.height),
+                    );
+                    line_top += measured_line.height;
+                    TableCellLineLayout {
+                        source_range: measured_line.source_range,
+                        visible_segments: table_cell_visible_segments(
+                            measured_line.source_range,
+                            visible_segments,
+                        ),
+                        layout: measured_line.layout.clone(),
+                        bounds,
+                    }
+                })
+                .collect();
+
+            TableCellLayout {
+                source_range: measured_cell.source_range,
+                source_outer_range: measured_cell.source_outer_range,
+                lines,
+                bounds: Bounds::new(
+                    point(
+                        content_left,
+                        row_bounds.top() + px(TABLE_TEXT_VERTICAL_INSET),
+                    ),
+                    size(
+                        content_width,
+                        (measured.row_height - px(TABLE_TEXT_VERTICAL_INSET * 2.0)).max(px(0.0)),
+                    ),
+                ),
+                hit_bounds: Bounds::new(
+                    point(cell_left, row_bounds.top()),
+                    size(cell_width, measured.row_height),
+                ),
+            }
+        })
+        .collect()
 }
 
 fn table_row_height_for_content_height(content_height: Pixels) -> Pixels {
@@ -1816,6 +1928,26 @@ mod tests {
     use gpui::FontStyle;
     use hanji_core::Document;
     use hanji_markdown::{MarkdownCodeBlockLine, OrderedListDelimiter};
+
+    #[test]
+    fn measured_container_width_uses_current_layout_constraints() {
+        assert_eq!(
+            measured_container_width(
+                Some(px(320.0)),
+                AvailableSpace::Definite(px(900.0)),
+                px(1200.0),
+            ),
+            px(320.0),
+        );
+        assert_eq!(
+            measured_container_width(None, AvailableSpace::Definite(px(360.0)), px(1200.0),),
+            px(360.0),
+        );
+        assert_eq!(
+            measured_container_width(None, AvailableSpace::MinContent, px(1000.0)),
+            px(968.0),
+        );
+    }
 
     #[test]
     fn inline_code_background_ranges_survive_without_strong_runs() {
