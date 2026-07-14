@@ -35,16 +35,10 @@ Each PR should include:
 
 AI-assisted contributions are welcome, but the human contributor remains the author and is fully responsible for the contribution. Before submitting, review every AI-assisted change, understand and be able to explain it, run the relevant checks, and ensure that the contribution can be provided under Hanji's license.
 
-Disclose material AI assistance when a tool generates or rewrites code, documentation, tests, or design content, or materially shapes implementation decisions. Describe the tool, model when known, and scope of the assistance in the pull request. Add an `Assisted-by` trailer to each affected commit:
+Disclose material AI assistance when a tool generates or rewrites code, documentation, tests, or design content, or materially shapes implementation decisions. Add an `Assisted-by` trailer with the tool or agent name and model when known to each affected commit:
 
 ```text
 Assisted-by: <tool or agent> (<model, if known>)
-```
-
-For example:
-
-```text
-Assisted-by: Codex (GPT-5)
 ```
 
 Minor autocomplete, spelling corrections, search, and deterministic formatting do not need to be disclosed.
