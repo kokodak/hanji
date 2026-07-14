@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use gpui::{
     App, AvailableSpace, BorderStyle, Bounds, Element, ElementId, ElementInputHandler, Entity,
     FontWeight, GlobalElementId, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels,
@@ -40,6 +43,19 @@ const MIN_WRAP_WIDTH: f32 = 120.0;
 
 pub(crate) struct EditorElement {
     pub(crate) editor: Entity<Hanji>,
+}
+
+pub(crate) struct EditorRequestLayoutState(Rc<RefCell<Option<MeasuredDocumentLayout>>>);
+
+#[derive(Clone)]
+struct MeasuredLineLayout {
+    layout: WrappedLine,
+    wrap_width: Pixels,
+}
+
+struct MeasuredDocumentLayout {
+    lines: Vec<MeasuredLineLayout>,
+    height: Pixels,
 }
 
 pub(crate) struct EditorPrepaintState {
@@ -141,7 +157,7 @@ impl IntoElement for EditorElement {
 }
 
 impl Element for EditorElement {
-    type RequestLayoutState = ();
+    type RequestLayoutState = EditorRequestLayoutState;
     type PrepaintState = EditorPrepaintState;
 
     fn id(&self) -> Option<ElementId> {
@@ -162,6 +178,8 @@ impl Element for EditorElement {
         let mut style = Style::default();
         style.size.width = relative(1.0).into();
         let editor = self.editor.clone();
+        let measured_layout = Rc::new(RefCell::new(None));
+        let request_layout_state = EditorRequestLayoutState(measured_layout.clone());
         let layout_id = window.request_measured_layout(
             style,
             move |known_dimensions, available_space, window, cx| {
@@ -170,13 +188,15 @@ impl Element for EditorElement {
                     available_space.width,
                     window.viewport_size().width,
                 );
-                let height = document_height(editor.read(cx), container_width, window);
+                let document_layout = measure_document(editor.read(cx), container_width, window);
+                let measured_size = size(container_width, document_layout.height);
+                measured_layout.borrow_mut().replace(document_layout);
 
-                size(container_width, height)
+                measured_size
             },
         );
 
-        (layout_id, ())
+        (layout_id, request_layout_state)
     }
 
     fn prepaint(
@@ -184,7 +204,7 @@ impl Element for EditorElement {
         _id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
+        request_layout: &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
@@ -206,8 +226,13 @@ impl Element for EditorElement {
         let selection = document.selection().primary();
 
         let projection = project_document(document);
+        let measured_layout = request_layout.0.borrow();
+        let measured_document = measured_layout
+            .as_ref()
+            .expect("editor measurement has not been performed");
+        assert_eq!(measured_document.lines.len(), projection.lines().len());
 
-        for line in projection.lines() {
+        for (line_index, line) in projection.lines().iter().enumerate() {
             let presentation = line_presentation(line.kind);
             let visible_segments = line.visible_segments_revealing_source_in(Some(selection));
             let marker_container_bounds = Bounds::new(
@@ -225,12 +250,13 @@ impl Element for EditorElement {
                 &text_style,
                 window,
             );
-            let line_text: SharedString = visible_text_from_segments(&visible_segments).into();
-            let runs = line_text_runs(&visible_segments, presentation, &text_style);
             let content_offset_width =
                 list_marker_geometry.map_or(px(0.0), |geometry| geometry.content_offset_width);
-            let wrap_width = line_wrap_width(bounds.size.width, presentation, content_offset_width);
-            let layout = shape_wrapped_line(line_text, presentation, &runs, wrap_width, window);
+            // The scroll extent and painted rows must come from the same shaping pass.
+            // Re-shaping here against `bounds` can produce more rows than were measured.
+            let measured_line = &measured_document.lines[line_index];
+            let layout = measured_line.layout.clone();
+            let wrap_width = measured_line.wrap_width;
             let wrapped_height = layout.size(px(presentation.line_height)).height;
             let container_bounds = Bounds::new(
                 point(bounds.left(), bounds.top() + px(top)),
@@ -306,6 +332,7 @@ impl Element for EditorElement {
             ));
             lines.push(line_snapshot);
         }
+        debug_assert_eq!(px(top), measured_document.height);
         flush_blockquote_bar_run(&mut blockquote_bar_runs, &mut blockquote_bar_run);
         flush_code_block_background_run(
             &mut code_block_background_runs,
@@ -434,12 +461,17 @@ fn measured_container_width(
     (viewport_width - px(EDITOR_CHROME_HORIZONTAL_PADDING)).max(px(MIN_WRAP_WIDTH))
 }
 
-fn document_height(editor: &Hanji, container_width: Pixels, window: &mut Window) -> Pixels {
+fn measure_document(
+    editor: &Hanji,
+    container_width: Pixels,
+    window: &mut Window,
+) -> MeasuredDocumentLayout {
     let document = editor.session.document();
     let selection = document.selection().primary();
     let text_style = window.text_style();
     let projection = project_document(document);
     let mut height = 0.0;
+    let mut lines = Vec::with_capacity(projection.lines().len());
 
     for line in projection.lines() {
         let presentation = line_presentation(line.kind);
@@ -460,9 +492,13 @@ fn document_height(editor: &Hanji, container_width: Pixels, window: &mut Window)
         let layout = shape_wrapped_line(line_text, presentation, &runs, wrap_width, window);
 
         height += f32::from(layout.size(px(presentation.line_height)).height);
+        lines.push(MeasuredLineLayout { layout, wrap_width });
     }
 
-    px(height.max(LINE_HEIGHT))
+    MeasuredDocumentLayout {
+        lines,
+        height: px(height.max(LINE_HEIGHT)),
+    }
 }
 
 fn line_wrap_width(
