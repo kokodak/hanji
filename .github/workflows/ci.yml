@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Rust checks
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Show Rust toolchain
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: Verify Metal toolchain availability
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+            sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          fi
+
+          xcodebuild -version
+          xcrun --find metal
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Test core crates
+        run: make test
+
+      - name: Check GPUI app
+        run: make check-app
+
+      - name: Test GPUI app
+        run: cargo test -p hanji
