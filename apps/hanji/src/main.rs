@@ -24,7 +24,8 @@ use gpui::{
 };
 use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
 use hanji_markdown::{
-    MarkdownCommand, MarkdownCommandError, MarkdownTaskState, execute_markdown_command,
+    MarkdownCommand, MarkdownCommandError, MarkdownLine, MarkdownTableLine, MarkdownTaskState,
+    ProjectedTableCell, execute_markdown_command, project_document,
 };
 use hanji_storage::DocumentSession;
 
@@ -34,7 +35,8 @@ use editing::{
     empty_marker_pair_delete_backward_edit, extension_points_for_selection,
     horizontal_offset_within_line, line_marker_hit_offset, list_indent_edit,
     list_newline_edit_for_line, marker_autocomplete_edit, marker_skip_offset, selected_source_text,
-    selection_is_reversed, selection_range_from_anchor_and_head, task_marker_state_char_range,
+    selected_source_text_for_copy, selection_is_reversed, selection_range_from_anchor_and_head,
+    task_marker_state_char_range,
 };
 use encoding::byte_offset_to_utf16;
 use external::external_url_command;
@@ -44,7 +46,7 @@ use renderer::{
     TaskMarkerHitbox,
 };
 use session::{is_scratch_document_path, new_scratch_session, open_initial_session};
-use snapshot::{LineSnapshot, line_for_offset};
+use snapshot::{LineSnapshot, TableCellHit, line_for_offset};
 use time_label::{document_modified_time, format_last_edited_time};
 
 const CARET_SCROLL_MARGIN: f32 = 24.0;
@@ -66,6 +68,7 @@ const FILE_BROWSER_WIDTH: f32 = 248.0;
 const FILE_BROWSER_ANIMATION_FRAME_MS: u64 = 8;
 const FILE_BROWSER_ANIMATION_DURATION_MS: u64 = 100;
 const FILE_BROWSER_ANIMATION_EPSILON: f32 = 0.25;
+const TABLE_LINE_BREAK_SOURCE: &str = "<br>";
 
 fn caret_blink_idle_delay_elapsed(idle_for: Duration) -> bool {
     idle_for >= Duration::from_millis(CARET_BLINK_IDLE_DELAY_MS)
@@ -167,6 +170,161 @@ fn validate_open_document_path(path: &Path) -> Result<(), &'static str> {
     }
 
     Ok(())
+}
+
+fn table_cell_at_offset(cells: &[ProjectedTableCell], offset: usize) -> Option<ProjectedTableCell> {
+    cells
+        .iter()
+        .copied()
+        .find(|cell| offset >= cell.content_range.start && offset <= cell.content_range.end)
+        .or_else(|| {
+            cells.iter().copied().find(|cell| {
+                offset >= cell.source_outer_range.start && offset <= cell.source_outer_range.end
+            })
+        })
+}
+
+fn table_horizontal_caret_offset(
+    cells: &[ProjectedTableCell],
+    offset: usize,
+    direction: isize,
+) -> Option<usize> {
+    let index = cells
+        .iter()
+        .position(|cell| offset >= cell.content_range.start && offset <= cell.content_range.end)?;
+    let cell = cells[index];
+
+    if direction < 0 && offset == cell.content_range.start {
+        return Some(
+            index
+                .checked_sub(1)
+                .and_then(|index| cells.get(index))
+                .map_or(offset, |cell| cell.content_range.end),
+        );
+    }
+    if direction > 0 && offset == cell.content_range.end {
+        return Some(
+            cells
+                .get(index + 1)
+                .map_or(offset, |cell| cell.content_range.start),
+        );
+    }
+
+    None
+}
+
+fn table_newline_edit(
+    cells: &[ProjectedTableCell],
+    range: &Range<usize>,
+) -> Option<(Range<usize>, String, Range<usize>)> {
+    let start_cell = table_cell_at_offset(cells, range.start)?;
+    let end_cell = table_cell_at_offset(cells, range.end)?;
+    if start_cell.content_range != end_cell.content_range
+        || range.start < start_cell.content_range.start
+        || range.end > start_cell.content_range.end
+    {
+        return None;
+    }
+
+    let caret = range.start + TABLE_LINE_BREAK_SOURCE.len();
+    Some((
+        range.clone(),
+        TABLE_LINE_BREAK_SOURCE.to_string(),
+        caret..caret,
+    ))
+}
+
+fn table_line_break_delete_edit(
+    text: &str,
+    range: &Range<usize>,
+    direction: isize,
+) -> Option<(Range<usize>, String, Range<usize>)> {
+    if range.start != range.end {
+        return None;
+    }
+
+    let marker_range = if direction < 0 {
+        let start = range.start.checked_sub(TABLE_LINE_BREAK_SOURCE.len())?;
+        start..range.start
+    } else {
+        range.end..range.end.checked_add(TABLE_LINE_BREAK_SOURCE.len())?
+    };
+    if text.get(marker_range.clone()) != Some(TABLE_LINE_BREAK_SOURCE) {
+        return None;
+    }
+
+    let caret = marker_range.start;
+    Some((marker_range, String::new(), caret..caret))
+}
+
+fn table_line_break_caret_offset(text: &str, offset: usize, direction: isize) -> Option<usize> {
+    let marker_range = if direction < 0 {
+        let start = offset.checked_sub(TABLE_LINE_BREAK_SOURCE.len())?;
+        start..offset
+    } else {
+        offset..offset.checked_add(TABLE_LINE_BREAK_SOURCE.len())?
+    };
+
+    (text.get(marker_range.clone()) == Some(TABLE_LINE_BREAK_SOURCE)).then_some(if direction < 0 {
+        marker_range.start
+    } else {
+        marker_range.end
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TableCellSelection {
+    table_range: TextRange,
+    row_start: usize,
+    row_end: usize,
+    column_start: usize,
+    column_end: usize,
+}
+
+impl TableCellSelection {
+    fn between(origin: TableCellHit, target: TableCellHit) -> Option<Self> {
+        if origin.table_range != target.table_range {
+            return None;
+        }
+
+        Some(Self {
+            table_range: origin.table_range,
+            row_start: origin.row_range.start.min(target.row_range.start),
+            row_end: origin.row_range.start.max(target.row_range.start),
+            column_start: origin.column.min(target.column),
+            column_end: origin.column.max(target.column),
+        })
+    }
+}
+
+fn selected_table_cell_source(
+    document: &hanji_core::Document,
+    selection: TableCellSelection,
+) -> Option<String> {
+    let projection = project_document(document);
+    let mut rows = Vec::new();
+
+    for line in projection.lines() {
+        if line.table_range() != Some(selection.table_range)
+            || line.range.start < selection.row_start
+            || line.range.start > selection.row_end
+        {
+            continue;
+        }
+
+        let cells = line.table_cells();
+        let Some(first_cell) = cells.get(selection.column_start) else {
+            continue;
+        };
+        let last_column = selection.column_end.min(cells.len().saturating_sub(1));
+        let last_cell = &cells[last_column];
+        let source = document
+            .text()
+            .get(first_cell.source_outer_range.start..last_cell.source_outer_range.end)?;
+        rows.push(source.to_string());
+    }
+
+    (!rows.is_empty()).then(|| rows.join("\n"))
 }
 
 fn window_title_for_session(session: &DocumentSession) -> String {
@@ -379,6 +537,8 @@ struct Hanji {
     selection_head: Option<usize>,
     is_selecting: bool,
     selection_drag_origin: Option<gpui::Point<Pixels>>,
+    selection_drag_cell_origin: Option<TableCellHit>,
+    table_cell_selection: Option<TableCellSelection>,
     status_message: Option<String>,
     last_edited_at: SystemTime,
     caret_opacity: f32,
@@ -415,6 +575,8 @@ impl Hanji {
             selection_head: None,
             is_selecting: false,
             selection_drag_origin: None,
+            selection_drag_cell_origin: None,
+            table_cell_selection: None,
             status_message: None,
             caret_opacity: 1.0,
             caret_last_activity_at: Instant::now(),
@@ -428,6 +590,20 @@ impl Hanji {
         self.marked_range = None;
         self.clear_selection_tracking();
         let range = self.selected_range();
+        if range.start == range.end
+            && self
+                .table_cell_at_offset(range.start)
+                .is_some_and(|cell| range.start <= cell.content_range.start)
+        {
+            return;
+        }
+        if self.table_cell_at_offset(range.start).is_some()
+            && let Some((range, replacement, selection_after)) =
+                table_line_break_delete_edit(self.session.document().text(), &range, -1)
+        {
+            self.replace_range(range, &replacement, selection_after, window, cx);
+            return;
+        }
         if let Some((range, replacement, selection_after)) =
             empty_marker_pair_delete_backward_edit(self.session.document().text(), &range)
         {
@@ -448,6 +624,21 @@ impl Hanji {
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
         self.clear_selection_tracking();
+        let range = self.selected_range();
+        if range.start == range.end
+            && self
+                .table_cell_at_offset(range.end)
+                .is_some_and(|cell| range.end >= cell.content_range.end)
+        {
+            return;
+        }
+        if self.table_cell_at_offset(range.end).is_some()
+            && let Some((range, replacement, selection_after)) =
+                table_line_break_delete_edit(self.session.document().text(), &range, 1)
+        {
+            self.replace_range(range, &replacement, selection_after, window, cx);
+            return;
+        }
         let changed = self
             .session
             .execute(EditorCommand::DeleteForward)
@@ -463,12 +654,16 @@ impl Hanji {
         let document = self.session.document();
         let range = document.selection().primary();
         let offset = if range.is_empty() {
-            document
-                .previous_grapheme_offset(range.start)
-                .ok()
-                .flatten()
-                .and_then(|offset| {
-                    self.horizontal_offset_within_current_line(range.start, offset, -1)
+            self.table_horizontal_caret_offset(range.start, -1)
+                .or_else(|| table_line_break_caret_offset(document.text(), range.start, -1))
+                .or_else(|| {
+                    document
+                        .previous_grapheme_offset(range.start)
+                        .ok()
+                        .flatten()
+                        .and_then(|offset| {
+                            self.horizontal_offset_within_current_line(range.start, offset, -1)
+                        })
                 })
         } else {
             Some(range.start)
@@ -515,11 +710,17 @@ impl Hanji {
         let document = self.session.document();
         let range = document.selection().primary();
         let offset = if range.is_empty() {
-            document
-                .next_grapheme_offset(range.end)
-                .ok()
-                .flatten()
-                .and_then(|offset| self.horizontal_offset_within_current_line(range.end, offset, 1))
+            self.table_horizontal_caret_offset(range.end, 1)
+                .or_else(|| table_line_break_caret_offset(document.text(), range.end, 1))
+                .or_else(|| {
+                    document
+                        .next_grapheme_offset(range.end)
+                        .ok()
+                        .flatten()
+                        .and_then(|offset| {
+                            self.horizontal_offset_within_current_line(range.end, offset, 1)
+                        })
+                })
         } else {
             Some(range.end)
         };
@@ -632,6 +833,13 @@ impl Hanji {
         self.marked_range = None;
         self.clear_selection_tracking();
         let range = self.selected_range();
+
+        if let Some((range, replacement, selection_after)) =
+            table_newline_edit(&self.table_cells(), &range)
+        {
+            self.replace_range(range, &replacement, selection_after, window, cx);
+            return;
+        }
 
         if let Some((range, replacement, selection_after)) = self.blockquote_newline_edit(&range) {
             self.replace_range(range, &replacement, selection_after, window, cx);
@@ -762,19 +970,35 @@ impl Hanji {
         self.marked_range = None;
         self.is_selecting = false;
         self.selection_drag_origin = None;
+        self.selection_drag_cell_origin = None;
+        self.table_cell_selection = None;
         let range = document_selection_range(self.session.document().len());
 
         self.select_from_anchor_to(range.start, range.end, None, cx);
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(selection) = self.table_cell_selection
+            && let Some(text) = selected_table_cell_source(self.session.document(), selection)
+        {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+            return;
+        }
+
         let range = self.selected_range();
-        if let Some(text) = selected_source_text(self.session.document().text(), &range) {
+        if let Some(text) = selected_source_text_for_copy(self.session.document(), &range) {
             cx.write_to_clipboard(ClipboardItem::new_string(text));
         }
     }
 
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(selection) = self.table_cell_selection
+            && let Some(text) = selected_table_cell_source(self.session.document(), selection)
+        {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+            return;
+        }
+
         let range = self.selected_range();
         let Some(text) = selected_source_text(self.session.document().text(), &range) else {
             return;
@@ -793,8 +1017,8 @@ impl Hanji {
             return;
         }
 
-        let (range, replacement, selection_after) =
-            clipboard_paste_edit(&self.selected_range(), &text);
+        let range = self.snap_table_caret_range(self.selected_range());
+        let (range, replacement, selection_after) = clipboard_paste_edit(&range, &text);
 
         self.marked_range = None;
         self.replace_range(range, &replacement, selection_after, window, cx);
@@ -1227,6 +1451,7 @@ impl Hanji {
     ) {
         window.focus(&self.focus_handle);
         self.marked_range = None;
+        self.table_cell_selection = None;
         self.update_hovered_link_at_position(event.position, cx);
         if !event.modifiers.shift
             && let Some(task_marker) = self.task_marker_at_position(event.position)
@@ -1248,12 +1473,19 @@ impl Hanji {
         {
             self.is_selecting = false;
             self.selection_drag_origin = None;
+            self.selection_drag_cell_origin = None;
+            self.table_cell_selection = None;
             self.select_from_anchor_to(range.start, range.end, None, cx);
             return;
         }
 
         self.is_selecting = false;
         self.selection_drag_origin = Some(event.position);
+        self.selection_drag_cell_origin = if event.modifiers.shift {
+            None
+        } else {
+            self.table_cell_hit_at_position(event.position)
+        };
         if event.modifiers.shift {
             let (anchor, _) = self.selection_extension_points(1);
             self.select_from_anchor_to(anchor, offset, None, cx);
@@ -1282,6 +1514,18 @@ impl Hanji {
             self.is_selecting = true;
         }
 
+        if let (Some(origin_cell), Some(target_cell)) = (
+            self.selection_drag_cell_origin,
+            self.table_cell_hit_at_position(event.position),
+        ) {
+            if let Some(selection) = TableCellSelection::between(origin_cell, target_cell) {
+                self.table_cell_selection = Some(selection);
+                self.reset_caret_blink();
+                cx.notify();
+                return;
+            }
+        }
+
         let anchor = self
             .selection_anchor
             .unwrap_or_else(|| self.session.document().selection().primary().start);
@@ -1299,6 +1543,7 @@ impl Hanji {
     fn on_mouse_up(&mut self, event: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.is_selecting = false;
         self.selection_drag_origin = None;
+        self.selection_drag_cell_origin = None;
         self.update_hovered_link_at_position(event.position, cx);
     }
 
@@ -1420,18 +1665,15 @@ impl Hanji {
         direction: isize,
     ) -> Option<(usize, Pixels)> {
         let (line_index, line) = self.line_index_for_offset(offset)?;
-        let visible_offset = line.source_to_visible_offset(offset);
-        let position = line.wrapped_caret_position(visible_offset)?;
-        let row = line.wrapped_row_for_visible_offset(visible_offset)?;
+        let position = line.source_caret_position(offset)?;
+        let row = line.source_visual_row(offset)?;
         let current_row = self.flat_visual_row_index(line_index, row);
         let target_row = current_row.checked_add_signed(direction)?;
         let (target_line_index, target_line_row) =
             self.line_index_and_row_for_flat_visual_row(target_row)?;
         let target_line = self.last_lines.get(target_line_index)?;
         let visual_x = self.preferred_visual_x.unwrap_or(position.x);
-        let target_visible_offset =
-            target_line.visible_offset_for_wrapped_row_x(target_line_row, visual_x);
-        let target_offset = target_line.visible_to_source_caret_offset(target_visible_offset);
+        let target_offset = target_line.source_offset_for_visual_row_x(target_line_row, visual_x);
 
         Some((target_offset, visual_x))
     }
@@ -1460,12 +1702,15 @@ impl Hanji {
     fn extend_selection_horizontally(&mut self, direction: isize, cx: &mut Context<Self>) {
         let document = self.session.document();
         let (anchor, head) = self.selection_extension_points(direction);
-        let offset = if direction < 0 {
-            document.previous_grapheme_offset(head).ok().flatten()
-        } else {
-            document.next_grapheme_offset(head).ok().flatten()
-        }
-        .and_then(|offset| self.horizontal_offset_within_current_line(head, offset, direction));
+        let offset = table_line_break_caret_offset(document.text(), head, direction)
+            .or_else(|| {
+                if direction < 0 {
+                    document.previous_grapheme_offset(head).ok().flatten()
+                } else {
+                    document.next_grapheme_offset(head).ok().flatten()
+                }
+            })
+            .and_then(|offset| self.horizontal_offset_within_current_line(head, offset, direction));
 
         if let Some(offset) = offset {
             self.select_from_anchor_to(anchor, offset, None, cx);
@@ -1552,6 +1797,7 @@ impl Hanji {
         let range = selection_range_from_anchor_and_head(anchor, head);
 
         if self.session.set_selection(Selection::single(range)).is_ok() {
+            self.table_cell_selection = None;
             self.selection_anchor = Some(anchor);
             self.selection_head = Some(head);
             self.preferred_column = preferred_column;
@@ -1575,6 +1821,7 @@ impl Hanji {
         let range = selection_range_from_anchor_and_head(anchor, head);
 
         if self.session.set_selection(Selection::single(range)).is_ok() {
+            self.table_cell_selection = None;
             self.selection_anchor = Some(anchor);
             self.selection_head = Some(head);
             self.preferred_column = None;
@@ -1595,11 +1842,51 @@ impl Hanji {
         self.selection_head = None;
         self.is_selecting = false;
         self.selection_drag_origin = None;
+        self.selection_drag_cell_origin = None;
+        self.table_cell_selection = None;
     }
 
     fn selected_range(&self) -> Range<usize> {
         let range = self.session.document().selection().primary();
         range.start..range.end
+    }
+
+    fn table_cells(&self) -> Vec<ProjectedTableCell> {
+        project_document(self.session.document())
+            .lines()
+            .iter()
+            .filter(|line| {
+                matches!(
+                    line.kind,
+                    MarkdownLine::Table {
+                        role: MarkdownTableLine::Header | MarkdownTableLine::Body
+                    }
+                )
+            })
+            .flat_map(|line| line.table_cells().iter().copied())
+            .collect()
+    }
+
+    fn table_cell_at_offset(&self, offset: usize) -> Option<ProjectedTableCell> {
+        table_cell_at_offset(&self.table_cells(), offset)
+    }
+
+    fn table_horizontal_caret_offset(&self, offset: usize, direction: isize) -> Option<usize> {
+        table_horizontal_caret_offset(&self.table_cells(), offset, direction)
+    }
+
+    fn snap_table_caret_range(&self, range: Range<usize>) -> Range<usize> {
+        if range.start != range.end {
+            return range;
+        }
+        let Some(cell) = self.table_cell_at_offset(range.start) else {
+            return range;
+        };
+        let offset = range
+            .start
+            .clamp(cell.content_range.start, cell.content_range.end);
+
+        offset..offset
     }
 
     fn replace_range(
@@ -1671,7 +1958,7 @@ impl Hanji {
         let target_right = viewport.right() - margin;
         let mut offset = self.editor_scroll.offset();
         let caret_position = line
-            .wrapped_caret_position(line.source_to_visible_offset(target_offset))
+            .source_caret_position(target_offset)
             .unwrap_or_else(|| point(px(0.0), px(0.0)));
         let caret_x = line.bounds.left() + caret_position.x;
         let caret_top = line.bounds.top() + caret_position.y;
@@ -1758,6 +2045,19 @@ impl Hanji {
         self.index_for_mouse_position_with_marker_mode(position, MarkerHitMode::ContentStart)
     }
 
+    fn table_cell_hit_at_position(&self, position: gpui::Point<Pixels>) -> Option<TableCellHit> {
+        let line = self
+            .last_lines
+            .iter()
+            .find(|line| position.y >= line.bounds.top() && position.y <= line.bounds.bottom())?;
+        let local_position = point(
+            position.x - line.bounds.left(),
+            position.y - line.bounds.top(),
+        );
+
+        line.table_cell_hit_for_local_position(local_position)
+    }
+
     fn index_for_mouse_position_with_marker_mode(
         &self,
         position: gpui::Point<Pixels>,
@@ -1797,8 +2097,7 @@ impl Hanji {
             position.x - line.bounds.left(),
             position.y - line.bounds.top(),
         );
-        let visible_offset = line.visible_offset_for_local_position(local_position);
-        let offset = line.visible_to_source_caret_offset(visible_offset);
+        let offset = line.source_offset_for_local_position(local_position);
 
         self.session
             .document()
@@ -1901,12 +2200,12 @@ impl Hanji {
     fn bounds_for_byte_range(&self, range: Range<usize>) -> Option<Bounds<Pixels>> {
         let range = self.snap_byte_range(range);
         let line = self.line_for_offset(range.start)?;
-        let start = line.source_to_visible_offset(range.start);
-        let end = line.source_to_visible_offset(range.end);
         let start_position = line
-            .wrapped_caret_position(start)
+            .source_caret_position(range.start)
             .unwrap_or_else(|| point(px(0.0), px(0.0)));
-        let end_position = line.wrapped_caret_position(end).unwrap_or(start_position);
+        let end_position = line
+            .source_caret_position(range.end)
+            .unwrap_or(start_position);
         let left = line.bounds.left() + start_position.x;
         let right = (line.bounds.left() + end_position.x).max(left + px(2.0));
         let top = line.bounds.top() + start_position.y;
@@ -2392,6 +2691,7 @@ impl EntityInputHandler for Hanji {
             .map(|range| self.utf16_range_to_byte(range))
             .or_else(|| self.marked_range.clone())
             .unwrap_or_else(|| self.selected_range());
+        let range = self.snap_table_caret_range(range);
         if let Some(offset) = marker_skip_offset(self.session.document().text(), &range, new_text) {
             self.move_caret(offset, cx);
             self.marked_range = None;
@@ -2423,6 +2723,7 @@ impl EntityInputHandler for Hanji {
             .map(|range| self.utf16_range_to_byte(range))
             .or_else(|| self.marked_range.clone())
             .unwrap_or_else(|| self.selected_range());
+        let range = self.snap_table_caret_range(range);
         let insert_start = range.start;
         let marked_range =
             (!new_text.is_empty()).then_some(insert_start..insert_start + new_text.len());
@@ -2691,6 +2992,153 @@ mod tests {
         let session = new_scratch_session();
 
         assert_eq!(document_path_label(session.path()), "Untitled");
+    }
+
+    #[test]
+    fn table_horizontal_navigation_skips_hidden_markdown_syntax() {
+        let document =
+            hanji_core::Document::new("| Name | Status |\n| --- | --- |\n| Hanji | Ready |");
+        let projection = project_document(&document);
+        let cells = projection
+            .lines()
+            .iter()
+            .filter(|line| {
+                matches!(
+                    line.kind,
+                    MarkdownLine::Table {
+                        role: MarkdownTableLine::Header | MarkdownTableLine::Body
+                    }
+                )
+            })
+            .flat_map(|line| line.table_cells().iter().copied())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            table_horizontal_caret_offset(&cells, cells[0].content_range.end, 1),
+            Some(cells[1].content_range.start)
+        );
+        assert_eq!(
+            table_horizontal_caret_offset(&cells, cells[1].content_range.start, -1),
+            Some(cells[0].content_range.end)
+        );
+        assert_eq!(
+            table_horizontal_caret_offset(&cells, cells[0].content_range.start, -1),
+            Some(cells[0].content_range.start)
+        );
+        assert_eq!(
+            table_horizontal_caret_offset(&cells, cells[3].content_range.end, 1),
+            Some(cells[3].content_range.end)
+        );
+    }
+
+    #[test]
+    fn table_cell_lookup_snaps_hidden_pipe_ranges_to_cell_content() {
+        let document = hanji_core::Document::new("| Name | Status |\n| --- | --- |");
+        let projection = project_document(&document);
+        let cells = projection.lines()[0].table_cells();
+        let hidden_pipe = cells[0].content_range.end + 1;
+
+        assert_eq!(table_cell_at_offset(cells, hidden_pipe), Some(cells[0]));
+    }
+
+    #[test]
+    fn table_drag_selection_uses_a_rectangular_row_and_column_range() {
+        let table_range = TextRange::new(0, 80);
+        let origin = TableCellHit {
+            table_range,
+            row_range: TextRange::new(40, 50),
+            column: 2,
+            source_range: TextRange::new(44, 46),
+            source_outer_range: TextRange::new(43, 47),
+        };
+        let target = TableCellHit {
+            table_range,
+            row_range: TextRange::new(20, 30),
+            column: 1,
+            source_range: TextRange::new(23, 25),
+            source_outer_range: TextRange::new(22, 26),
+        };
+
+        assert_eq!(
+            TableCellSelection::between(origin, target),
+            Some(TableCellSelection {
+                table_range,
+                row_start: 20,
+                row_end: 40,
+                column_start: 1,
+                column_end: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn rectangular_table_selection_copies_only_selected_columns_and_rows() {
+        let source =
+            "| A | B | C | D |\n| --- | --- | --- | --- |\n| 1 | 2 | 3 | 4 |\n| 5 | 6 | 7 | 8 |";
+        let document = hanji_core::Document::new(source);
+        let projection = project_document(&document);
+        let table_range = projection.lines()[0].table_range().unwrap();
+        let selection = TableCellSelection {
+            table_range,
+            row_start: projection.lines()[2].range.start,
+            row_end: projection.lines()[3].range.start,
+            column_start: 1,
+            column_end: 2,
+        };
+
+        assert_eq!(
+            selected_table_cell_source(&document, selection),
+            Some("| 2 | 3 |\n| 6 | 7 |".to_string())
+        );
+    }
+
+    #[test]
+    fn newline_inside_table_cell_inserts_a_source_backed_cell_break() {
+        let document = hanji_core::Document::new("| Hanji | Ready |\n| --- | --- |");
+        let projection = project_document(&document);
+        let cell = projection.lines()[0].table_cells()[0];
+        let caret = cell.content_range.start + 2;
+
+        assert_eq!(
+            table_newline_edit(projection.lines()[0].table_cells(), &(caret..caret)),
+            Some((
+                caret..caret,
+                TABLE_LINE_BREAK_SOURCE.to_string(),
+                caret + TABLE_LINE_BREAK_SOURCE.len()..caret + TABLE_LINE_BREAK_SOURCE.len(),
+            ))
+        );
+    }
+
+    #[test]
+    fn table_cell_break_navigation_and_deletion_treat_the_marker_as_one_unit() {
+        let source = "Hanji<br>Editor";
+        let before_break = "Hanji".len();
+        let after_break = before_break + TABLE_LINE_BREAK_SOURCE.len();
+
+        assert_eq!(
+            table_line_break_caret_offset(source, before_break, 1),
+            Some(after_break)
+        );
+        assert_eq!(
+            table_line_break_caret_offset(source, after_break, -1),
+            Some(before_break)
+        );
+        assert_eq!(
+            table_line_break_delete_edit(source, &(after_break..after_break), -1),
+            Some((
+                before_break..after_break,
+                String::new(),
+                before_break..before_break,
+            ))
+        );
+        assert_eq!(
+            table_line_break_delete_edit(source, &(before_break..before_break), 1),
+            Some((
+                before_break..after_break,
+                String::new(),
+                before_break..before_break,
+            ))
+        );
     }
 
     #[test]

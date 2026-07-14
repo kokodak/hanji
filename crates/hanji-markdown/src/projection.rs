@@ -1,8 +1,9 @@
 use hanji_core::{Document, TextRange};
 
 use crate::{
-    MarkdownCodeBlockLine, MarkdownLine, blockquote_content_start, classify_line,
-    heading_content_start, horizontal_rule_marker_range, list_item_content_start,
+    MarkdownCodeBlockLine, MarkdownLine, MarkdownTableLine, blockquote_content_start,
+    classify_line, heading_content_start, horizontal_rule_marker_range, list_item_content_start,
+    table::{MarkdownTableRow, is_delimiter_row, parse_table_row},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +35,7 @@ pub enum ProjectedSegmentKind {
     CodeContent,
     CodeBlockFence,
     CodeBlockContent,
+    TableMarker,
     LinkMarker,
     LinkText,
     LinkDestination,
@@ -170,6 +172,22 @@ pub struct ProjectedLine<'a> {
     pub kind: MarkdownLine,
     pub inlines: Vec<ProjectedInline<'a>>,
     style_ranges: Vec<ProjectedStyleRange>,
+    table: Option<ProjectedTableLine>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectedTableCell {
+    pub range: TextRange,
+    pub content_range: TextRange,
+    pub source_outer_range: TextRange,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProjectedTableLine {
+    table_range: TextRange,
+    column_count: usize,
+    cells: Vec<ProjectedTableCell>,
+    separators: Vec<TextRange>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,6 +204,20 @@ impl ProjectedStyleRange {
 }
 
 impl<'a> ProjectedLine<'a> {
+    pub fn table_range(&self) -> Option<TextRange> {
+        self.table.as_ref().map(|table| table.table_range)
+    }
+
+    pub fn table_column_count(&self) -> Option<usize> {
+        self.table.as_ref().map(|table| table.column_count)
+    }
+
+    pub fn table_cells(&self) -> &[ProjectedTableCell] {
+        self.table
+            .as_ref()
+            .map_or(&[], |table| table.cells.as_slice())
+    }
+
     pub(crate) fn style_marker_ranges(&self) -> impl Iterator<Item = MarkdownMarkerRanges> + '_ {
         self.style_ranges
             .iter()
@@ -230,6 +262,10 @@ impl<'a> ProjectedLine<'a> {
 
         if matches!(self.kind, MarkdownLine::HorizontalRule) {
             return self.horizontal_rule_visible_segments_revealing_source_in(reveal_range);
+        }
+
+        if matches!(self.kind, MarkdownLine::Table { .. }) {
+            return self.table_visible_segments_revealing_source_in(reveal_range);
         }
 
         let mut segments = Vec::new();
@@ -383,6 +419,10 @@ impl<'a> ProjectedLine<'a> {
 
         if matches!(self.kind, MarkdownLine::HorizontalRule) {
             return self.horizontal_rule_source_visible_segments();
+        }
+
+        if matches!(self.kind, MarkdownLine::Table { .. }) {
+            return self.table_source_visible_segments();
         }
 
         let mut segments = Vec::new();
@@ -617,6 +657,92 @@ impl<'a> ProjectedLine<'a> {
                 ProjectedSegmentKind::Text,
             );
         }
+
+        segments
+    }
+
+    fn table_visible_segments_revealing_source_in(
+        &self,
+        _reveal_range: Option<TextRange>,
+    ) -> Vec<ProjectedVisibleSegment<'a>> {
+        let MarkdownLine::Table { role } = self.kind else {
+            return Vec::new();
+        };
+        if matches!(role, MarkdownTableLine::Delimiter) {
+            return Vec::new();
+        }
+
+        self.table_preview_visible_segments()
+    }
+
+    fn table_preview_visible_segments(&self) -> Vec<ProjectedVisibleSegment<'a>> {
+        let Some(table) = &self.table else {
+            return Vec::new();
+        };
+
+        let mut segments = Vec::new();
+        let mut visible_start = 0;
+        for cell in &table.cells {
+            push_visible_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                &mut visible_start,
+                cell.source_outer_range,
+                cell.content_range,
+                ProjectedSegmentKind::Text,
+            );
+        }
+
+        segments
+    }
+
+    fn table_source_visible_segments(&self) -> Vec<ProjectedSegment<'a>> {
+        let Some(table) = &self.table else {
+            return Vec::new();
+        };
+        let MarkdownLine::Table { role } = self.kind else {
+            return Vec::new();
+        };
+
+        if matches!(role, MarkdownTableLine::Delimiter) {
+            let mut segments = Vec::new();
+            push_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                self.range,
+                ProjectedSegmentKind::TableMarker,
+            );
+            return segments;
+        }
+
+        let mut segments = Vec::new();
+        let mut part_start = self.range.start;
+        for separator in &table.separators {
+            push_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                TextRange::new(part_start, separator.start),
+                ProjectedSegmentKind::Text,
+            );
+            push_segment(
+                &mut segments,
+                self.source,
+                self.range.start,
+                *separator,
+                ProjectedSegmentKind::TableMarker,
+            );
+            part_start = separator.end;
+        }
+        push_segment(
+            &mut segments,
+            self.source,
+            self.range.start,
+            TextRange::new(part_start, self.range.end),
+            ProjectedSegmentKind::Text,
+        );
 
         segments
     }
@@ -1045,6 +1171,66 @@ pub fn project_document(document: &Document) -> MarkdownProjection<'_> {
             continue;
         }
 
+        if line_index + 1 < document.line_count()
+            && let Some(header_row) = parse_table_row(source)
+            && header_row.cells.len() >= 2
+        {
+            let (delimiter_range, delimiter_source) = document_line(document, line_index + 1);
+            if let Some(delimiter_row) = parse_table_row(delimiter_source)
+                && delimiter_row.cells.len() == header_row.cells.len()
+                && is_delimiter_row(delimiter_source, &delimiter_row)
+            {
+                let mut body_rows = Vec::new();
+                let mut body_line_index = line_index + 2;
+                while body_line_index < document.line_count() {
+                    let (body_range, body_source) = document_line(document, body_line_index);
+                    let Some(body_row) = parse_table_row(body_source) else {
+                        break;
+                    };
+                    body_rows.push((body_range, body_source, body_row));
+                    body_line_index += 1;
+                }
+
+                let column_count = body_rows
+                    .iter()
+                    .map(|(_, _, row)| row.cells.len())
+                    .fold(header_row.cells.len(), usize::max);
+                let table_end = body_rows
+                    .last()
+                    .map_or(delimiter_range.end, |(range, _, _)| range.end);
+                let table_range = TextRange::new(range.start, table_end);
+                lines.push(project_table_line(
+                    range,
+                    source,
+                    MarkdownTableLine::Header,
+                    &header_row,
+                    table_range,
+                    column_count,
+                ));
+                lines.push(project_table_line(
+                    delimiter_range,
+                    delimiter_source,
+                    MarkdownTableLine::Delimiter,
+                    &delimiter_row,
+                    table_range,
+                    column_count,
+                ));
+                for (body_range, body_source, body_row) in body_rows {
+                    lines.push(project_table_line(
+                        body_range,
+                        body_source,
+                        MarkdownTableLine::Body,
+                        &body_row,
+                        table_range,
+                        column_count,
+                    ));
+                }
+
+                line_index = body_line_index;
+                continue;
+            }
+        }
+
         lines.push(project_normal_line(range, source));
         line_index += 1;
     }
@@ -1067,7 +1253,10 @@ fn project_normal_line<'a>(range: TextRange, source: &'a str) -> ProjectedLine<'
         MarkdownLine::HorizontalRule => 0,
         MarkdownLine::Blockquote => blockquote_content_start(source).unwrap_or(0),
         MarkdownLine::ListItem { .. } => list_item_content_start(source).unwrap_or(0),
-        MarkdownLine::Blank | MarkdownLine::Paragraph | MarkdownLine::CodeBlock { .. } => 0,
+        MarkdownLine::Blank
+        | MarkdownLine::Paragraph
+        | MarkdownLine::CodeBlock { .. }
+        | MarkdownLine::Table { .. } => 0,
     };
     let marker_range = match kind {
         MarkdownLine::Heading { .. } => heading_marker_range(source, range.start),
@@ -1076,7 +1265,10 @@ fn project_normal_line<'a>(range: TextRange, source: &'a str) -> ProjectedLine<'
         MarkdownLine::Blockquote | MarkdownLine::ListItem { .. } => {
             (content_start > 0).then_some(TextRange::new(range.start, range.start + content_start))
         }
-        MarkdownLine::Blank | MarkdownLine::Paragraph | MarkdownLine::CodeBlock { .. } => None,
+        MarkdownLine::Blank
+        | MarkdownLine::Paragraph
+        | MarkdownLine::CodeBlock { .. }
+        | MarkdownLine::Table { .. } => None,
     };
 
     let inline_projection = if matches!(kind, MarkdownLine::HorizontalRule) {
@@ -1093,6 +1285,7 @@ fn project_normal_line<'a>(range: TextRange, source: &'a str) -> ProjectedLine<'
         kind,
         inlines: inline_projection.inlines,
         style_ranges: inline_projection.style_ranges,
+        table: None,
     }
 }
 
@@ -1111,7 +1304,82 @@ fn project_code_block_line<'a>(
         kind: MarkdownLine::CodeBlock { role },
         inlines: Vec::new(),
         style_ranges: Vec::new(),
+        table: None,
     }
+}
+
+fn project_table_line<'a>(
+    range: TextRange,
+    source: &'a str,
+    role: MarkdownTableLine,
+    row: &MarkdownTableRow,
+    table_range: TextRange,
+    column_count: usize,
+) -> ProjectedLine<'a> {
+    let separators = row
+        .separators
+        .iter()
+        .map(|separator| TextRange::new(range.start + separator.start, range.start + separator.end))
+        .collect();
+    let cells = row
+        .cells
+        .iter()
+        .map(|cell| {
+            let source_outer_start = row
+                .separators
+                .iter()
+                .rev()
+                .find(|separator| separator.end <= cell.start)
+                .map_or(cell.start, |separator| separator.start);
+            let source_outer_end = row
+                .separators
+                .iter()
+                .find(|separator| separator.start >= cell.end)
+                .map_or(cell.end, |separator| separator.end);
+            let content_range = trimmed_table_cell_range(source, cell);
+
+            ProjectedTableCell {
+                range: TextRange::new(range.start + cell.start, range.start + cell.end),
+                content_range: TextRange::new(
+                    range.start + content_range.start,
+                    range.start + content_range.end,
+                ),
+                source_outer_range: TextRange::new(
+                    range.start + source_outer_start,
+                    range.start + source_outer_end,
+                ),
+            }
+        })
+        .collect();
+
+    ProjectedLine {
+        range,
+        marker_range: None,
+        code_block_range: None,
+        source,
+        kind: MarkdownLine::Table { role },
+        inlines: Vec::new(),
+        style_ranges: Vec::new(),
+        table: Some(ProjectedTableLine {
+            table_range,
+            column_count,
+            cells,
+            separators,
+        }),
+    }
+}
+
+fn trimmed_table_cell_range(source: &str, cell: &std::ops::Range<usize>) -> std::ops::Range<usize> {
+    let cell_source = &source[cell.clone()];
+    let trimmed = cell_source.trim();
+    if trimmed.is_empty() {
+        return cell.start..cell.start;
+    }
+
+    let leading_whitespace = cell_source.len() - cell_source.trim_start().len();
+    let trailing_whitespace = cell_source.len() - cell_source.trim_end().len();
+
+    cell.start + leading_whitespace..cell.end - trailing_whitespace
 }
 
 fn block_marker_kind(kind: MarkdownLine) -> ProjectedSegmentKind {
@@ -1120,6 +1388,7 @@ fn block_marker_kind(kind: MarkdownLine) -> ProjectedSegmentKind {
         MarkdownLine::HorizontalRule => ProjectedSegmentKind::HorizontalRuleMarker,
         MarkdownLine::Blockquote => ProjectedSegmentKind::BlockquoteMarker,
         MarkdownLine::ListItem { .. } => ProjectedSegmentKind::ListMarker,
+        MarkdownLine::Table { .. } => ProjectedSegmentKind::TableMarker,
         MarkdownLine::Blank | MarkdownLine::Paragraph | MarkdownLine::CodeBlock { .. } => {
             ProjectedSegmentKind::Text
         }
@@ -1550,6 +1819,7 @@ fn source_segment_priority(kind: ProjectedSegmentKind) -> u8 {
         | ProjectedSegmentKind::StrikethroughMarker
         | ProjectedSegmentKind::CodeMarker
         | ProjectedSegmentKind::CodeBlockFence
+        | ProjectedSegmentKind::TableMarker
         | ProjectedSegmentKind::LinkMarker => 0,
         ProjectedSegmentKind::Text
         | ProjectedSegmentKind::StrongContent
@@ -5513,5 +5783,123 @@ mod tests {
         assert_eq!(inlines.len(), 3);
         assert_eq!(inlines[1].content, "~~code~~");
         assert!(matches!(inlines[1].kind, MarkdownInline::Code { .. }));
+    }
+
+    #[test]
+    fn projects_valid_pipe_tables() {
+        let document = Document::new("| Name | Status |\n| --- | --- |\n| Tables | Planned |");
+        let projection = project_document(&document);
+        let lines = projection.lines();
+
+        assert_eq!(lines.len(), 3);
+        assert_eq!(
+            lines.iter().map(|line| line.kind).collect::<Vec<_>>(),
+            vec![
+                MarkdownLine::Table {
+                    role: MarkdownTableLine::Header,
+                },
+                MarkdownLine::Table {
+                    role: MarkdownTableLine::Delimiter,
+                },
+                MarkdownLine::Table {
+                    role: MarkdownTableLine::Body,
+                },
+            ]
+        );
+        assert_eq!(lines[0].visible_text(), "NameStatus");
+        assert_eq!(lines[1].visible_text(), "");
+        assert_eq!(lines[2].visible_text(), "TablesPlanned");
+        assert_eq!(lines[0].table_range(), lines[2].table_range());
+        assert_eq!(lines[0].table_column_count(), Some(2));
+        assert_eq!(
+            source_for_range(&document, lines[0].table_cells()[0].content_range),
+            "Name"
+        );
+    }
+
+    #[test]
+    fn keeps_table_preview_when_caret_is_inside_a_cell() {
+        let source = "| Name | Status |\n| --- | --- |\n| Tables | Planned |";
+        let document = Document::new(source);
+        let projection = project_document(&document);
+        let lines = projection.lines();
+        let caret = TextRange::caret(lines[2].range.start + 2);
+
+        assert_eq!(
+            lines[0].visible_text_revealing_source_in(Some(caret)),
+            "NameStatus"
+        );
+        assert_eq!(lines[1].visible_text_revealing_source_in(Some(caret)), "");
+        assert_eq!(
+            lines[2].visible_text_revealing_source_in(Some(caret)),
+            "TablesPlanned"
+        );
+    }
+
+    #[test]
+    fn leaves_missing_or_incomplete_delimiter_rows_as_text() {
+        for source in [
+            "Name | Status\nTables | Planned",
+            "Name | Status\n-- | ---\nTables | Planned",
+        ] {
+            let document = Document::new(source);
+            let projection = project_document(&document);
+
+            assert!(
+                projection
+                    .lines()
+                    .iter()
+                    .all(|line| !matches!(line.kind, MarkdownLine::Table { .. })),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_uneven_body_rows_in_the_table() {
+        let document =
+            Document::new("| Name | Status |\n| --- | --- |\n| Tables |\nImages | Planned | Later");
+        let projection = project_document(&document);
+        let lines = projection.lines();
+
+        assert_eq!(lines.len(), 4);
+        assert!(matches!(
+            lines[2].kind,
+            MarkdownLine::Table {
+                role: MarkdownTableLine::Body
+            }
+        ));
+        assert_eq!(lines[0].table_column_count(), Some(3));
+        assert_eq!(lines[2].table_column_count(), Some(3));
+        assert_eq!(lines[3].table_column_count(), Some(3));
+        assert!(matches!(
+            lines[3].kind,
+            MarkdownLine::Table {
+                role: MarkdownTableLine::Body
+            }
+        ));
+    }
+
+    #[test]
+    fn escaped_pipes_do_not_create_extra_table_cells() {
+        let document = Document::new(
+            r"| Name \| Alias | Status |
+| --- | --- |
+| Hanji | Ready |",
+        );
+        let projection = project_document(&document);
+        let table = projection.lines()[0].table.as_ref().unwrap();
+
+        assert_eq!(table.separators.len(), 3);
+        assert!(matches!(
+            projection.lines()[0].kind,
+            MarkdownLine::Table {
+                role: MarkdownTableLine::Header
+            }
+        ));
+    }
+
+    fn source_for_range(document: &Document, range: TextRange) -> &str {
+        &document.text()[range.start..range.end]
     }
 }

@@ -1,10 +1,10 @@
 use std::ops::Range;
 
 use gpui::{Bounds, Pixels};
-use hanji_core::{TextEdit, TextRange};
+use hanji_core::{Document, TextEdit, TextRange};
 use hanji_markdown::{
     MarkdownListMarker, MarkdownTaskState, OrderedListDelimiter, blockquote_content_start,
-    list_item,
+    list_item, project_document,
 };
 
 const DRAG_SELECTION_THRESHOLD: f64 = 2.0;
@@ -30,6 +30,38 @@ pub(crate) fn selected_source_text(text: &str, range: &Range<usize>) -> Option<S
     }
 
     text.get(range.clone()).map(ToString::to_string)
+}
+
+pub(crate) fn selected_source_text_for_copy(
+    document: &Document,
+    range: &Range<usize>,
+) -> Option<String> {
+    if range.start == range.end {
+        return None;
+    }
+
+    let projection = project_document(document);
+    let mut expanded = range.clone();
+
+    if let Some(cell) = projection
+        .lines()
+        .iter()
+        .flat_map(|line| line.table_cells())
+        .find(|cell| cell.content_range.start == range.start && range.end >= cell.content_range.end)
+    {
+        expanded.start = cell.source_outer_range.start;
+    }
+    if let Some(cell) = projection
+        .lines()
+        .iter()
+        .flat_map(|line| line.table_cells())
+        .rev()
+        .find(|cell| cell.content_range.end == range.end && range.start <= cell.content_range.start)
+    {
+        expanded.end = cell.source_outer_range.end;
+    }
+
+    document.text().get(expanded).map(ToString::to_string)
 }
 
 pub(crate) fn clipboard_paste_edit(
@@ -696,6 +728,48 @@ mod tests {
         assert_eq!(
             selected_source_text("A **bold** word", &(2..10)),
             Some("**bold**".to_string())
+        );
+    }
+
+    #[test]
+    fn selected_table_cells_copy_their_markdown_source() {
+        let source = "| Name | Status |\n| --- | --- |\n| Hanji | Ready |";
+        let document = Document::new(source);
+        let projection = project_document(&document);
+        let header = &projection.lines()[0];
+        let cells = header.table_cells();
+        let range = cells[0].content_range.start..cells[1].content_range.end;
+
+        assert_eq!(
+            selected_source_text_for_copy(&document, &range),
+            Some("| Name | Status |".to_string())
+        );
+    }
+
+    #[test]
+    fn selected_whole_table_copies_complete_markdown_source() {
+        let source = "| Name | Status |\n| --- | --- |\n| Hanji | Ready |";
+        let document = Document::new(source);
+        let projection = project_document(&document);
+        let first_cell = projection.lines()[0].table_cells()[0];
+        let last_cell = projection.lines()[2].table_cells()[1];
+        let range = first_cell.content_range.start..last_cell.content_range.end;
+
+        assert_eq!(
+            selected_source_text_for_copy(&document, &range),
+            Some(source.to_string())
+        );
+    }
+
+    #[test]
+    fn partially_selected_table_cell_copies_only_selected_source() {
+        let document = Document::new("| Hanji | Ready |\n| --- | --- |");
+        let cell = project_document(&document).lines()[0].table_cells()[0];
+        let range = cell.content_range.start + 1..cell.content_range.end;
+
+        assert_eq!(
+            selected_source_text_for_copy(&document, &range),
+            Some("anji".to_string())
         );
     }
 
