@@ -16,5 +16,5 @@ pub use line::{
 pub use projection::{
     MarkdownInline, MarkdownLinkRanges, MarkdownMarkerRanges, MarkdownProjection, ProjectedInline,
     ProjectedInlineStyle, ProjectedLine, ProjectedSegment, ProjectedSegmentKind,
-    ProjectedVisibleSegment, VisibleOffsetAffinity, project_document,
+    ProjectedTableCell, ProjectedVisibleSegment, VisibleOffsetAffinity, project_document,
 };

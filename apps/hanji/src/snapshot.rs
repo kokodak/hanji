@@ -1,4 +1,4 @@
-use gpui::{Bounds, Pixels, Point, WrappedLine, point, px};
+use gpui::{App, Bounds, Pixels, Point, TextAlign, Window, WrappedLine, point, px};
 use hanji_core::TextRange;
 use hanji_markdown::{ProjectedSegmentKind, ProjectedVisibleSegment};
 
@@ -11,6 +11,25 @@ pub(crate) struct LineSnapshot {
     pub(crate) layout: WrappedLine,
     pub(crate) line_height: Pixels,
     pub(crate) bounds: Bounds<Pixels>,
+    table_cells: Option<Vec<TableCellSnapshot>>,
+}
+
+pub(crate) struct TableCellLayout<'a> {
+    pub(crate) source_range: TextRange,
+    pub(crate) visible_segments: Vec<ProjectedVisibleSegment<'a>>,
+    pub(crate) layout: WrappedLine,
+    pub(crate) bounds: Bounds<Pixels>,
+    pub(crate) hit_bounds: Bounds<Pixels>,
+}
+
+#[derive(Clone)]
+struct TableCellSnapshot {
+    source_range: TextRange,
+    visible_len: usize,
+    segments: Vec<LineSegmentSnapshot>,
+    layout: WrappedLine,
+    bounds: Bounds<Pixels>,
+    hit_bounds: Bounds<Pixels>,
 }
 
 impl LineSnapshot {
@@ -31,7 +50,186 @@ impl LineSnapshot {
             layout,
             line_height,
             bounds,
+            table_cells: None,
         }
+    }
+
+    pub(crate) fn new_table(
+        range: TextRange,
+        layout: WrappedLine,
+        line_height: Pixels,
+        bounds: Bounds<Pixels>,
+        cells: Vec<TableCellLayout<'_>>,
+    ) -> Self {
+        Self {
+            range,
+            marker_range: None,
+            visible_len: 0,
+            segments: Vec::new(),
+            layout,
+            line_height,
+            bounds,
+            table_cells: Some(
+                cells
+                    .into_iter()
+                    .map(|cell| {
+                        let visible_len = cell
+                            .visible_segments
+                            .last()
+                            .map_or(0, |segment| segment.visible_range.end);
+                        TableCellSnapshot {
+                            source_range: cell.source_range,
+                            visible_len,
+                            segments: cell.visible_segments.into_iter().map(Into::into).collect(),
+                            layout: cell.layout,
+                            bounds: cell.bounds,
+                            hit_bounds: cell.hit_bounds,
+                        }
+                    })
+                    .collect(),
+            ),
+        }
+    }
+
+    pub(crate) fn paint(&self, window: &mut Window, cx: &mut App) {
+        if let Some(cells) = &self.table_cells {
+            for cell in cells {
+                cell.layout
+                    .paint(
+                        cell.bounds.origin,
+                        self.line_height,
+                        TextAlign::Left,
+                        Some(cell.bounds),
+                        window,
+                        cx,
+                    )
+                    .ok();
+            }
+            return;
+        }
+
+        self.layout
+            .paint(
+                self.bounds.origin,
+                self.line_height,
+                TextAlign::Left,
+                Some(self.bounds),
+                window,
+                cx,
+            )
+            .ok();
+    }
+
+    pub(crate) fn source_caret_position(&self, source_offset: usize) -> Option<Point<Pixels>> {
+        let Some(cells) = &self.table_cells else {
+            let visible_offset = self.source_to_visible_offset(source_offset);
+            return self.wrapped_caret_position(visible_offset);
+        };
+        let cell = table_cell_for_source_offset(cells, source_offset)?;
+        let visible_offset = source_to_visible_offset_in_segments(
+            &cell.segments,
+            cell.source_range,
+            cell.visible_len,
+            source_offset,
+        );
+        let position = cell
+            .layout
+            .position_for_index(visible_offset, self.line_height)?;
+
+        Some(point(
+            cell.bounds.left() - self.bounds.left() + position.x,
+            cell.bounds.top() - self.bounds.top() + position.y,
+        ))
+    }
+
+    pub(crate) fn source_offset_for_local_position(&self, position: Point<Pixels>) -> usize {
+        let Some(cells) = &self.table_cells else {
+            let visible_offset = self.visible_offset_for_local_position(position);
+            return self.visible_to_source_caret_offset(visible_offset);
+        };
+        let Some(cell) = table_cell_for_local_x(cells, self.bounds.left() + position.x) else {
+            return self.range.start;
+        };
+        let local_position = point(
+            position.x + self.bounds.left() - cell.bounds.left(),
+            position.y + self.bounds.top() - cell.bounds.top(),
+        );
+        let visible_offset = cell
+            .layout
+            .closest_index_for_position(local_position, self.line_height)
+            .unwrap_or_else(|offset| offset)
+            .min(cell.visible_len);
+
+        visible_segments_to_source_caret_offset(
+            &cell.segments,
+            cell.source_range,
+            cell.visible_len,
+            visible_offset,
+        )
+    }
+
+    pub(crate) fn source_range_bounds(
+        &self,
+        range: TextRange,
+        min_width: Pixels,
+    ) -> Vec<Bounds<Pixels>> {
+        let Some(cells) = &self.table_cells else {
+            let visible_start = self.source_to_visible_offset(range.start);
+            let visible_end = self.source_to_visible_offset(range.end);
+            return self
+                .wrapped_range_bounds(TextRange::new(visible_start, visible_end), min_width);
+        };
+
+        cells
+            .iter()
+            .filter_map(|cell| {
+                let start = range.start.max(cell.source_range.start);
+                let end = range.end.min(cell.source_range.end);
+                if start >= end {
+                    return None;
+                }
+
+                let visible_start = source_to_visible_offset_in_segments(
+                    &cell.segments,
+                    cell.source_range,
+                    cell.visible_len,
+                    start,
+                );
+                let visible_end = source_to_visible_offset_in_segments(
+                    &cell.segments,
+                    cell.source_range,
+                    cell.visible_len,
+                    end,
+                );
+                let start_x = cell.layout.unwrapped_layout.x_for_index(visible_start);
+                let end_x = cell.layout.unwrapped_layout.x_for_index(visible_end);
+                let right =
+                    (cell.bounds.left() + end_x).max(cell.bounds.left() + start_x + min_width);
+
+                Some(Bounds::from_corners(
+                    point(cell.bounds.left() + start_x, cell.bounds.top()),
+                    point(right, cell.bounds.bottom()),
+                ))
+            })
+            .collect()
+    }
+
+    pub(crate) fn source_visual_row(&self, source_offset: usize) -> Option<usize> {
+        if let Some(cells) = &self.table_cells {
+            return (!cells.is_empty()).then_some(0);
+        }
+
+        let visible_offset = self.source_to_visible_offset(source_offset);
+        self.wrapped_row_for_visible_offset(visible_offset)
+    }
+
+    pub(crate) fn source_offset_for_visual_row_x(&self, row: usize, x: Pixels) -> usize {
+        if self.table_cells.is_some() {
+            return self.source_offset_for_local_position(point(x, self.line_height / 2.0));
+        }
+
+        let visible_offset = self.visible_offset_for_wrapped_row_x(row, x);
+        self.visible_to_source_caret_offset(visible_offset)
     }
 
     pub(crate) fn source_to_visible_offset(&self, source_offset: usize) -> usize {
@@ -53,6 +251,9 @@ impl LineSnapshot {
     }
 
     pub(crate) fn wrapped_row_count(&self) -> usize {
+        if let Some(cells) = &self.table_cells {
+            return usize::from(!cells.is_empty());
+        }
         self.layout.wrap_boundaries().len() + 1
     }
 
@@ -289,6 +490,31 @@ fn visible_segments_to_source_caret_offset(
     }
 
     line_range.end
+}
+
+fn table_cell_for_source_offset(
+    cells: &[TableCellSnapshot],
+    source_offset: usize,
+) -> Option<&TableCellSnapshot> {
+    cells
+        .iter()
+        .find(|cell| {
+            source_offset >= cell.source_range.start && source_offset <= cell.source_range.end
+        })
+        .or_else(|| {
+            cells
+                .iter()
+                .find(|cell| source_offset < cell.source_range.start)
+        })
+        .or_else(|| cells.last())
+}
+
+fn table_cell_for_local_x(cells: &[TableCellSnapshot], x: Pixels) -> Option<&TableCellSnapshot> {
+    cells
+        .iter()
+        .find(|cell| x >= cell.hit_bounds.left() && x <= cell.hit_bounds.right())
+        .or_else(|| cells.iter().find(|cell| x < cell.hit_bounds.left()))
+        .or_else(|| cells.last())
 }
 
 pub(crate) fn line_for_offset(lines: &[LineSnapshot], offset: usize) -> Option<&LineSnapshot> {
