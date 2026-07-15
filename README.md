@@ -31,6 +31,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for issue, pull request, and development 
 
 - [docs/](docs/) contains product and engineering design notes.
 - [docs/design/](docs/design/) contains core editor concepts and design vocabulary.
+- [site/](site/) contains the static project website deployed with GitHub Pages.
 - [crates/hanji-core](crates/hanji-core/) owns text editing primitives.
 - [crates/hanji-markdown](crates/hanji-markdown/) owns Markdown projection and commands.
 - [crates/hanji-storage](crates/hanji-storage/) owns local file and document session behavior.

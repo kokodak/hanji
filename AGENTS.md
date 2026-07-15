@@ -14,6 +14,7 @@ Hanji is a light, local-first Markdown editor. It should feel simple enough for 
 
 - [docs/](docs/) contains product and engineering design notes.
 - [docs/design/](docs/design/) contains core editor concepts and design vocabulary.
+- [site/](site/) contains the static project website deployed with GitHub Pages.
 - [crates/hanji-core](crates/hanji-core/) owns text editing primitives: text buffers, selections, transactions, undo, and core commands.
 - [crates/hanji-markdown](crates/hanji-markdown/) owns Markdown parsing, source mapping, projection, and formatting commands.
 - [crates/hanji-storage](crates/hanji-storage/) owns local file and document session behavior.
@@ -32,6 +33,7 @@ Hanji is a light, local-first Markdown editor. It should feel simple enough for 
 
 - Put design documents under `docs/`.
 - Put core editor concepts under `docs/design/`.
+- Keep the public project website under `site/`.
 - Keep the Rust and GPUI architecture direction in `docs/architecture.md` until a dedicated ADR structure exists.
 - Keep GPUI app code in `apps/hanji/`.
 - Add or update focused tests alongside behavior changes when practical.

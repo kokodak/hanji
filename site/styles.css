@@ -1,0 +1,106 @@
+:root {
+  color-scheme: light;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  color: #25231f;
+  background: #fffefb;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #fffefb;
+}
+
+::selection {
+  background: rgb(35 134 54 / 18%);
+}
+
+.welcome {
+  display: flex;
+  min-height: 100svh;
+  justify-content: center;
+  align-items: flex-start;
+  padding: clamp(7rem, 20svh, 12rem) 1.5rem 3rem;
+}
+
+.hero {
+  width: min(100%, 44rem);
+  text-align: center;
+}
+
+.title {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: clamp(0.55rem, 1.5vw, 0.9rem);
+  margin: 0;
+  font-size: clamp(3.25rem, 10vw, 5.5rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.015em;
+}
+
+.marker {
+  color: #238636;
+}
+
+.tagline {
+  margin: 2.25rem 0 0;
+  font-size: clamp(1rem, 2.4vw, 1.125rem);
+  line-height: 1.5;
+}
+
+.description {
+  margin: 0.55rem 0 0;
+  color: #5f6267;
+  font-size: clamp(0.875rem, 2vw, 0.95rem);
+  line-height: 1.6;
+}
+
+.actions {
+  display: flex;
+  justify-content: center;
+  gap: 1.5rem;
+  margin-top: 2rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.actions a {
+  color: #1d7430;
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.24em;
+}
+
+.actions a:hover {
+  color: #145522;
+}
+
+.actions a:focus-visible {
+  border-radius: 2px;
+  outline: 2px solid #238636;
+  outline-offset: 4px;
+}
+
+@media (max-width: 30rem) {
+  .welcome {
+    padding-top: clamp(6rem, 18svh, 8rem);
+  }
+
+  .actions {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+}
