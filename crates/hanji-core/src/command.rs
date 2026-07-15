@@ -4,6 +4,8 @@ use crate::{Document, EditError, Selection, TextRange, Transaction};
 pub enum EditorCommand {
     InsertText(String),
     DeleteBackward,
+    DeleteWordBackward,
+    DeleteLineBackward,
     DeleteForward,
 }
 
@@ -30,6 +32,8 @@ impl Document {
         match command {
             EditorCommand::InsertText(text) => self.insert_text(text),
             EditorCommand::DeleteBackward => self.delete_backward(),
+            EditorCommand::DeleteWordBackward => self.delete_word_backward(),
+            EditorCommand::DeleteLineBackward => self.delete_line_backward(),
             EditorCommand::DeleteForward => self.delete_forward(),
         }
     }
@@ -49,21 +53,58 @@ impl Document {
         let range = single_selection_range(self)?;
 
         if !range.is_empty() {
-            self.apply(
-                Transaction::replace(range, "").with_selection_after(Selection::caret(range.start)),
-            )?;
-            return Ok(true);
+            return self.delete_range(range);
         }
 
         let Some(previous_offset) = self.previous_grapheme_offset(range.start)? else {
             return Ok(false);
         };
 
-        let delete_range = TextRange::new(previous_offset, range.start);
-        self.apply(
-            Transaction::replace(delete_range, "")
-                .with_selection_after(Selection::caret(previous_offset)),
-        )?;
+        self.delete_range(TextRange::new(previous_offset, range.start))
+    }
+
+    fn delete_word_backward(&mut self) -> Result<bool, CommandError> {
+        let range = single_selection_range(self)?;
+
+        if !range.is_empty() {
+            return self.delete_range(range);
+        }
+
+        let line_index = self.line_index_at_offset(range.start)?;
+        let line_start = self
+            .line_range(line_index)
+            .ok_or(EditError::InvalidRange)?
+            .start;
+        let previous_offset = self
+            .previous_word_offset(range.start)?
+            .map_or(line_start, |offset| offset.max(line_start));
+
+        self.delete_range(TextRange::new(previous_offset, range.start))
+    }
+
+    fn delete_line_backward(&mut self) -> Result<bool, CommandError> {
+        let range = single_selection_range(self)?;
+
+        if !range.is_empty() {
+            return self.delete_range(range);
+        }
+
+        let line_index = self.line_index_at_offset(range.start)?;
+        let line_start = self
+            .line_range(line_index)
+            .ok_or(EditError::InvalidRange)?
+            .start;
+
+        self.delete_range(TextRange::new(line_start, range.start))
+    }
+
+    fn delete_range(&mut self, range: TextRange) -> Result<bool, CommandError> {
+        if range.is_empty() {
+            return Ok(false);
+        }
+
+        let caret = range.start;
+        self.apply(Transaction::replace(range, "").with_selection_after(Selection::caret(caret)))?;
 
         Ok(true)
     }
@@ -72,23 +113,14 @@ impl Document {
         let range = single_selection_range(self)?;
 
         if !range.is_empty() {
-            self.apply(
-                Transaction::replace(range, "").with_selection_after(Selection::caret(range.start)),
-            )?;
-            return Ok(true);
+            return self.delete_range(range);
         }
 
         let Some(next_offset) = self.next_grapheme_offset(range.start)? else {
             return Ok(false);
         };
 
-        let delete_range = TextRange::new(range.start, next_offset);
-        self.apply(
-            Transaction::replace(delete_range, "")
-                .with_selection_after(Selection::caret(range.start)),
-        )?;
-
-        Ok(true)
+        self.delete_range(TextRange::new(range.start, next_offset))
     }
 }
 
@@ -160,6 +192,102 @@ mod tests {
 
         assert_eq!(document.text(), "A");
         assert_eq!(document.selection().primary(), TextRange::caret("A".len()));
+    }
+
+    #[test]
+    fn delete_word_backward_uses_existing_word_boundary() {
+        let mut document = Document::new("Capture quick note");
+        document
+            .set_selection(Selection::caret("Capture quick note".len()))
+            .unwrap();
+
+        document.execute(EditorCommand::DeleteWordBackward).unwrap();
+
+        assert_eq!(document.text(), "Capture quick ");
+        assert_eq!(
+            document.selection().primary(),
+            TextRange::caret("Capture quick ".len())
+        );
+    }
+
+    #[test]
+    fn delete_word_backward_stays_within_current_line() {
+        let mut document = Document::new("First line\n  Second line");
+        let caret = "First line\n  ".len();
+        document.set_selection(Selection::caret(caret)).unwrap();
+
+        document.execute(EditorCommand::DeleteWordBackward).unwrap();
+
+        assert_eq!(document.text(), "First line\nSecond line");
+        assert_eq!(
+            document.selection().primary(),
+            TextRange::caret("First line\n".len())
+        );
+    }
+
+    #[test]
+    fn delete_word_backward_preserves_grapheme_boundaries() {
+        let mut document = Document::new("A🇰🇷B");
+        document
+            .set_selection(Selection::caret("A🇰🇷B".len()))
+            .unwrap();
+
+        document.execute(EditorCommand::DeleteWordBackward).unwrap();
+
+        assert_eq!(document.text(), "A🇰🇷");
+        assert_eq!(
+            document.selection().primary(),
+            TextRange::caret("A🇰🇷".len())
+        );
+    }
+
+    #[test]
+    fn delete_line_backward_removes_current_line_prefix() {
+        let mut document = Document::new("First line\nSecond line");
+        let caret = "First line\nSecond ".len();
+        document.set_selection(Selection::caret(caret)).unwrap();
+
+        document.execute(EditorCommand::DeleteLineBackward).unwrap();
+
+        assert_eq!(document.text(), "First line\nline");
+        assert_eq!(
+            document.selection().primary(),
+            TextRange::caret("First line\n".len())
+        );
+    }
+
+    #[test]
+    fn backward_unit_deletion_noops_at_line_start() {
+        for command in [
+            EditorCommand::DeleteWordBackward,
+            EditorCommand::DeleteLineBackward,
+        ] {
+            let mut document = Document::new("First line\nSecond line");
+            let caret = "First line\n".len();
+            document.set_selection(Selection::caret(caret)).unwrap();
+
+            assert!(!document.execute(command).unwrap());
+            assert_eq!(document.text(), "First line\nSecond line");
+            assert_eq!(document.selection().primary(), TextRange::caret(caret));
+        }
+    }
+
+    #[test]
+    fn backward_unit_deletion_removes_selection() {
+        for command in [
+            EditorCommand::DeleteWordBackward,
+            EditorCommand::DeleteLineBackward,
+        ] {
+            let mut document = Document::new("Hanji notes");
+            document
+                .set_selection(Selection::single(TextRange::new(6, 11)))
+                .unwrap();
+
+            document.execute(command).unwrap();
+
+            assert_eq!(document.text(), "Hanji ");
+            assert_eq!(document.selection().primary(), TextRange::caret(6));
+        }
     }
 
     #[test]
