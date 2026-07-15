@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog], and this project follows [Semantic Ve
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-15
+
+### Added
+
+- Added source-backed Markdown table preview with wrapped cell editing, rectangular cell selection, and Markdown source copying.
+- Added `Option+Backspace` and `Command+Backspace` shortcuts for word and line-prefix deletion.
+- Added keyboard shortcut reference documentation.
+- Added GitHub Actions CI for app and workspace checks.
+
+### Changed
+
+- Updated the README and contributor guidance, including AI-assisted contribution disclosure.
+
+### Fixed
+
+- Fixed long soft-wrapped documents so their final rendered rows remain within the reachable scroll extent.
+
 ## [0.1.1] - 2026-07-04
 
 ### Added
@@ -35,7 +52,8 @@ The format is based on [Keep a Changelog], and this project follows [Semantic Ve
 - Added core crates for text editing, Markdown projection, local storage, and future plugin API boundaries.
 - Added macOS DMG packaging and GitHub Release automation for preview distribution.
 
-[Unreleased]: https://github.com/kokodak/hanji/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/kokodak/hanji/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/kokodak/hanji/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/kokodak/hanji/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/kokodak/hanji/releases/tag/v0.1.0
 [Keep a Changelog]: https://keepachangelog.com/en/2.0.0/
