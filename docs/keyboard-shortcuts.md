@@ -29,6 +29,8 @@ Shortcuts currently wired up in [`apps/hanji/src/main.rs`](../apps/hanji/src/mai
 | Paste | ⌘ V |
 | Undo | ⌘ Z |
 | Redo | ⌘ Shift Z |
+| Delete previous word | ⌥ Backspace |
+| Delete to start of line | ⌘ Backspace |
 | Indent list item | Tab |
 | Outdent list item | Shift Tab |
 

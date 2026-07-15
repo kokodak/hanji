@@ -272,6 +272,19 @@ fn table_line_break_caret_offset(text: &str, offset: usize, direction: isize) ->
     })
 }
 
+fn table_cell_line_start_for_offset(text: &str, cell: ProjectedTableCell, offset: usize) -> usize {
+    let cell_start = cell.content_range.start;
+    let Some(prefix) = text.get(cell_start..offset) else {
+        return cell_start;
+    };
+
+    prefix
+        .rfind(TABLE_LINE_BREAK_SOURCE)
+        .map_or(cell_start, |relative_offset| {
+            cell_start + relative_offset + TABLE_LINE_BREAK_SOURCE.len()
+        })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TableCellSelection {
     table_range: TextRange,
@@ -411,6 +424,8 @@ fn reopen_or_focus_editor(cx: &mut App) {
 fn configure_app_actions(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("backspace", Backspace, None),
+        KeyBinding::new("alt-backspace", DeleteWordBackward, None),
+        KeyBinding::new("cmd-backspace", DeleteLineBackward, None),
         KeyBinding::new("delete", Delete, None),
         KeyBinding::new("left", Left, None),
         KeyBinding::new("right", Right, None),
@@ -468,6 +483,8 @@ actions!(
     hanji,
     [
         Backspace,
+        DeleteWordBackward,
+        DeleteLineBackward,
         Delete,
         Left,
         Right,
@@ -614,6 +631,79 @@ impl Hanji {
         let changed = self
             .session
             .execute(EditorCommand::DeleteBackward)
+            .unwrap_or(false);
+
+        if changed {
+            self.document_changed(window, cx);
+        }
+    }
+
+    fn delete_word_backward(
+        &mut self,
+        _: &DeleteWordBackward,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.marked_range = None;
+        self.clear_selection_tracking();
+        let range = self.selected_range();
+        let table_boundary = if range.is_empty() {
+            let document = self.session.document();
+            self.table_cell_at_offset(range.start).map(|cell| {
+                document
+                    .previous_word_offset(range.start)
+                    .ok()
+                    .flatten()
+                    .map_or(cell.content_range.start, |offset| {
+                        offset.max(cell.content_range.start)
+                    })
+            })
+        } else {
+            None
+        };
+        if let Some(boundary) = table_boundary {
+            if boundary < range.start {
+                self.replace_range(boundary..range.start, "", boundary..boundary, window, cx);
+            }
+            return;
+        }
+
+        let changed = self
+            .session
+            .execute(EditorCommand::DeleteWordBackward)
+            .unwrap_or(false);
+
+        if changed {
+            self.document_changed(window, cx);
+        }
+    }
+
+    fn delete_line_backward(
+        &mut self,
+        _: &DeleteLineBackward,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.marked_range = None;
+        self.clear_selection_tracking();
+        let range = self.selected_range();
+        let table_boundary = if range.is_empty() {
+            let document = self.session.document();
+            self.table_cell_at_offset(range.start)
+                .map(|cell| table_cell_line_start_for_offset(document.text(), cell, range.start))
+        } else {
+            None
+        };
+        if let Some(boundary) = table_boundary {
+            if boundary < range.start {
+                self.replace_range(boundary..range.start, "", boundary..boundary, window, cx);
+            }
+            return;
+        }
+
+        let changed = self
+            .session
+            .execute(EditorCommand::DeleteLineBackward)
             .unwrap_or(false);
 
         if changed {
@@ -2821,6 +2911,8 @@ impl Render for Hanji {
             .track_focus(&self.focus_handle(cx))
             .key_context("HanjiEditor")
             .on_action(cx.listener(Self::backspace))
+            .on_action(cx.listener(Self::delete_word_backward))
+            .on_action(cx.listener(Self::delete_line_backward))
             .on_action(cx.listener(Self::delete))
             .on_action(cx.listener(Self::left))
             .on_action(cx.listener(Self::right))
@@ -3138,6 +3230,24 @@ mod tests {
                 String::new(),
                 before_break..before_break,
             ))
+        );
+    }
+
+    #[test]
+    fn table_line_deletion_stays_within_current_visual_cell_line() {
+        let source = "| Hanji<br>Editor | Ready |\n| --- | --- |";
+        let document = hanji_core::Document::new(source);
+        let projection = project_document(&document);
+        let cell = projection.lines()[0].table_cells()[0];
+        let caret = source.find("Editor").unwrap() + "Editor".len();
+
+        assert_eq!(
+            table_cell_line_start_for_offset(source, cell, caret),
+            source.find("Editor").unwrap()
+        );
+        assert_eq!(
+            table_cell_line_start_for_offset(source, cell, cell.content_range.start + 2),
+            cell.content_range.start
         );
     }
 
