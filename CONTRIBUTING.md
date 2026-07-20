@@ -63,6 +63,7 @@ Run the main checks:
 
 ```sh
 make check-app
+make check-docs
 cargo test --workspace --exclude hanji
 cargo test -p hanji
 ```
@@ -88,7 +89,8 @@ Keep core editor logic independent from GPUI. Keep Markdown files as the source 
 - Prefer small, explicit modules over broad abstractions.
 - Keep UI copy calm, brief, and useful.
 - Add tests alongside behavior changes when practical.
-- Put design notes under `docs/`, and core editor concepts under `docs/design/`.
+- Keep current ownership in `docs/architecture/`, durable semantics in `docs/design/`, exact behavior in `docs/reference/`, and proposals in `docs/plans/`.
+- Follow the folder contracts, page status values, and review checklist in [`docs/documentation-guide.md`](docs/documentation-guide.md).
 
 ## Review
 

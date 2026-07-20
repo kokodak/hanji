@@ -14,6 +14,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Check documentation
+        run: make check-docs
+
   checks:
     name: Rust checks
     runs-on: macos-15

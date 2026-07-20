@@ -12,8 +12,13 @@ Hanji is a light, local-first Markdown editor. It should feel simple enough for 
 
 ## Project Structure
 
-- [docs/](docs/) contains product and engineering design notes.
-- [docs/design/](docs/design/) contains core editor concepts and design vocabulary.
+- [docs/](docs/) is the documentation index and taxonomy.
+- [docs/architecture/](docs/architecture/) describes current component ownership and runtime flows.
+- [docs/design/](docs/design/) defines durable editor concepts and behavior.
+- [docs/reference/](docs/reference/) describes current APIs and supported behavior.
+- [docs/development/](docs/development/) contains contributor and release workflows.
+- [docs/plans/](docs/plans/) contains proposed or incomplete work.
+- [docs/decisions/](docs/decisions/) records durable architectural decisions and rationale.
 - [site/](site/) contains the static project website deployed with GitHub Pages.
 - [crates/hanji-core](crates/hanji-core/) owns text editing primitives: text buffers, selections, transactions, undo, and core commands.
 - [crates/hanji-markdown](crates/hanji-markdown/) owns Markdown parsing, source mapping, projection, and syntax-dependent editing policy.
@@ -32,10 +37,13 @@ Hanji is a light, local-first Markdown editor. It should feel simple enough for 
 
 ## Repository Conventions
 
-- Put design documents under `docs/`.
-- Put core editor concepts under `docs/design/`.
+- Keep the documentation taxonomy and navigation in `docs/README.md`.
+- Follow the documentation contract and status rules in `docs/documentation-guide.md`.
+- Put current ownership and dependency direction under `docs/architecture/`.
+- Put durable document and editing semantics under `docs/design/`.
+- Put exact current contracts under `docs/reference/` and future work under `docs/plans/`.
+- Record major accepted tradeoffs under `docs/decisions/`.
 - Keep the public project website under `site/`.
-- Keep the Rust and GPUI architecture direction in `docs/architecture.md` until a dedicated ADR structure exists.
 - Keep GPUI app code in `apps/hanji/`.
 - Add or update focused tests alongside behavior changes when practical.
 - Start commit messages with an imperative verb and make the scope broad enough to describe the full change.
@@ -57,6 +65,7 @@ Hanji is a light, local-first Markdown editor. It should feel simple enough for 
 ```sh
 make app
 make check-app
+make check-docs
 make test
 cargo test -p hanji
 ```

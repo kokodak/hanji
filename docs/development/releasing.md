@@ -1,5 +1,7 @@
 # Releasing Hanji
 
+Status: Current
+
 Hanji releases are distributed through GitHub Releases. The release source is an annotated Git tag, the release notes come from `CHANGELOG.md`, and the macOS download artifact is a DMG built by GitHub Actions.
 
 ## Versioning

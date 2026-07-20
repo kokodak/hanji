@@ -1,5 +1,7 @@
 # Editor Core
 
+Status: Current
+
 The editor core owns text editing behavior independent of the UI framework.
 
 GPUI should handle windows, input delivery, rendering, and platform integration. The core should handle document state, edits, selections, commands, and undo history.
@@ -12,7 +14,7 @@ GPUI should handle windows, input delivery, rendering, and platform integration.
 - Maintain undo and redo history.
 - Run editor commands.
 - Keep editing ranges and caret movement on user-visible text boundaries.
-- Expose document snapshots to the UI.
+- Expose source and navigation queries to higher layers.
 
 ## Non-Responsibilities
 
@@ -40,7 +42,7 @@ The source text remains UTF-8 Markdown, and `TextRange` continues to store byte 
 
 The core owns this rule because every UI surface should agree on what a user-visible character is. A flag emoji such as `🇰🇷`, a combined emoji, or a character plus combining marks should move, select, and delete as one visible unit.
 
-Core APIs should expose previous, next, and nearest grapheme boundary helpers for UI adapters. Platform input APIs may report UTF-16 offsets or hit-tested byte indexes that land inside a grapheme cluster; adapters should snap those positions through the core before setting selections or applying transactions.
+Core APIs should expose previous, next, and nearest grapheme boundary helpers for UI adapters. Platform input APIs may report UTF-16 offsets or hit-tested byte indexes that land inside a grapheme cluster; adapters should convert and snap those positions through the core before calling the editor facade. See [Coordinate Systems](coordinate-systems.md).
 
 Core should also expose word-boundary movement for accelerated keyboard navigation. Word movement must still return grapheme boundaries, skip punctuation and Markdown marker characters around words, and avoid splitting emoji or combined Unicode clusters.
 
@@ -62,18 +64,14 @@ Undo and redo belong to the document state. The first implementation stores whol
 
 ### Command
 
-A command is a named editing operation such as insert text, toggle emphasis, create heading, or split list item.
+A core command is a named syntax-agnostic editing operation such as inserting or deleting plain text.
 
 Commands should operate on core state and return an outcome the UI can render.
 
-The current core command layer covers plain text insertion plus backward and forward deletion. Deletion commands operate on grapheme clusters, not Unicode scalar values. Markdown-specific commands belong in `hanji-markdown`, where they can build core transactions without making the core depend on Markdown syntax.
-
-### Projection
-
-A projection is a visual interpretation of the Markdown source. WYSIWYG editing changes the projection, not the source of truth.
+The current core command layer covers plain text insertion and deletion primitives. Deletion commands operate on grapheme clusters, not Unicode scalar values. Markdown-specific commands belong in `hanji-markdown`, where they can build core transactions without making the core depend on Markdown syntax. Platform-facing commands belong to `hanji-editor`, which prevents adapters from bypassing policy.
 
 ## Boundary Rule
 
-No GPUI types should enter the editor core. If the boundary feels awkward, define a small Hanji-owned type instead.
+No Markdown, storage, GPUI, DOM, or WebAssembly binding types should enter the editor core. If the boundary feels awkward, define a small Hanji-owned type in the narrowest owning layer.
 
 Byte offsets from UI adapters should be treated as untrusted until the core validates or snaps them to a grapheme boundary.

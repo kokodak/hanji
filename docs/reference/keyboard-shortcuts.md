@@ -1,6 +1,8 @@
 # Keyboard Shortcuts
 
-Shortcuts currently wired up in [`apps/hanji/src/main.rs`](../apps/hanji/src/main.rs).
+Status: Current
+
+Shortcuts currently wired up in [`apps/hanji/src/main.rs`](../../apps/hanji/src/main.rs).
 
 ## Document
 

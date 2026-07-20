@@ -1,4 +1,4 @@
-.PHONY: help app check-app build-app package-macos test metal
+.PHONY: help app check-app check-docs build-app package-macos test metal
 
 METAL_TOOLCHAIN ?=
 FILE ?=
@@ -11,6 +11,7 @@ help:
 	@printf "  make app               Run the Rust GPUI app\n"
 	@printf "  make app FILE=note.md  Run the Rust GPUI app with a Markdown file\n"
 	@printf "  make check-app         Check the Rust GPUI app\n"
+	@printf "  make check-docs        Validate documentation structure and links\n"
 	@printf "  make build-app         Build the Rust GPUI app\n"
 	@printf "  make package-macos     Build a macOS app bundle and DMG\n"
 	@printf "  make package-macos VERSION=0.1.0\n"
@@ -56,6 +57,9 @@ check-app:
 		printf "Metal compiler was not found. Install full Xcode or run 'make metal' if your Xcode supports Metal Toolchain downloads.\n"; \
 		exit 1; \
 	fi
+
+check-docs:
+	python3 scripts/check-docs.py
 
 build-app:
 	@metal_toolchain="$$HANJI_METAL_TOOLCHAIN"; \

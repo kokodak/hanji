@@ -1,5 +1,9 @@
 # Philosophy
 
+Status: Current
+
+Scope: Product direction
+
 Hanji is a light, local-first Markdown editor.
 
 It should feel simple enough for notes, durable enough for plain text writing, and open enough for user plugins.

@@ -29,8 +29,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for issue, pull request, and development 
 
 ## Project Layout
 
-- [docs/](docs/) contains product and engineering design notes.
-- [docs/design/](docs/design/) contains core editor concepts and design vocabulary.
+- [docs/](docs/) is the documentation index.
+- [docs/architecture/](docs/architecture/) describes current component boundaries and runtime flows.
+- [docs/design/](docs/design/) defines durable document and editing semantics.
+- [docs/reference/](docs/reference/) records current APIs and supported behavior.
+- [docs/plans/](docs/plans/) keeps proposed work separate from implemented architecture.
 - [site/](site/) contains the static project website deployed with GitHub Pages.
 - [crates/hanji-core](crates/hanji-core/) owns text editing primitives.
 - [crates/hanji-markdown](crates/hanji-markdown/) owns Markdown projection and editing policy.
@@ -43,8 +46,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for issue, pull request, and development 
 ## Documentation
 
 - [Hanji Docs](docs/README.md)
-- [Architecture](docs/architecture.md)
+- [Architecture](docs/architecture/README.md)
 - [Design Notes](docs/design/README.md)
+- [Editor API](docs/reference/editor-api.md)
 
 ## License
 

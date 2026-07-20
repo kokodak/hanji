@@ -1,8 +1,12 @@
 # Large Document Performance
 
+Status: Proposed
+
 Hanji should stay responsive when editing long local Markdown files. Large document work should protect the source-backed WYSIWYG model while avoiding full-document work during ordinary interaction.
 
 This note records the likely bottlenecks and the next optimization tasks. It is a planning document, not a benchmark report.
+
+The currently implemented pipeline and cache boundary are documented in [Projection and Rendering](../architecture/rendering.md).
 
 ## Current Risks
 
@@ -164,103 +168,9 @@ Possible improvements:
 - Avoid rebuilding non-visible render caches immediately after paste.
 - Consider showing a minimal responsive state while visible layout catches up.
 
-## Benchmarking Plan
+## Measurement
 
-Performance work needs repeatable measurement before and after each change. Hanji should grow a small benchmark suite that measures editor behavior at the same boundaries used by the product architecture: core text edits, Markdown projection, renderer preparation, and app-level interaction.
-
-The benchmark suite should report both isolated stage timings and end-to-end interaction timings. Microbenchmarks help identify the hot path, but user-facing budgets should be based on complete scenarios such as paste, scroll, type, select, and caret movement.
-
-### Benchmark Types
-
-- Core benchmarks: measure `hanji-core` text edits, line index lookup, line index rebuild or incremental update, selection mapping, undo, and redo.
-- Markdown benchmarks: measure block classification, inline projection, fenced code block projection, link detection, marker reveal, and visible-to-source mapping.
-- Renderer benchmarks: measure line projection consumption, visible segment creation, text shaping, soft-wrap measurement, line height caching, hitbox generation, and paint preparation.
-- Interaction benchmarks: measure paste, continuous scroll, single-character editing, vertical caret movement through soft-wrapped lines, mouse hit testing, selection drag, and select all.
-- Memory benchmarks: record peak memory, retained cache size, line snapshot count, shaped line count, undo entry size, and text buffer allocation behavior.
-
-### Fixture Corpus
-
-Use deterministic local fixtures so results can be compared across commits:
-
-- `small-note`: a short ordinary note that protects the common case.
-- `long-prose-1mb`: paragraphs with soft wrapping and common inline Markdown.
-- `long-prose-5mb`: a stress version of the prose fixture.
-- `many-short-lines`: many simple lines to stress line indexing, scrolling, and hit testing.
-- `many-long-lines`: very long soft-wrapped lines to stress shaping and vertical movement.
-- `mixed-markdown`: headings, blockquotes, lists, task lists, links, autolinks, raw URLs, inline code, emphasis, strong, strikethrough, horizontal rules, and escapes.
-- `many-fences`: many closed backtick and tilde fenced code blocks.
-- `unclosed-fence-tail`: an intentionally malformed large document that stresses fallback scanning.
-
-Synthetic fixtures are useful because they are stable. A later phase can add anonymized real notes only if they are safe to store in the repository.
-
-### Metrics
-
-Each benchmark run should record:
-
-- Document bytes, line count, maximum line length, and estimated wrapped row count.
-- Total elapsed time.
-- Per-stage elapsed time.
-- Frame count and slow-frame count for app-level runs.
-- p50, p95, and max latency for repeated interactions.
-- Number of projected lines, shaped lines, painted lines, visible lines, and cached lines.
-- Cache hit rate for projection and line measurement caches.
-- Peak memory and retained memory after idle.
-
-The most important number is not average throughput. Hanji should optimize for interaction latency and predictable frame time.
-
-### Measurement Discipline
-
-- Run each scenario once as warmup before recording.
-- Record multiple iterations and keep p50, p95, and max values.
-- Separate cold-start costs from steady-state interaction costs.
-- Run release builds for benchmark numbers.
-- Keep debug instrumentation opt-in so normal app usage stays clean.
-- Store machine and build metadata with each result.
-- Avoid comparing unrelated machines as pass or fail; use them for trend hints only.
-- Treat benchmark output as data. Do not tune thresholds until the suite is stable enough to trust.
-
-### Baselines and Regression Gates
-
-The first benchmark milestone should produce a checked-in baseline file from a known machine. Later changes can compare against that baseline.
-
-Suggested gates:
-
-- Core and Markdown microbenchmarks may run in CI once stable.
-- GPUI app interaction benchmarks can start as manual or nightly checks because they depend on platform rendering behavior.
-- A regression should be flagged when p95 latency or peak memory grows beyond an agreed threshold for the same fixture and machine profile.
-- A performance improvement should include both the benchmark delta and the user-visible scenario it improves.
-
-### Viewport-Oriented Measurement
-
-Large document benchmarks should explicitly track whether work scales with visible content or total document size.
-
-Useful counters:
-
-- Total source lines.
-- Visible source lines.
-- Overscan lines.
-- Lines projected for this frame.
-- Lines shaped for this frame.
-- Lines painted for this frame.
-- Lines retained in caches.
-- Height metadata entries.
-
-As viewport rendering lands, a successful scroll benchmark should show stable per-frame shaped and painted line counts even as total document size grows.
-
-### App Harness Direction
-
-The app-level benchmark harness should be scriptable. It should open a fixture, wait for the editor to become idle, perform a deterministic action sequence, and write structured results.
-
-Useful commands:
-
-```sh
-make bench-core
-make bench-markdown
-make bench-app FILE=fixtures/bench/long-prose-1mb.md
-make bench-app SCENARIO=paste FILE=fixtures/bench/mixed-markdown.md
-```
-
-The exact command names can change, but the workflow should stay simple enough that performance can be checked before and after a rendering change.
+Implementation work should be gated by repeatable measurements at the core, Markdown, renderer, and app interaction boundaries. Fixtures, metrics, baselines, and the proposed app harness are specified separately in [Performance Benchmarking](performance-benchmarking.md).
 
 ## Success Criteria
 
