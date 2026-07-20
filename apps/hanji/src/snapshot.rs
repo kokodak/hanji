@@ -1,5 +1,5 @@
 use gpui::{App, Bounds, Pixels, Point, TextAlign, Window, WrappedLine, point, px};
-use hanji_core::TextRange;
+use hanji_editor::TextRange;
 use hanji_markdown::{ProjectedSegmentKind, ProjectedVisibleSegment};
 
 #[derive(Clone)]

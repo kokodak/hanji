@@ -1,5 +1,4 @@
 mod editing;
-mod encoding;
 mod external;
 mod file_browser;
 mod renderer;
@@ -22,23 +21,26 @@ use gpui::{
     ScrollHandle, SharedString, SystemMenuType, Timer, TitlebarOptions, UTF16Selection, Window,
     WindowBounds, WindowOptions, actions, div, point, prelude::*, px, rgb, size,
 };
-use hanji_core::{EditorCommand, Selection, TextPosition, TextRange, Transaction};
+use hanji_core::{byte_offset_to_utf16, utf16_range_to_byte};
+use hanji_editor::{
+    Command as EditorCommand, Editor, TextInput, TextPosition, TextRange, TextSelection,
+};
 use hanji_markdown::{
-    MarkdownCommand, MarkdownCommandError, MarkdownLine, MarkdownTableLine, MarkdownTaskState,
-    ProjectedTableCell, execute_markdown_command, project_document,
+    MarkdownLine, MarkdownTableLine, ProjectedTableCell, table_cell_at_offset,
+    table_horizontal_caret_offset, table_line_break_caret_offset,
+};
+#[cfg(test)]
+use hanji_markdown::{
+    TABLE_LINE_BREAK_SOURCE, project_document, table_cell_line_start_for_offset,
+    table_line_break_delete_edit, table_newline_edit,
 };
 use hanji_storage::DocumentSession;
 
 use editing::{
-    ListIndentDirection, MarkerHitMode, blockquote_newline_edit_for_line, bounds_contains_point,
-    clipboard_paste_edit, document_selection_range, drag_distance_exceeds_threshold,
-    empty_marker_pair_delete_backward_edit, extension_points_for_selection,
-    horizontal_offset_within_line, line_marker_hit_offset, list_indent_edit,
-    list_newline_edit_for_line, marker_autocomplete_edit, marker_skip_offset, selected_source_text,
-    selected_source_text_for_copy, selection_is_reversed, selection_range_from_anchor_and_head,
-    task_marker_state_char_range,
+    MarkerHitMode, bounds_contains_point, document_selection_range,
+    drag_distance_exceeds_threshold, extension_points_for_selection, horizontal_offset_within_line,
+    line_marker_hit_offset, selected_source_text, selection_is_reversed,
 };
-use encoding::byte_offset_to_utf16;
 use external::external_url_command;
 use file_browser::{MarkdownFile, folder_label, is_markdown_file, markdown_files_in};
 use renderer::{
@@ -68,8 +70,6 @@ const FILE_BROWSER_WIDTH: f32 = 248.0;
 const FILE_BROWSER_ANIMATION_FRAME_MS: u64 = 8;
 const FILE_BROWSER_ANIMATION_DURATION_MS: u64 = 100;
 const FILE_BROWSER_ANIMATION_EPSILON: f32 = 0.25;
-const TABLE_LINE_BREAK_SOURCE: &str = "<br>";
-
 fn caret_blink_idle_delay_elapsed(idle_for: Duration) -> bool {
     idle_for >= Duration::from_millis(CARET_BLINK_IDLE_DELAY_MS)
 }
@@ -172,119 +172,6 @@ fn validate_open_document_path(path: &Path) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn table_cell_at_offset(cells: &[ProjectedTableCell], offset: usize) -> Option<ProjectedTableCell> {
-    cells
-        .iter()
-        .copied()
-        .find(|cell| offset >= cell.content_range.start && offset <= cell.content_range.end)
-        .or_else(|| {
-            cells.iter().copied().find(|cell| {
-                offset >= cell.source_outer_range.start && offset <= cell.source_outer_range.end
-            })
-        })
-}
-
-fn table_horizontal_caret_offset(
-    cells: &[ProjectedTableCell],
-    offset: usize,
-    direction: isize,
-) -> Option<usize> {
-    let index = cells
-        .iter()
-        .position(|cell| offset >= cell.content_range.start && offset <= cell.content_range.end)?;
-    let cell = cells[index];
-
-    if direction < 0 && offset == cell.content_range.start {
-        return Some(
-            index
-                .checked_sub(1)
-                .and_then(|index| cells.get(index))
-                .map_or(offset, |cell| cell.content_range.end),
-        );
-    }
-    if direction > 0 && offset == cell.content_range.end {
-        return Some(
-            cells
-                .get(index + 1)
-                .map_or(offset, |cell| cell.content_range.start),
-        );
-    }
-
-    None
-}
-
-fn table_newline_edit(
-    cells: &[ProjectedTableCell],
-    range: &Range<usize>,
-) -> Option<(Range<usize>, String, Range<usize>)> {
-    let start_cell = table_cell_at_offset(cells, range.start)?;
-    let end_cell = table_cell_at_offset(cells, range.end)?;
-    if start_cell.content_range != end_cell.content_range
-        || range.start < start_cell.content_range.start
-        || range.end > start_cell.content_range.end
-    {
-        return None;
-    }
-
-    let caret = range.start + TABLE_LINE_BREAK_SOURCE.len();
-    Some((
-        range.clone(),
-        TABLE_LINE_BREAK_SOURCE.to_string(),
-        caret..caret,
-    ))
-}
-
-fn table_line_break_delete_edit(
-    text: &str,
-    range: &Range<usize>,
-    direction: isize,
-) -> Option<(Range<usize>, String, Range<usize>)> {
-    if range.start != range.end {
-        return None;
-    }
-
-    let marker_range = if direction < 0 {
-        let start = range.start.checked_sub(TABLE_LINE_BREAK_SOURCE.len())?;
-        start..range.start
-    } else {
-        range.end..range.end.checked_add(TABLE_LINE_BREAK_SOURCE.len())?
-    };
-    if text.get(marker_range.clone()) != Some(TABLE_LINE_BREAK_SOURCE) {
-        return None;
-    }
-
-    let caret = marker_range.start;
-    Some((marker_range, String::new(), caret..caret))
-}
-
-fn table_line_break_caret_offset(text: &str, offset: usize, direction: isize) -> Option<usize> {
-    let marker_range = if direction < 0 {
-        let start = offset.checked_sub(TABLE_LINE_BREAK_SOURCE.len())?;
-        start..offset
-    } else {
-        offset..offset.checked_add(TABLE_LINE_BREAK_SOURCE.len())?
-    };
-
-    (text.get(marker_range.clone()) == Some(TABLE_LINE_BREAK_SOURCE)).then_some(if direction < 0 {
-        marker_range.start
-    } else {
-        marker_range.end
-    })
-}
-
-fn table_cell_line_start_for_offset(text: &str, cell: ProjectedTableCell, offset: usize) -> usize {
-    let cell_start = cell.content_range.start;
-    let Some(prefix) = text.get(cell_start..offset) else {
-        return cell_start;
-    };
-
-    prefix
-        .rfind(TABLE_LINE_BREAK_SOURCE)
-        .map_or(cell_start, |relative_offset| {
-            cell_start + relative_offset + TABLE_LINE_BREAK_SOURCE.len()
-        })
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TableCellSelection {
     table_range: TextRange,
@@ -310,11 +197,8 @@ impl TableCellSelection {
     }
 }
 
-fn selected_table_cell_source(
-    document: &hanji_core::Document,
-    selection: TableCellSelection,
-) -> Option<String> {
-    let projection = project_document(document);
+fn selected_table_cell_source(document: &Editor, selection: TableCellSelection) -> Option<String> {
+    let projection = document.projection();
     let mut rows = Vec::new();
 
     for line in projection.lines() {
@@ -332,7 +216,7 @@ fn selected_table_cell_source(
         let last_column = selection.column_end.min(cells.len().saturating_sub(1));
         let last_cell = &cells[last_column];
         let source = document
-            .text()
+            .source()
             .get(first_cell.source_outer_range.start..last_cell.source_outer_range.end)?;
         rows.push(source.to_string());
     }
@@ -567,7 +451,7 @@ impl Hanji {
     fn new(session: DocumentSession, cx: &mut Context<Self>) -> Self {
         let file_browser_root = file_browser_root_for_document(session.path());
         let welcome_visible =
-            is_scratch_document_path(session.path()) && session.document().text().is_empty();
+            is_scratch_document_path(session.path()) && session.editor().source().is_empty();
         let mut editor = Self {
             focus_handle: cx.focus_handle(),
             last_edited_at: document_modified_time(session.path()),
@@ -604,38 +488,12 @@ impl Hanji {
     }
 
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
-        self.marked_range = None;
-        self.clear_selection_tracking();
-        let range = self.selected_range();
-        if range.start == range.end
-            && self
-                .table_cell_at_offset(range.start)
-                .is_some_and(|cell| range.start <= cell.content_range.start)
-        {
-            return;
-        }
-        if self.table_cell_at_offset(range.start).is_some()
-            && let Some((range, replacement, selection_after)) =
-                table_line_break_delete_edit(self.session.document().text(), &range, -1)
-        {
-            self.replace_range(range, &replacement, selection_after, window, cx);
-            return;
-        }
-        if let Some((range, replacement, selection_after)) =
-            empty_marker_pair_delete_backward_edit(self.session.document().text(), &range)
-        {
-            self.replace_range(range, &replacement, selection_after, window, cx);
-            return;
-        }
-
-        let changed = self
-            .session
-            .execute(EditorCommand::DeleteBackward)
-            .unwrap_or(false);
-
-        if changed {
-            self.document_changed(window, cx);
-        }
+        self.apply_editor_command(
+            EditorCommand::DeleteBackward,
+            "Could not delete text.",
+            window,
+            cx,
+        );
     }
 
     fn delete_word_backward(
@@ -644,38 +502,12 @@ impl Hanji {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.marked_range = None;
-        self.clear_selection_tracking();
-        let range = self.selected_range();
-        let table_boundary = if range.is_empty() {
-            let document = self.session.document();
-            self.table_cell_at_offset(range.start).map(|cell| {
-                document
-                    .previous_word_offset(range.start)
-                    .ok()
-                    .flatten()
-                    .map_or(cell.content_range.start, |offset| {
-                        offset.max(cell.content_range.start)
-                    })
-            })
-        } else {
-            None
-        };
-        if let Some(boundary) = table_boundary {
-            if boundary < range.start {
-                self.replace_range(boundary..range.start, "", boundary..boundary, window, cx);
-            }
-            return;
-        }
-
-        let changed = self
-            .session
-            .execute(EditorCommand::DeleteWordBackward)
-            .unwrap_or(false);
-
-        if changed {
-            self.document_changed(window, cx);
-        }
+        self.apply_editor_command(
+            EditorCommand::DeleteWordBackward,
+            "Could not delete text.",
+            window,
+            cx,
+        );
     }
 
     fn delete_line_backward(
@@ -684,68 +516,30 @@ impl Hanji {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.marked_range = None;
-        self.clear_selection_tracking();
-        let range = self.selected_range();
-        let table_boundary = if range.is_empty() {
-            let document = self.session.document();
-            self.table_cell_at_offset(range.start)
-                .map(|cell| table_cell_line_start_for_offset(document.text(), cell, range.start))
-        } else {
-            None
-        };
-        if let Some(boundary) = table_boundary {
-            if boundary < range.start {
-                self.replace_range(boundary..range.start, "", boundary..boundary, window, cx);
-            }
-            return;
-        }
-
-        let changed = self
-            .session
-            .execute(EditorCommand::DeleteLineBackward)
-            .unwrap_or(false);
-
-        if changed {
-            self.document_changed(window, cx);
-        }
+        self.apply_editor_command(
+            EditorCommand::DeleteLineBackward,
+            "Could not delete text.",
+            window,
+            cx,
+        );
     }
 
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
-        self.marked_range = None;
-        self.clear_selection_tracking();
-        let range = self.selected_range();
-        if range.start == range.end
-            && self
-                .table_cell_at_offset(range.end)
-                .is_some_and(|cell| range.end >= cell.content_range.end)
-        {
-            return;
-        }
-        if self.table_cell_at_offset(range.end).is_some()
-            && let Some((range, replacement, selection_after)) =
-                table_line_break_delete_edit(self.session.document().text(), &range, 1)
-        {
-            self.replace_range(range, &replacement, selection_after, window, cx);
-            return;
-        }
-        let changed = self
-            .session
-            .execute(EditorCommand::DeleteForward)
-            .unwrap_or(false);
-
-        if changed {
-            self.document_changed(window, cx);
-        }
+        self.apply_editor_command(
+            EditorCommand::DeleteForward,
+            "Could not delete text.",
+            window,
+            cx,
+        );
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
-        let document = self.session.document();
-        let range = document.selection().primary();
+        let document = self.session.editor();
+        let range = document.selection().range();
         let offset = if range.is_empty() {
             self.table_horizontal_caret_offset(range.start, -1)
-                .or_else(|| table_line_break_caret_offset(document.text(), range.start, -1))
+                .or_else(|| table_line_break_caret_offset(document.source(), range.start, -1))
                 .or_else(|| {
                     document
                         .previous_grapheme_offset(range.start)
@@ -771,8 +565,8 @@ impl Hanji {
 
     fn option_left(&mut self, _: &OptionLeft, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
-        let document = self.session.document();
-        let range = document.selection().primary();
+        let document = self.session.editor();
+        let range = document.selection().range();
         let offset = if range.is_empty() {
             document
                 .previous_word_offset(range.start)
@@ -797,11 +591,11 @@ impl Hanji {
 
     fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
-        let document = self.session.document();
-        let range = document.selection().primary();
+        let document = self.session.editor();
+        let range = document.selection().range();
         let offset = if range.is_empty() {
             self.table_horizontal_caret_offset(range.end, 1)
-                .or_else(|| table_line_break_caret_offset(document.text(), range.end, 1))
+                .or_else(|| table_line_break_caret_offset(document.source(), range.end, 1))
                 .or_else(|| {
                     document
                         .next_grapheme_offset(range.end)
@@ -827,8 +621,8 @@ impl Hanji {
 
     fn option_right(&mut self, _: &OptionRight, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
-        let document = self.session.document();
-        let range = document.selection().primary();
+        let document = self.session.editor();
+        let range = document.selection().range();
         let offset = if range.is_empty() {
             document
                 .next_word_offset(range.end)
@@ -876,7 +670,7 @@ impl Hanji {
 
     fn cmd_down(&mut self, _: &CmdDown, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
-        self.move_caret(self.session.document().len(), cx);
+        self.move_caret(self.session.editor().len(), cx);
     }
 
     fn shift_cmd_left(&mut self, _: &ShiftCmdLeft, _: &mut Window, cx: &mut Context<Self>) {
@@ -901,7 +695,7 @@ impl Hanji {
 
     fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
-        let range = self.session.document().selection().primary();
+        let range = self.session.editor().selection().range();
         let Some(line_range) = self.line_range_for_offset(range.start) else {
             return;
         };
@@ -911,7 +705,7 @@ impl Hanji {
 
     fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_range = None;
-        let range = self.session.document().selection().primary();
+        let range = self.session.editor().selection().range();
         let Some(line_range) = self.line_range_for_offset(range.end) else {
             return;
         };
@@ -920,34 +714,17 @@ impl Hanji {
     }
 
     fn newline(&mut self, _: &Newline, window: &mut Window, cx: &mut Context<Self>) {
-        self.marked_range = None;
-        self.clear_selection_tracking();
-        let range = self.selected_range();
-
-        if let Some((range, replacement, selection_after)) =
-            table_newline_edit(&self.table_cells(), &range)
-        {
-            self.replace_range(range, &replacement, selection_after, window, cx);
-            return;
-        }
-
-        if let Some((range, replacement, selection_after)) = self.blockquote_newline_edit(&range) {
-            self.replace_range(range, &replacement, selection_after, window, cx);
-            return;
-        }
-
-        if let Some((range, replacement, selection_after)) = self.list_newline_edit(&range) {
-            self.replace_range(range, &replacement, selection_after, window, cx);
-            return;
-        }
-
-        let caret = range.start + "\n".len();
-        self.replace_range(range, "\n", caret..caret, window, cx);
+        self.apply_editor_command(
+            EditorCommand::InsertNewline,
+            "Could not insert a new line.",
+            window,
+            cx,
+        );
     }
 
     fn toggle_strong(&mut self, _: &ToggleStrong, window: &mut Window, cx: &mut Context<Self>) {
         self.apply_markdown_command(
-            MarkdownCommand::ToggleStrong,
+            EditorCommand::ToggleStrong,
             "Could not toggle strong text.",
             window,
             cx,
@@ -956,7 +733,7 @@ impl Hanji {
 
     fn toggle_italic(&mut self, _: &ToggleItalic, window: &mut Window, cx: &mut Context<Self>) {
         self.apply_markdown_command(
-            MarkdownCommand::ToggleEmphasis,
+            EditorCommand::ToggleEmphasis,
             "Could not toggle italic text.",
             window,
             cx,
@@ -965,7 +742,7 @@ impl Hanji {
 
     fn toggle_code(&mut self, _: &ToggleCode, window: &mut Window, cx: &mut Context<Self>) {
         self.apply_markdown_command(
-            MarkdownCommand::ToggleCode,
+            EditorCommand::ToggleCode,
             "Could not toggle code text.",
             window,
             cx,
@@ -974,7 +751,7 @@ impl Hanji {
 
     fn insert_link(&mut self, _: &InsertLink, window: &mut Window, cx: &mut Context<Self>) {
         self.apply_markdown_command(
-            MarkdownCommand::InsertLink,
+            EditorCommand::InsertLink,
             "Could not insert link.",
             window,
             cx,
@@ -1062,35 +839,34 @@ impl Hanji {
         self.selection_drag_origin = None;
         self.selection_drag_cell_origin = None;
         self.table_cell_selection = None;
-        let range = document_selection_range(self.session.document().len());
+        let range = document_selection_range(self.session.editor().len());
 
         self.select_from_anchor_to(range.start, range.end, None, cx);
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(selection) = self.table_cell_selection
-            && let Some(text) = selected_table_cell_source(self.session.document(), selection)
+            && let Some(text) = selected_table_cell_source(self.session.editor(), selection)
         {
-            cx.write_to_clipboard(ClipboardItem::new_string(text));
+            cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
             return;
         }
 
-        let range = self.selected_range();
-        if let Some(text) = selected_source_text_for_copy(self.session.document(), &range) {
-            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        if let Some(text) = self.session.editor().selected_source() {
+            cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
         }
     }
 
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(selection) = self.table_cell_selection
-            && let Some(text) = selected_table_cell_source(self.session.document(), selection)
+            && let Some(text) = selected_table_cell_source(self.session.editor(), selection)
         {
             cx.write_to_clipboard(ClipboardItem::new_string(text));
             return;
         }
 
         let range = self.selected_range();
-        let Some(text) = selected_source_text(self.session.document().text(), &range) else {
+        let Some(text) = selected_source_text(self.session.editor().source(), &range) else {
             return;
         };
 
@@ -1108,91 +884,74 @@ impl Hanji {
         }
 
         let range = self.snap_table_caret_range(self.selected_range());
-        let (range, replacement, selection_after) = clipboard_paste_edit(&range, &text);
-
         self.marked_range = None;
-        self.replace_range(range, &replacement, selection_after, window, cx);
+        self.apply_text_input(
+            TextInput::literal(text).replacing(TextRange::new(range.start, range.end)),
+            "Could not paste text.",
+            window,
+            cx,
+        );
     }
 
     fn indent_list(&mut self, _: &IndentList, window: &mut Window, cx: &mut Context<Self>) {
-        self.apply_list_indent(ListIndentDirection::Increase, window, cx);
+        self.apply_editor_command(
+            EditorCommand::Indent,
+            "Could not indent the list.",
+            window,
+            cx,
+        );
     }
 
     fn outdent_list(&mut self, _: &OutdentList, window: &mut Window, cx: &mut Context<Self>) {
-        self.apply_list_indent(ListIndentDirection::Decrease, window, cx);
+        self.apply_editor_command(
+            EditorCommand::Outdent,
+            "Could not outdent the list.",
+            window,
+            cx,
+        );
     }
 
-    fn apply_list_indent(
+    fn apply_editor_command(
         &mut self,
-        direction: ListIndentDirection,
+        command: EditorCommand,
+        failure_message: &'static str,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         self.marked_range = None;
-        let range = self.selected_range();
-        let Some((edits, selection_after)) =
-            list_indent_edit(self.session.document().text(), &range, direction)
-        else {
-            return;
-        };
-        let selection_after =
-            Selection::single(TextRange::new(selection_after.start, selection_after.end));
-        let transaction = Transaction::new(edits, Some(selection_after));
+        self.clear_selection_tracking();
 
-        if self.session.apply(transaction).is_ok() {
-            self.clear_preferred_vertical_target();
-            self.clear_selection_tracking();
-            self.document_changed(window, cx);
+        match self.session.execute(command) {
+            Ok(update) if update.changed() => {
+                self.clear_preferred_vertical_target();
+                self.document_changed(window, cx);
+                true
+            }
+            Ok(_) => false,
+            Err(_) => {
+                self.status_message = Some(failure_message.to_string());
+                cx.notify();
+                false
+            }
         }
     }
 
     fn apply_markdown_command(
         &mut self,
-        command: MarkdownCommand,
+        command: EditorCommand,
         failure_message: &'static str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.marked_range = None;
-        self.clear_selection_tracking();
-
-        match self
-            .session
-            .edit_document(|document| execute_markdown_command(document, command))
-        {
-            Ok(true) => {
-                self.clear_preferred_vertical_target();
-                self.document_changed(window, cx);
-            }
-            Ok(false) => {}
-            Err(MarkdownCommandError::MultipleSelectionsUnsupported) => {
-                self.status_message =
-                    Some("Multiple selections are not supported yet.".to_string());
-                cx.notify();
-            }
-            Err(MarkdownCommandError::Edit(_)) => {
-                self.status_message = Some(failure_message.to_string());
-                cx.notify();
-            }
-        }
+        self.apply_editor_command(command, failure_message, window, cx);
     }
 
     fn undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
-        self.marked_range = None;
-        self.clear_selection_tracking();
-
-        if self.session.undo().is_some() {
-            self.document_changed(window, cx);
-        }
+        self.apply_editor_command(EditorCommand::Undo, "Could not undo.", window, cx);
     }
 
     fn redo(&mut self, _: &Redo, window: &mut Window, cx: &mut Context<Self>) {
-        self.marked_range = None;
-        self.clear_selection_tracking();
-
-        if self.session.redo().is_some() {
-            self.document_changed(window, cx);
-        }
+        self.apply_editor_command(EditorCommand::Redo, "Could not redo.", window, cx);
     }
 
     fn new_document(&mut self, _: &NewDocument, window: &mut Window, cx: &mut Context<Self>) {
@@ -1618,7 +1377,7 @@ impl Hanji {
 
         let anchor = self
             .selection_anchor
-            .unwrap_or_else(|| self.session.document().selection().primary().start);
+            .unwrap_or_else(|| self.session.editor().selection().range().start);
         self.select_from_anchor_to(
             anchor,
             self.index_for_mouse_position_with_marker_mode(
@@ -1642,11 +1401,15 @@ impl Hanji {
         self.clear_selection_tracking();
         let offset = self
             .session
-            .document()
+            .editor()
             .nearest_grapheme_offset(offset)
             .unwrap_or(offset);
 
-        if self.session.set_selection(Selection::caret(offset)).is_ok() {
+        if self
+            .session
+            .set_selection(TextSelection::caret(offset))
+            .is_ok()
+        {
             self.reset_caret_blink();
             self.scroll_selection_into_view();
             cx.notify();
@@ -1661,7 +1424,11 @@ impl Hanji {
     ) {
         self.clear_selection_tracking();
 
-        if self.session.set_selection(Selection::caret(offset)).is_ok() {
+        if self
+            .session
+            .set_selection(TextSelection::caret(offset))
+            .is_ok()
+        {
             self.preferred_column = Some(column);
             self.preferred_visual_x = None;
             self.reset_caret_blink();
@@ -1679,11 +1446,15 @@ impl Hanji {
         self.clear_selection_tracking();
         let offset = self
             .session
-            .document()
+            .editor()
             .nearest_grapheme_offset(offset)
             .unwrap_or(offset);
 
-        if self.session.set_selection(Selection::caret(offset)).is_ok() {
+        if self
+            .session
+            .set_selection(TextSelection::caret(offset))
+            .is_ok()
+        {
             self.preferred_column = None;
             self.preferred_visual_x = Some(visual_x);
             self.reset_caret_blink();
@@ -1693,8 +1464,8 @@ impl Hanji {
     }
 
     fn move_caret_vertically(&mut self, direction: isize, cx: &mut Context<Self>) {
-        let document = self.session.document();
-        let range = document.selection().primary();
+        let document = self.session.editor();
+        let range = document.selection().range();
         let offset = if range.is_empty() {
             range.start
         } else if direction < 0 {
@@ -1724,7 +1495,7 @@ impl Hanji {
         offset: usize,
         direction: isize,
     ) -> Option<(usize, usize)> {
-        let document = self.session.document();
+        let document = self.session.editor();
         let Ok(position) = document.position_at_offset(offset) else {
             return None;
         };
@@ -1743,7 +1514,7 @@ impl Hanji {
                 document
                     .line_range(target_line)
                     .map(|range| range.end)
-                    .ok_or(hanji_core::EditError::InvalidRange)
+                    .ok_or(hanji_editor::Error::InvalidRange)
             })
             .ok()
             .map(|target_offset| (target_offset, column))
@@ -1790,9 +1561,9 @@ impl Hanji {
     }
 
     fn extend_selection_horizontally(&mut self, direction: isize, cx: &mut Context<Self>) {
-        let document = self.session.document();
+        let document = self.session.editor();
         let (anchor, head) = self.selection_extension_points(direction);
-        let offset = table_line_break_caret_offset(document.text(), head, direction)
+        let offset = table_line_break_caret_offset(document.source(), head, direction)
             .or_else(|| {
                 if direction < 0 {
                     document.previous_grapheme_offset(head).ok().flatten()
@@ -1827,7 +1598,7 @@ impl Hanji {
     }
 
     fn extend_selection_by_word(&mut self, direction: isize, cx: &mut Context<Self>) {
-        let document = self.session.document();
+        let document = self.session.editor();
         let (anchor, head) = self.selection_extension_points(direction);
         let offset = if direction < 0 {
             document.previous_word_offset(head).ok().flatten()
@@ -1860,7 +1631,7 @@ impl Hanji {
         let offset = if direction < 0 {
             0
         } else {
-            self.session.document().len()
+            self.session.editor().len()
         };
 
         self.select_from_anchor_to(anchor, offset, None, cx);
@@ -1871,7 +1642,7 @@ impl Hanji {
             return (anchor, head);
         }
 
-        extension_points_for_selection(self.session.document().selection().primary(), direction)
+        extension_points_for_selection(self.session.editor().selection().range(), direction)
     }
 
     fn select_from_anchor_to(
@@ -1881,12 +1652,14 @@ impl Hanji {
         preferred_column: Option<usize>,
         cx: &mut Context<Self>,
     ) {
-        let document = self.session.document();
+        let document = self.session.editor();
         let anchor = document.nearest_grapheme_offset(anchor).unwrap_or(anchor);
         let head = document.nearest_grapheme_offset(head).unwrap_or(head);
-        let range = selection_range_from_anchor_and_head(anchor, head);
-
-        if self.session.set_selection(Selection::single(range)).is_ok() {
+        if self
+            .session
+            .set_selection(TextSelection::new(anchor, head))
+            .is_ok()
+        {
             self.table_cell_selection = None;
             self.selection_anchor = Some(anchor);
             self.selection_head = Some(head);
@@ -1905,12 +1678,14 @@ impl Hanji {
         visual_x: Pixels,
         cx: &mut Context<Self>,
     ) {
-        let document = self.session.document();
+        let document = self.session.editor();
         let anchor = document.nearest_grapheme_offset(anchor).unwrap_or(anchor);
         let head = document.nearest_grapheme_offset(head).unwrap_or(head);
-        let range = selection_range_from_anchor_and_head(anchor, head);
-
-        if self.session.set_selection(Selection::single(range)).is_ok() {
+        if self
+            .session
+            .set_selection(TextSelection::new(anchor, head))
+            .is_ok()
+        {
             self.table_cell_selection = None;
             self.selection_anchor = Some(anchor);
             self.selection_head = Some(head);
@@ -1937,12 +1712,14 @@ impl Hanji {
     }
 
     fn selected_range(&self) -> Range<usize> {
-        let range = self.session.document().selection().primary();
+        let range = self.session.editor().selection().range();
         range.start..range.end
     }
 
     fn table_cells(&self) -> Vec<ProjectedTableCell> {
-        project_document(self.session.document())
+        self.session
+            .editor()
+            .projection()
             .lines()
             .iter()
             .filter(|line| {
@@ -1987,19 +1764,45 @@ impl Hanji {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let transaction = Transaction::replace(TextRange::new(range.start, range.end), new_text)
-            .with_selection_after(Selection::single(TextRange::new(
+        let input = TextInput::literal(new_text)
+            .replacing(TextRange::new(range.start, range.end))
+            .selecting_after(TextSelection::new(
                 selection_after.start,
                 selection_after.end,
-            )));
+            ));
 
-        if self.session.apply(transaction).is_err() {
+        self.apply_text_input(input, "Could not edit text.", window, cx)
+    }
+
+    fn apply_text_input(
+        &mut self,
+        input: TextInput,
+        failure_message: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let update = match self.session.replace_text(input) {
+            Ok(update) => update,
+            Err(_) => {
+                self.status_message = Some(failure_message.to_string());
+                cx.notify();
+                return false;
+            }
+        };
+
+        if !update.changed() {
             return false;
         }
 
         self.clear_preferred_vertical_target();
         self.clear_selection_tracking();
-        self.document_changed(window, cx);
+        if update.text_changed() {
+            self.document_changed(window, cx);
+        } else {
+            self.reset_caret_blink();
+            self.scroll_selection_into_view();
+            cx.notify();
+        }
         true
     }
 
@@ -2030,7 +1833,7 @@ impl Hanji {
     }
 
     fn scroll_selection_into_view(&self) {
-        let selection = self.session.document().selection().primary();
+        let selection = self.session.editor().selection().range();
         let target_offset = self.selection_head.unwrap_or(selection.end);
         let Some(line) = line_for_offset(&self.last_lines, target_offset) else {
             return;
@@ -2075,38 +1878,8 @@ impl Hanji {
         self.editor_scroll.set_offset(offset);
     }
 
-    fn blockquote_newline_edit(
-        &self,
-        range: &Range<usize>,
-    ) -> Option<(Range<usize>, String, Range<usize>)> {
-        if range.start != range.end {
-            return None;
-        }
-
-        let document = self.session.document();
-        let line_range = self.line_range_for_offset(range.start)?;
-        let line_source = &document.text()[line_range.start..line_range.end];
-
-        blockquote_newline_edit_for_line(line_source, line_range, range)
-    }
-
-    fn list_newline_edit(
-        &self,
-        range: &Range<usize>,
-    ) -> Option<(Range<usize>, String, Range<usize>)> {
-        if range.start != range.end {
-            return None;
-        }
-
-        let document = self.session.document();
-        let line_range = self.line_range_for_offset(range.start)?;
-        let line_source = &document.text()[line_range.start..line_range.end];
-
-        list_newline_edit_for_line(line_source, line_range, range)
-    }
-
     fn line_range_for_offset(&self, offset: usize) -> Option<TextRange> {
-        let document = self.session.document();
+        let document = self.session.editor();
         let line_index = document.line_index_at_offset(offset).ok()?;
 
         document.line_range(line_index)
@@ -2114,7 +1887,7 @@ impl Hanji {
 
     fn word_selection_range_for_offset(&self, offset: usize) -> Option<TextRange> {
         self.session
-            .document()
+            .editor()
             .word_range_at_offset(offset)
             .ok()
             .flatten()
@@ -2166,7 +1939,7 @@ impl Hanji {
         };
 
         if position.y > last_line.bounds.bottom() {
-            return self.session.document().len();
+            return self.session.editor().len();
         }
 
         let line = self
@@ -2190,7 +1963,7 @@ impl Hanji {
         let offset = line.source_offset_for_local_position(local_position);
 
         self.session
-            .document()
+            .editor()
             .nearest_grapheme_offset(offset)
             .unwrap_or(offset)
     }
@@ -2255,34 +2028,22 @@ impl Hanji {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let document = self.session.document();
-        let Some(range) = task_marker_state_char_range(document.text(), task_marker.marker_range)
-        else {
-            return false;
-        };
-        let replacement = match task_marker.state {
-            MarkdownTaskState::Unchecked => "x",
-            MarkdownTaskState::Checked => " ",
-        };
-        let selection = document.selection().primary();
-
-        self.replace_range(
-            range,
-            replacement,
-            selection.start..selection.end,
+        self.apply_editor_command(
+            EditorCommand::ToggleTaskAt(task_marker.marker_range.start),
+            "Could not toggle the task.",
             window,
             cx,
         )
     }
 
     fn byte_range_to_utf16(&self, range: &Range<usize>) -> Range<usize> {
-        byte_offset_to_utf16(self.session.document().text(), range.start)
-            ..byte_offset_to_utf16(self.session.document().text(), range.end)
+        byte_offset_to_utf16(self.session.editor().source(), range.start)
+            ..byte_offset_to_utf16(self.session.editor().source(), range.end)
     }
 
     fn utf16_range_to_byte(&self, range: &Range<usize>) -> Range<usize> {
-        let text = self.session.document().text();
-        let range = encoding::utf16_range_to_byte(text, range);
+        let text = self.session.editor().source();
+        let range = utf16_range_to_byte(text, range);
 
         self.snap_byte_range(range)
     }
@@ -2325,7 +2086,7 @@ impl Hanji {
     }
 
     fn snap_byte_range(&self, range: Range<usize>) -> Range<usize> {
-        let document = self.session.document();
+        let document = self.session.editor();
         let start = document
             .nearest_grapheme_offset(range.start)
             .unwrap_or(range.start);
@@ -2737,7 +2498,7 @@ impl EntityInputHandler for Hanji {
     ) -> Option<String> {
         let range = self.utf16_range_to_byte(&range_utf16);
         adjusted_range.replace(self.byte_range_to_utf16(&range));
-        Some(self.session.document().text()[range].to_string())
+        Some(self.session.editor().source()[range].to_string())
     }
 
     fn selected_text_range(
@@ -2782,20 +2543,9 @@ impl EntityInputHandler for Hanji {
             .or_else(|| self.marked_range.clone())
             .unwrap_or_else(|| self.selected_range());
         let range = self.snap_table_caret_range(range);
-        if let Some(offset) = marker_skip_offset(self.session.document().text(), &range, new_text) {
-            self.move_caret(offset, cx);
-            self.marked_range = None;
-            return;
-        }
+        let input = TextInput::typing(new_text).replacing(TextRange::new(range.start, range.end));
 
-        let (range, replacement, selection_after) =
-            marker_autocomplete_edit(self.session.document().text(), &range, new_text)
-                .unwrap_or_else(|| {
-                    let caret = range.start + new_text.len();
-                    (range, new_text.to_string(), caret..caret)
-                });
-
-        if self.replace_range(range, &replacement, selection_after, window, cx) {
+        if self.apply_text_input(input, "Could not insert text.", window, cx) {
             self.marked_range = None;
         }
     }
@@ -2818,14 +2568,21 @@ impl EntityInputHandler for Hanji {
         let marked_range =
             (!new_text.is_empty()).then_some(insert_start..insert_start + new_text.len());
         let selection_after = if let Some(selected_range) = new_selected_range_utf16.as_ref() {
-            let selected_range = encoding::utf16_range_to_byte(new_text, selected_range);
+            let selected_range = utf16_range_to_byte(new_text, selected_range);
             insert_start + selected_range.start..insert_start + selected_range.end
         } else {
             let caret = range.start + new_text.len();
             caret..caret
         };
 
-        if self.replace_range(range, new_text, selection_after, window, cx) {
+        let input = TextInput::literal(new_text)
+            .replacing(TextRange::new(range.start, range.end))
+            .selecting_after(TextSelection::new(
+                selection_after.start,
+                selection_after.end,
+            ));
+
+        if self.apply_text_input(input, "Could not update marked text.", window, cx) {
             self.marked_range = marked_range;
         }
     }
@@ -2847,7 +2604,7 @@ impl EntityInputHandler for Hanji {
         _cx: &mut Context<Self>,
     ) -> Option<usize> {
         Some(byte_offset_to_utf16(
-            self.session.document().text(),
+            self.session.editor().source(),
             self.index_for_mouse_position(point),
         ))
     }
@@ -3167,8 +2924,8 @@ mod tests {
     fn rectangular_table_selection_copies_only_selected_columns_and_rows() {
         let source =
             "| A | B | C | D |\n| --- | --- | --- | --- |\n| 1 | 2 | 3 | 4 |\n| 5 | 6 | 7 | 8 |";
-        let document = hanji_core::Document::new(source);
-        let projection = project_document(&document);
+        let document = Editor::new(source);
+        let projection = document.projection();
         let table_range = projection.lines()[0].table_range().unwrap();
         let selection = TableCellSelection {
             table_range,

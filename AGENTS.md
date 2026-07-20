@@ -16,7 +16,8 @@ Hanji is a light, local-first Markdown editor. It should feel simple enough for 
 - [docs/design/](docs/design/) contains core editor concepts and design vocabulary.
 - [site/](site/) contains the static project website deployed with GitHub Pages.
 - [crates/hanji-core](crates/hanji-core/) owns text editing primitives: text buffers, selections, transactions, undo, and core commands.
-- [crates/hanji-markdown](crates/hanji-markdown/) owns Markdown parsing, source mapping, projection, and formatting commands.
+- [crates/hanji-markdown](crates/hanji-markdown/) owns Markdown parsing, source mapping, projection, and syntax-dependent editing policy.
+- [crates/hanji-editor](crates/hanji-editor/) owns the portable editor facade used by GPUI and future WebAssembly adapters.
 - [crates/hanji-storage](crates/hanji-storage/) owns local file and document session behavior.
 - [crates/hanji-plugin-api](crates/hanji-plugin-api/) is reserved for future public plugin contracts.
 - [apps/hanji](apps/hanji/) contains the GPUI desktop application.

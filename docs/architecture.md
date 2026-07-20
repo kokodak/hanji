@@ -9,8 +9,9 @@ Shared product decisions live in `docs/`, outside implementation-specific module
 ```text
 crates/
   hanji-core/       Text buffer, selections, transactions, undo, commands
-  hanji-markdown/   Markdown parsing, source mapping, projection, formatting commands
-  hanji-storage/    Local spaces, files, autosave, app metadata
+  hanji-markdown/   Markdown parsing, projection, source mapping, editing policy
+  hanji-editor/     Portable editor facade coordinating core and Markdown behavior
+  hanji-storage/    Native file persistence and document sessions
   hanji-plugin-api/ Future public plugin contracts
 
 apps/
@@ -21,10 +22,19 @@ This structure is intentionally small. Crates can stay thin until their boundari
 
 ## Core Boundaries
 
-- `hanji-core` owns editing behavior and must not import UI framework types.
-- `hanji-markdown` treats Markdown text as the source of truth.
-- `hanji-storage` keeps documents visible as normal files and keeps app metadata separate.
-- `apps/hanji` translates GPUI input, rendering, and window events into core commands.
+- `hanji-core` owns syntax-agnostic text primitives and must not import Markdown or UI framework types.
+- `hanji-markdown` owns syntax-dependent projection and edit planning while treating Markdown text as the source of truth.
+- `hanji-editor` owns the standard editing workflow and is the only normal entry point for platform text input and logical commands.
+- `hanji-storage` owns native file persistence and delegates document editing to `hanji-editor`.
+- `apps/hanji` translates GPUI input, rendering, and window events into facade calls.
+
+The mutation boundary is strict: consumers cannot access a mutable core `Document` or submit raw transactions through `hanji-editor` or `hanji-storage`. Text changes use `TextInput`, logical operations use `Command`, and every operation returns `Update`.
+
+## Portable Editor Direction
+
+Hanji exposes one platform-independent editor facade for native and future web frontends. The `hanji-editor` crate coordinates core text editing, Markdown input policy, projection, selection, and history without depending on GPUI, storage, browser APIs, or WebAssembly binding types.
+
+The GPUI app consumes that facade, and a future `hanji-wasm` adapter should do the same. Platform adapters continue to own input delivery, rendering, hit testing, clipboard integration, and persistence. See [Portable Editor API](design/editor-api.md) for the boundary and implementation sequence.
 
 ## Markdown Crate Boundaries
 
@@ -32,6 +42,7 @@ This structure is intentionally small. Crates can stay thin until their boundari
 
 - `line` classifies Markdown source lines into semantic block-like roles.
 - `command` turns Markdown formatting actions into core transactions.
+- `editing` plans portable Markdown-aware typing, newline, list, task, and table behavior.
 - `projection` builds source-backed views for WYSIWYG rendering, preserving source ranges so the raw Markdown text remains recoverable.
 
 ## WYSIWYG Strategy

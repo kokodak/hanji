@@ -2297,6 +2297,7 @@ version = "0.1.2"
 dependencies = [
  "gpui",
  "hanji-core",
+ "hanji-editor",
  "hanji-markdown",
  "hanji-storage",
  "libc",
@@ -2307,6 +2308,14 @@ name = "hanji-core"
 version = "0.1.2"
 dependencies = [
  "unicode-segmentation",
+]
+
+[[package]]
+name = "hanji-editor"
+version = "0.1.2"
+dependencies = [
+ "hanji-core",
+ "hanji-markdown",
 ]
 
 [[package]]
@@ -2324,7 +2333,7 @@ version = "0.1.2"
 name = "hanji-storage"
 version = "0.1.2"
 dependencies = [
- "hanji-core",
+ "hanji-editor",
 ]
 
 [[package]]

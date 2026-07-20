@@ -74,7 +74,8 @@ If you skip a relevant check, explain why in the pull request.
 The main Rust workspace is split by responsibility:
 
 - `crates/hanji-core`: text buffer, selections, transactions, undo, and core commands.
-- `crates/hanji-markdown`: Markdown parsing, source mapping, projection, and formatting commands.
+- `crates/hanji-markdown`: Markdown parsing, source mapping, projection, and editing policy.
+- `crates/hanji-editor`: the platform-independent public editor API.
 - `crates/hanji-storage`: local files and document sessions.
 - `crates/hanji-plugin-api`: future public plugin contracts.
 - `apps/hanji`: the GPUI desktop app.

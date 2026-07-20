@@ -1,14 +1,18 @@
+//! Native Markdown file persistence and document sessions.
+//!
+//! Storage delegates editing behavior to `hanji-editor`; it does not define editor policy.
+
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use hanji_core::{CommandError, Document, DocumentChange, EditorCommand, Selection, Transaction};
+use hanji_editor::{Command, Editor, Error as EditorError, TextInput, TextSelection, Update};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct DocumentSession {
     path: PathBuf,
-    document: Document,
+    editor: Editor,
     saved_text: String,
     saved_revision: u64,
     revision: u64,
@@ -27,7 +31,7 @@ impl DocumentSession {
 
         Self {
             path: path.into(),
-            document: Document::new(text.clone()),
+            editor: Editor::new(text.clone()),
             saved_text: text,
             saved_revision: 0,
             revision: 0,
@@ -38,64 +42,38 @@ impl DocumentSession {
         &self.path
     }
 
-    pub fn document(&self) -> &Document {
-        &self.document
+    pub fn editor(&self) -> &Editor {
+        &self.editor
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.document.text() != self.saved_text
+        self.editor.source() != self.saved_text
     }
 
     pub fn revision(&self) -> u64 {
         self.revision
     }
 
-    pub fn execute(&mut self, command: EditorCommand) -> Result<bool, CommandError> {
-        let changed = self.document.execute(command)?;
-        self.mark_changed_if(changed);
-        Ok(changed)
+    pub fn execute(&mut self, command: Command) -> Result<Update, EditorError> {
+        let update = self.editor.execute(command)?;
+        self.track_update(update);
+        Ok(update)
     }
 
-    pub fn edit_document<E>(
-        &mut self,
-        edit: impl FnOnce(&mut Document) -> Result<bool, E>,
-    ) -> Result<bool, E> {
-        let before_text = self.document.text().to_owned();
-        let changed = edit(&mut self.document)?;
-        self.mark_changed_if(changed && self.document.text() != before_text);
-        Ok(changed)
+    pub fn replace_text(&mut self, input: TextInput) -> Result<Update, EditorError> {
+        let update = self.editor.replace_text(input)?;
+        self.track_update(update);
+        Ok(update)
     }
 
-    pub fn set_selection(&mut self, selection: Selection) -> Result<(), hanji_core::EditError> {
-        self.document.set_selection(selection)
-    }
-
-    pub fn apply(
-        &mut self,
-        transaction: Transaction,
-    ) -> Result<DocumentChange, hanji_core::EditError> {
-        let before_text = self.document.text().to_owned();
-        let change = self.document.apply(transaction)?;
-        self.mark_changed_if(self.document.text() != before_text);
-        Ok(change)
-    }
-
-    pub fn undo(&mut self) -> Option<DocumentChange> {
-        let before_text = self.document.text().to_owned();
-        let change = self.document.undo()?;
-        self.mark_changed_if(self.document.text() != before_text);
-        Some(change)
-    }
-
-    pub fn redo(&mut self) -> Option<DocumentChange> {
-        let before_text = self.document.text().to_owned();
-        let change = self.document.redo()?;
-        self.mark_changed_if(self.document.text() != before_text);
-        Some(change)
+    pub fn set_selection(&mut self, selection: TextSelection) -> Result<Update, EditorError> {
+        let update = self.editor.set_selection(selection)?;
+        self.track_update(update);
+        Ok(update)
     }
 
     pub fn save(&mut self) -> io::Result<()> {
-        let text = self.document.text().to_owned();
+        let text = self.editor.source().to_owned();
 
         write_markdown(&self.path, &text)?;
         self.saved_text = text;
@@ -105,7 +83,7 @@ impl DocumentSession {
 
     pub fn save_as(&mut self, path: impl Into<PathBuf>) -> io::Result<()> {
         let path = path.into();
-        let text = self.document.text().to_owned();
+        let text = self.editor.source().to_owned();
 
         write_markdown(&path, &text)?;
         self.path = path;
@@ -114,8 +92,8 @@ impl DocumentSession {
         Ok(())
     }
 
-    fn mark_changed_if(&mut self, changed: bool) {
-        if changed {
+    fn track_update(&mut self, update: Update) {
+        if update.text_changed() {
             self.mark_changed();
         }
     }
@@ -248,24 +226,22 @@ mod tests {
         let session = DocumentSession::open(&path).unwrap();
 
         assert_eq!(session.path(), path.as_path());
-        assert_eq!(session.document().text(), "# Hanji\n");
+        assert_eq!(session.editor().source(), "# Hanji\n");
         assert!(!session.is_dirty());
     }
 
     #[test]
-    fn session_tracks_dirty_state_after_command() {
+    fn session_tracks_dirty_state_after_text_input() {
         let directory = TestDirectory::new("session-dirty");
         let path = directory.path().join("note.md");
         let mut session = DocumentSession::new(&path, "Hanji");
 
-        let changed = session
-            .execute(EditorCommand::insert_text(" notes"))
-            .unwrap();
+        let update = session.replace_text(TextInput::typing(" notes")).unwrap();
 
-        assert!(changed);
+        assert!(update.text_changed());
         assert!(session.is_dirty());
         assert_eq!(session.revision(), 1);
-        assert_eq!(session.document().text(), " notesHanji");
+        assert_eq!(session.editor().source(), " notesHanji");
     }
 
     #[test]
@@ -274,49 +250,11 @@ mod tests {
         let path = directory.path().join("note.md");
         let mut session = DocumentSession::new(&path, "Hanji");
 
-        let changed = session.execute(EditorCommand::DeleteBackward).unwrap();
+        let update = session.execute(Command::DeleteBackward).unwrap();
 
-        assert!(!changed);
+        assert!(!update.changed());
         assert!(!session.is_dirty());
         assert_eq!(session.revision(), 0);
-    }
-
-    #[test]
-    fn session_tracks_dirty_state_after_external_document_edit() {
-        let directory = TestDirectory::new("session-external-edit");
-        let path = directory.path().join("note.md");
-        let mut session = DocumentSession::new(&path, "Hanji");
-
-        let changed = session
-            .edit_document(|document| document.execute(EditorCommand::insert_text(" notes")))
-            .unwrap();
-
-        assert!(changed);
-        assert!(session.is_dirty());
-        assert_eq!(session.revision(), 1);
-        assert_eq!(session.document().text(), " notesHanji");
-    }
-
-    #[test]
-    fn session_does_not_mark_selection_only_external_document_edit_dirty() {
-        let directory = TestDirectory::new("session-external-selection");
-        let path = directory.path().join("note.md");
-        let mut session = DocumentSession::new(&path, "Hanji");
-
-        let changed = session
-            .edit_document(|document| {
-                document.set_selection(Selection::caret(5))?;
-                Ok::<_, hanji_core::EditError>(true)
-            })
-            .unwrap();
-
-        assert!(changed);
-        assert!(!session.is_dirty());
-        assert_eq!(session.revision(), 0);
-        assert_eq!(
-            session.document().selection().primary(),
-            hanji_core::TextRange::caret(5)
-        );
     }
 
     #[test]
@@ -325,9 +263,7 @@ mod tests {
         let path = directory.path().join("note.md");
         let mut session = DocumentSession::new(&path, "Hanji");
 
-        session
-            .execute(EditorCommand::insert_text(" notes"))
-            .unwrap();
+        session.replace_text(TextInput::typing(" notes")).unwrap();
         session.save().unwrap();
 
         assert!(!session.is_dirty());
@@ -341,9 +277,7 @@ mod tests {
         let new_path = directory.path().join("note.md");
         let mut session = DocumentSession::new(&old_path, "Hanji");
 
-        session
-            .execute(EditorCommand::insert_text(" notes"))
-            .unwrap();
+        session.replace_text(TextInput::typing(" notes")).unwrap();
         session.save_as(&new_path).unwrap();
 
         assert_eq!(session.path(), new_path.as_path());
@@ -371,36 +305,14 @@ mod tests {
         let path = directory.path().join("note.md");
         let mut session = DocumentSession::new(&path, "Hanji");
 
-        session
-            .execute(EditorCommand::insert_text(" notes"))
-            .unwrap();
+        session.replace_text(TextInput::typing(" notes")).unwrap();
         assert!(session.is_dirty());
 
-        session.undo().unwrap();
+        let update = session.execute(Command::Undo).unwrap();
 
+        assert!(update.text_changed());
         assert!(!session.is_dirty());
-        assert_eq!(session.document().text(), "Hanji");
-    }
-
-    #[test]
-    fn session_does_not_mark_selection_only_transaction_dirty() {
-        let directory = TestDirectory::new("session-selection");
-        let path = directory.path().join("note.md");
-        let mut session = DocumentSession::new(&path, "Hanji");
-
-        session
-            .apply(Transaction::new(
-                Vec::new(),
-                Some(hanji_core::Selection::caret(5)),
-            ))
-            .unwrap();
-
-        assert!(!session.is_dirty());
-        assert_eq!(session.revision(), 0);
-        assert_eq!(
-            session.document().selection().primary(),
-            hanji_core::TextRange::caret(5)
-        );
+        assert_eq!(session.editor().source(), "Hanji");
     }
 
     #[test]
@@ -409,16 +321,12 @@ mod tests {
         let path = directory.path().join("note.md");
         let mut session = DocumentSession::new(&path, "Hanji");
 
-        session
-            .set_selection(hanji_core::Selection::caret(5))
-            .unwrap();
+        let update = session.set_selection(TextSelection::caret(5)).unwrap();
 
+        assert!(update.selection_changed());
         assert!(!session.is_dirty());
-        assert!(!session.document().can_undo());
-        assert_eq!(
-            session.document().selection().primary(),
-            hanji_core::TextRange::caret(5)
-        );
+        assert!(!session.editor().can_undo());
+        assert_eq!(session.editor().selection(), TextSelection::caret(5));
     }
 
     struct TestDirectory {

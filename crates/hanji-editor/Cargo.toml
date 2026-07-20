@@ -1,9 +1,10 @@
 [package]
-name = "hanji-storage"
+name = "hanji-editor"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
 [dependencies]
-hanji-editor.workspace = true
+hanji-core.workspace = true
+hanji-markdown.workspace = true

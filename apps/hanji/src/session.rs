@@ -59,7 +59,7 @@ mod tests {
         let session = new_scratch_session();
 
         assert!(is_scratch_document_path(session.path()));
-        assert!(session.document().text().is_empty());
+        assert!(session.editor().source().is_empty());
     }
 
     #[test]
@@ -68,7 +68,7 @@ mod tests {
         let session = open_initial_path(path.clone()).unwrap();
 
         assert_eq!(session.path(), path);
-        assert!(session.document().text().is_empty());
+        assert!(session.editor().source().is_empty());
     }
 
     #[test]

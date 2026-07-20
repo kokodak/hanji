@@ -33,7 +33,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for issue, pull request, and development 
 - [docs/design/](docs/design/) contains core editor concepts and design vocabulary.
 - [site/](site/) contains the static project website deployed with GitHub Pages.
 - [crates/hanji-core](crates/hanji-core/) owns text editing primitives.
-- [crates/hanji-markdown](crates/hanji-markdown/) owns Markdown projection and commands.
+- [crates/hanji-markdown](crates/hanji-markdown/) owns Markdown projection and editing policy.
+- [crates/hanji-editor](crates/hanji-editor/) is the portable editor facade used by platform frontends.
 - [crates/hanji-storage](crates/hanji-storage/) owns local file and document session behavior.
 - [crates/hanji-plugin-api](crates/hanji-plugin-api/) is reserved for future plugin contracts.
 - [apps/hanji](apps/hanji/) contains the GPUI desktop app.

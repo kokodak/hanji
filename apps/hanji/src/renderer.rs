@@ -7,14 +7,15 @@ use gpui::{
     ShapedLine, SharedString, StrikethroughStyle, Style, TextRun, TextStyle, UnderlineStyle,
     Window, WrappedLine, fill, point, px, quad, relative, rgb, rgba, size,
 };
-use hanji_core::TextRange;
+use hanji_editor::TextRange;
+#[cfg(test)]
+use hanji_markdown::project_document;
 use hanji_markdown::{
     MarkdownLine, MarkdownListMarker, MarkdownTableLine, MarkdownTaskState, ProjectedInlineStyle,
     ProjectedLine, ProjectedSegmentKind, ProjectedTableCell, ProjectedVisibleSegment,
-    project_document,
+    ordered_list_delimiter,
 };
 
-use crate::editing::ordered_list_delimiter;
 use crate::snapshot::{LineSnapshot, TableCellLayout, TableCellLineLayout, line_for_offset};
 use crate::{Hanji, TableCellSelection};
 
@@ -173,7 +174,6 @@ struct HiddenListMarkerGeometry {
 pub(crate) struct TaskMarkerHitbox {
     pub(crate) bounds: Bounds<Pixels>,
     pub(crate) marker_range: TextRange,
-    pub(crate) state: MarkdownTaskState,
 }
 
 #[derive(Clone)]
@@ -270,10 +270,10 @@ impl Element for EditorElement {
         let mut code_block_background_run = None;
         let mut top = 0.0;
 
-        let document = editor.session.document();
-        let selection = document.selection().primary();
+        let document = editor.session.editor();
+        let selection = document.selection().range();
 
-        let projection = project_document(document);
+        let projection = document.projection();
         let measured_layout = request_layout.0.borrow();
         let measured_document = measured_layout
             .as_ref()
@@ -379,13 +379,12 @@ impl Element for EditorElement {
                     &text_style,
                     window,
                 );
-                if let Some(state) = task
+                if task.is_some()
                     && let Some(marker_range) = line.marker_range
                 {
                     task_marker_hitboxes.push(TaskMarkerHitbox {
                         bounds: marker_snapshot.bounds(),
                         marker_range,
-                        state,
                     });
                 }
                 list_markers.push(marker_snapshot);
@@ -567,10 +566,10 @@ fn measure_document(
     container_width: Pixels,
     window: &mut Window,
 ) -> MeasuredDocumentLayout {
-    let document = editor.session.document();
-    let selection = document.selection().primary();
+    let document = editor.session.editor();
+    let selection = document.selection().range();
     let text_style = window.text_style();
-    let projection = project_document(document);
+    let projection = document.projection();
     let mut height = 0.0;
     let mut lines = Vec::with_capacity(projection.lines().len());
 
