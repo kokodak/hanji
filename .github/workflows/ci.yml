@@ -14,6 +14,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Classify changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run_rust: ${{ steps.paths.outputs.run_rust }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test change classification
+        run: python3 -m unittest discover -s .github/scripts -p 'test_ci_changes.py' -v
+      - name: Classify pull request paths
+        id: paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 .github/scripts/ci_changes.py
+
   docs:
     name: Documentation
     runs-on: ubuntu-latest
@@ -25,8 +46,10 @@ jobs:
       - name: Check documentation
         run: make check-docs
 
-  checks:
-    name: Rust checks
+  rust:
+    name: Rust suite
+    needs: changes
+    if: needs.changes.outputs.run_rust == 'true'
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -61,3 +84,28 @@ jobs:
 
       - name: Test GPUI app
         run: cargo test -p hanji
+
+  checks:
+    # Preserve the existing required-check name even when the expensive job skips.
+    name: Rust checks
+    needs: [changes, rust]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report Rust result
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          RUN_RUST: ${{ needs.changes.outputs.run_rust }}
+          RUST_RESULT: ${{ needs.rust.result }}
+        run: |
+          set -euo pipefail
+          test "$CHANGES_RESULT" = success
+          if [ "$RUN_RUST" = true ]; then
+            test "$RUST_RESULT" = success
+            echo "Rust and GPUI checks passed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            test "$RUN_RUST" = false
+            test "$RUST_RESULT" = skipped
+            echo "Rust and GPUI checks skipped: documentation-only pull request." >> "$GITHUB_STEP_SUMMARY"
+          fi
